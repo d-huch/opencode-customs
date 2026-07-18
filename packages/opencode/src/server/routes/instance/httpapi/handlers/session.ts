@@ -75,6 +75,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     })
 
     const status = Effect.fn("SessionHttpApi.status")(function* () {
+      yield* promptSvc.recover()
       return Object.fromEntries(yield* statusSvc.list())
     })
 

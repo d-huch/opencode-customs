@@ -82,6 +82,7 @@ import { createPromptInputTransientState } from "./prompt-input/transient-state"
 import { showToast } from "@/utils/toast"
 import { ImagePreview } from "@opencode-ai/ui/image-preview"
 import type { ReferenceInfo } from "@opencode-ai/sdk/v2/client"
+import { SessionContextUsage } from "@/components/session-context-usage"
 
 export { createPromptInputHistory }
 export type { PromptInputControls, PromptInputHistory, PromptInputProps, PromptInputState, PromptInputSubmission }
@@ -1779,6 +1780,9 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                       </div>
                     </Show>
                   </Show>
+                </Show>
+                <Show when={store.mode === "normal"}>
+                  <SessionContextUsage variant="compact" />
                 </Show>
               </div>
             </div>

@@ -138,6 +138,33 @@ describe("session.message-v2.toModelMessage", () => {
     ])
   })
 
+  test("does not send internal compaction metadata to the model", async () => {
+    const messageID = "m-summary"
+    const input: SessionV1.WithParts[] = [
+      {
+        info: assistantInfo(messageID, "m-user"),
+        parts: [
+          {
+            ...basePart(messageID, "p1"),
+            type: "text",
+            text: "summary",
+            metadata: {
+              compaction_normalized: true,
+              openai: { assistant: "meta" },
+            },
+          },
+        ] as SessionV1.Part[],
+      },
+    ]
+
+    expect(await MessageV2.toModelMessages(input, model)).toStrictEqual([
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "summary", providerOptions: { openai: { assistant: "meta" } } }],
+      },
+    ])
+  })
+
   test("filters out messages with only ignored parts", async () => {
     const messageID = "m-user"
 
@@ -1465,6 +1492,20 @@ describe("session.message-v2.fromError", () => {
       })
       const result = MessageV2.fromError(error, { providerID })
       expect(SessionV1.ContextOverflowError.isInstance(result)).toBe(true)
+    })
+  })
+
+  test("detects LM Studio context overflow from a plain provider error", () => {
+    const message =
+      "The number of tokens to keep from the initial prompt is greater than the context length. Try to load the model with a larger context length, or provide a shorter input"
+    const result = MessageV2.fromError(new Error(message), { providerID })
+
+    expect(result).toStrictEqual({
+      name: "ContextOverflowError",
+      data: {
+        message,
+        responseBody: message,
+      },
     })
   })
 

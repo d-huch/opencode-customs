@@ -1,4 +1,5 @@
 import { Cause, Effect, Layer } from "effect"
+import { Database } from "../../database/database"
 import { LocationServiceMap } from "../../location-service-map"
 import { makeGlobalNode } from "../../effect/app-node"
 import { SessionRunCoordinator } from "../run-coordinator"
@@ -6,6 +7,7 @@ import { SessionRunner } from "../runner"
 import { SessionSchema } from "../schema"
 import { SessionStore } from "../store"
 import { SessionExecution } from "../execution"
+import { SessionExecutionCheckpoint } from "../execution-checkpoint"
 
 /** Current-process routing for implicit-local Locations. Future remote placement belongs here. */
 const layer = Layer.effect(
@@ -13,6 +15,7 @@ const layer = Layer.effect(
   Effect.gen(function* () {
     const store = yield* SessionStore.Service
     const locations = yield* LocationServiceMap.Service
+    const db = (yield* Database.Service).db
     const coordinator = yield* SessionRunCoordinator.make<SessionSchema.ID, SessionRunner.RunError>({
       drain: Effect.fnUntraced(function* (sessionID: SessionSchema.ID, force) {
         const session = yield* store.get(sessionID)
@@ -27,6 +30,7 @@ const layer = Layer.effect(
         )
       }),
     })
+    yield* Effect.forEach(yield* SessionExecutionCheckpoint.abandoned(db, "v2"), coordinator.wake, { discard: true })
 
     return SessionExecution.Service.of({
       active: coordinator.active,
@@ -40,7 +44,7 @@ const layer = Layer.effect(
 export const node = makeGlobalNode({
   service: SessionExecution.Service,
   layer,
-  deps: [SessionStore.node, LocationServiceMap.node],
+  deps: [Database.node, SessionStore.node, LocationServiceMap.node],
 })
 
 export * as SessionExecutionLocal from "./local"

@@ -468,15 +468,20 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
   }
 
   const updateConfigMutation = useMutation(() => ({
-    mutationFn: (config: Config) => serverSDK.client.global.config.update({ config }),
-    onSuccess: () => {
-      bootstrap.refetch()
-      // Invalidate all provider queries so newly configured custom providers
-      // appear immediately in the available provider list across all directories.
-      queryClient.invalidateQueries({ queryKey: [serverSDK.scope, null, "providers"] })
-      queryClient.invalidateQueries({
+    mutationFn: async (config: Config) => {
+      const result = await serverSDK.client.global.config.update({ config })
+      // Global config updates schedule instance disposal after the response. Wait
+      // for it here so the refresh below cannot repopulate the UI from stale state.
+      await serverSDK.client.global.dispose()
+      return result
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: [serverSDK.scope, "config"], refetchType: "none" })
+      await queryClient.invalidateQueries({
         predicate: (query) => query.queryKey[0] === serverSDK.scope && query.queryKey[2] === "providers",
+        refetchType: "none",
       })
+      await bootstrap.refetch()
     },
   }))
 

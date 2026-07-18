@@ -5,16 +5,7 @@ import { Switch } from "@opencode-ai/ui/switch"
 import { Tabs } from "@opencode-ai/ui/tabs"
 import { showToast } from "@/utils/toast"
 import { useNavigate } from "@solidjs/router"
-import {
-  type Accessor,
-  createEffect,
-  createMemo,
-  createResource,
-  For,
-  type JSXElement,
-  onCleanup,
-  Show,
-} from "solid-js"
+import { type Accessor, createEffect, createMemo, createResource, For, Index, onCleanup, Show } from "solid-js"
 import { createStore } from "solid-js/store"
 import { ServerHealthIndicator, ServerRow } from "@/components/server/server-row"
 import { useLanguage } from "@/context/language"
@@ -26,18 +17,7 @@ import { useGlobal } from "@/context/global"
 import { useSettings } from "@/context/settings"
 import { useMcpToggle } from "@/context/mcp"
 import { useSDK } from "@/context/sdk"
-
-const pluginEmptyMessage = (value: string, file: string): JSXElement => {
-  const parts = value.split(file)
-  if (parts.length === 1) return value
-  return (
-    <>
-      {parts[0]}
-      <code class="bg-surface-raised-base px-1.5 py-0.5 rounded-sm text-text-base">{file}</code>
-      {parts.slice(1).join(file)}
-    </>
-  )
-}
+import { useRepositoryDiagnostics } from "@/context/repository-diagnostics"
 
 const listServersByHealth = (
   list: ServerConnection.Any[],
@@ -273,6 +253,15 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
     () => (props.shown() && desktop() ? sdk() : undefined),
     (context) => context.client.v2.repositoryMap.get().then((result) => result.data?.data),
   )
+  const repositoryDiagnostics = useRepositoryDiagnostics()
+  const [lmStudio, { refetch: refetchLmStudio }] = createResource(
+    () => (props.shown() && desktop() ? sdk() : undefined),
+    (context) => context.client.provider.lmstudio.probe().then((result) => result.data),
+  )
+  const [governor, { refetch: refetchGovernor }] = createResource(
+    () => (props.shown() && desktop() ? sdk() : undefined),
+    (context) => context.client.provider.runtime.resources().then((result) => result.data),
+  )
   const [repositoryMapState, setRepositoryMapState] = createStore({ refreshing: false })
   const repositoryMapStatus = createMemo(() => {
     if (repositoryMap()?.status === "complete") return language.t("status.popover.repositoryMap.status.complete")
@@ -281,9 +270,21 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
   })
   const repositorySemanticStatus = createMemo(() => {
     if (repositoryMap()?.semantic.status === "indexing") return language.t("common.loading")
-    if (repositoryMap()?.semantic.status === "ready")
-      return language.t("status.popover.repositoryMap.status.complete")
+    if (repositoryMap()?.semantic.status === "ready") return language.t("status.popover.repositoryMap.status.complete")
     return language.t("status.popover.repositoryMap.status.unavailable")
+  })
+  const lmStudioStatus = createMemo(() => {
+    if (lmStudio()?.status === "ready") return language.t("status.popover.runtime.status.ready")
+    if (lmStudio()?.status === "degraded") return language.t("status.popover.runtime.status.degraded")
+    if (lmStudio()?.status === "unauthorized") return language.t("status.popover.runtime.status.unauthorized")
+    if (lmStudio()?.status === "offline") return language.t("status.popover.runtime.status.offline")
+    return language.t("status.popover.runtime.status.unconfigured")
+  })
+  const loadedLmStudioModels = createMemo(() => lmStudio()?.models.filter((model) => model.loaded) ?? [])
+  const governorStatus = createMemo(() => {
+    if (governor()?.status === "healthy") return language.t("status.popover.runtime.governor.status.healthy")
+    if (governor()?.status === "pressured") return language.t("status.popover.runtime.governor.status.pressured")
+    return language.t("status.popover.runtime.governor.status.critical")
   })
 
   const fail = (err: unknown) => {
@@ -298,6 +299,12 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
     if (!props.shown() || repositoryMap.error || repositoryMap()?.semantic.status !== "indexing") return
     const timer = window.setTimeout(() => void refetchRepositoryMap(), 1_500)
     onCleanup(() => window.clearTimeout(timer))
+  })
+
+  createEffect(() => {
+    if (!props.shown() || !desktop()) return
+    const timer = window.setInterval(() => void refetchGovernor(), 2_000)
+    onCleanup(() => window.clearInterval(timer))
   })
 
   let dialogRun = 0
@@ -321,11 +328,6 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
       return result
     }, new Map<string, number>()),
   )
-  const plugins = createMemo(() =>
-    (sync().data.config.plugin ?? []).map((item) => (typeof item === "string" ? item : item[0])),
-  )
-  const pluginCount = createMemo(() => plugins().length)
-  const pluginEmpty = createMemo(() => pluginEmptyMessage(language.t("dialog.plugins.empty"), "opencode.json"))
   const refreshRepositoryMap = async () => {
     if (repositoryMapState.refreshing) return
     setRepositoryMapState("refreshing", true)
@@ -334,6 +336,10 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
       .then((result) => setRepositoryMap(result.data?.data))
       .catch(fail)
       .finally(() => setRepositoryMapState("refreshing", false))
+  }
+  const configureRepositoryDiagnostics = async (enabled: boolean, clear = false) => {
+    if (repositoryDiagnostics.updating()) return
+    await repositoryDiagnostics.configure(enabled, clear).catch(fail)
   }
 
   return (
@@ -361,10 +367,11 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
             {lspCount() > 0 ? `${lspCount()} ` : ""}
             {language.t("status.popover.tab.lsp")}
           </Tabs.Trigger>
-          <Tabs.Trigger value="plugins" data-slot="tab" class="text-12-regular">
-            {pluginCount() > 0 ? `${pluginCount()} ` : ""}
-            {language.t("status.popover.tab.plugins")}
-          </Tabs.Trigger>
+          <Show when={desktop()}>
+            <Tabs.Trigger value="runtime" data-slot="tab" class="text-12-regular">
+              {language.t("status.popover.tab.runtime")}
+            </Tabs.Trigger>
+          </Show>
           <Show when={desktop()}>
             <Tabs.Trigger value="repository-map" data-slot="tab" class="text-12-regular">
               {language.t("status.popover.tab.repositoryMap")}
@@ -532,32 +539,187 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
           </div>
         </Tabs.Content>
 
-        <Tabs.Content value="plugins">
-          <div class="flex flex-col px-2 pb-2">
-            <div class="flex flex-col p-3 bg-background-base rounded-sm min-h-14">
-              <Show
-                when={plugins().length > 0}
-                fallback={<div class="text-14-regular text-text-base text-center my-auto">{pluginEmpty()}</div>}
-              >
-                <For each={plugins()}>
-                  {(plugin) => (
-                    <div class="flex items-center gap-2 w-full px-2 py-1">
-                      <div class="size-1.5 rounded-full shrink-0 bg-icon-success-base" />
-                      <span class="text-14-regular text-text-base truncate">{plugin}</span>
+        <Show when={desktop()}>
+          <Tabs.Content value="runtime">
+            <div class="flex flex-col px-2 pb-2">
+              <div class="flex min-h-32 flex-col gap-3 rounded-sm bg-background-base p-3">
+                <Show when={governor()}>
+                  {(runtime) => (
+                    <div class="flex flex-col gap-3 border-b border-border-weak-base pb-3">
+                      <div class="flex items-center gap-2 px-1">
+                        <div
+                          classList={{
+                            "size-1.5 shrink-0 rounded-full": true,
+                            "bg-icon-success-base": runtime().status === "healthy",
+                            "bg-icon-warning-base": runtime().status === "pressured",
+                            "bg-icon-critical-base": runtime().status === "critical",
+                          }}
+                        />
+                        <span class="text-14-medium text-text-base">
+                          {language.t("status.popover.runtime.governor.title")} · {governorStatus()}
+                        </span>
+                      </div>
+
+                      <div class="grid grid-cols-2 gap-2">
+                        <RuntimeMetric
+                          label={language.t("status.popover.runtime.governor.availableMemory")}
+                          value={`${formatRuntimeBytes(runtime().memory.availableBytes)} · ${Number(runtime().memory.availablePercent).toLocaleString(language.intl())}%`}
+                        />
+                        <RuntimeMetric
+                          label={language.t("status.popover.runtime.governor.processMemory")}
+                          value={formatRuntimeBytes(runtime().memory.processRssBytes)}
+                        />
+                      </div>
+
+                      <div class="flex items-center gap-2 px-1 text-11-regular text-text-weaker">
+                        <span>{language.t("status.popover.runtime.governor.requests")}</span>
+                        <span class="ml-auto tabular-nums text-text-base">
+                          {runtime().activity.activeModelRequests} / {runtime().limits.modelConcurrency}
+                          {Number(runtime().activity.waitingModelRequests) > 0
+                            ? ` · +${runtime().activity.waitingModelRequests}`
+                            : ""}
+                        </span>
+                      </div>
+
+                      <Show
+                        when={runtime().lastDecision}
+                        fallback={
+                          <span class="px-1 text-11-regular text-text-weaker">
+                            {language.t("status.popover.runtime.governor.noDecision")}
+                          </span>
+                        }
+                      >
+                        {(decision) => (
+                          <div class="flex flex-col gap-1 rounded-md bg-surface-raised-base px-2 py-1.5">
+                            <div class="flex items-center gap-2">
+                              <span class="text-11-regular text-text-weaker">
+                                {language.t("status.popover.runtime.governor.safeContext")}
+                              </span>
+                              <span class="ml-auto text-12-medium tabular-nums text-text-base">
+                                {Number(decision().safeInputTokens).toLocaleString(language.intl())}
+                              </span>
+                            </div>
+                            <span class="truncate text-10-regular text-text-weaker">
+                              {decision().modelID} · {Number(decision().requestedContext).toLocaleString(language.intl())}
+                              {decision().runtimeContext
+                                ? ` → ${Number(decision().runtimeContext).toLocaleString(language.intl())}`
+                                : ""}
+                            </span>
+                          </div>
+                        )}
+                      </Show>
                     </div>
                   )}
-                </For>
-              </Show>
+                </Show>
+
+                <Show
+                  when={lmStudio() || !lmStudio.loading}
+                  fallback={
+                    <div class="my-auto text-center text-14-regular text-text-base">
+                      {language.t("common.loading")}
+                    </div>
+                  }
+                >
+                  <div class="flex items-center gap-2 px-1">
+                    <div
+                      classList={{
+                        "size-1.5 shrink-0 rounded-full": true,
+                        "bg-icon-success-base": lmStudio()?.status === "ready",
+                        "bg-icon-warning-base": lmStudio()?.status === "degraded",
+                        "bg-icon-critical-base":
+                          !lmStudio() || lmStudio()?.status === "offline" || lmStudio()?.status === "unauthorized",
+                        "bg-border-weak-base": lmStudio()?.status === "unconfigured",
+                      }}
+                    />
+                    <span class="text-14-medium text-text-base">LM Studio · {lmStudioStatus()}</span>
+                    <Show when={typeof lmStudio()?.latencyMs === "number" && lmStudio()?.status !== "unconfigured"}>
+                      <span class="ml-auto text-11-regular tabular-nums text-text-weaker">
+                        {lmStudio()?.latencyMs} ms
+                      </span>
+                    </Show>
+                  </div>
+
+                  <Show when={lmStudio()?.baseURL}>
+                    <span class="truncate px-1 font-mono text-11-regular text-text-weaker">{lmStudio()?.baseURL}</span>
+                  </Show>
+
+                  <Show when={lmStudio()?.status !== "unconfigured"}>
+                    <div class="grid grid-cols-2 gap-2">
+                      <RuntimeApiStatus label="Native API" enabled={lmStudio()?.api.native === true} />
+                      <RuntimeApiStatus label="OpenAI API" enabled={lmStudio()?.api.openai === true} />
+                      <RuntimeApiStatus label="Responses" enabled={lmStudio()?.api.responses === true} />
+                      <RuntimeApiStatus label="Embeddings" enabled={lmStudio()?.api.embeddings === true} />
+                    </div>
+
+                    <div class="flex flex-col gap-1 border-t border-border-weak-base pt-3">
+                      <span class="px-1 text-12-medium text-text-base">
+                        {language.t("status.popover.runtime.loadedModels")}
+                      </span>
+                      <Show
+                        when={loadedLmStudioModels().length > 0}
+                        fallback={
+                          <span class="px-1 text-11-regular text-text-weaker">
+                            {language.t("status.popover.runtime.noLoadedModels")}
+                          </span>
+                        }
+                      >
+                        <For each={loadedLmStudioModels()}>
+                          {(model) => (
+                            <div class="flex flex-col gap-1 rounded-md bg-surface-raised-base px-2 py-1.5">
+                              <div class="flex min-w-0 items-center gap-2">
+                                <span class="min-w-0 flex-1 truncate text-12-regular text-text-base">
+                                  {model.name}
+                                </span>
+                                <Show when={model.context.active}>
+                                  {(context) => (
+                                    <span class="shrink-0 text-10-regular tabular-nums text-text-weaker">
+                                      {Number(context()).toLocaleString(language.intl())}
+                                    </span>
+                                  )}
+                                </Show>
+                              </div>
+                              <div class="flex flex-wrap gap-1">
+                                <RuntimeCapability label="Tools" enabled={model.capabilities.tools} />
+                                <RuntimeCapability label="Vision" enabled={model.capabilities.vision} />
+                                <RuntimeCapability
+                                  label={language.t("model.tooltip.reasoning")}
+                                  enabled={model.capabilities.reasoning}
+                                />
+                                <RuntimeCapability label="Embeddings" enabled={model.capabilities.embeddings} />
+                              </div>
+                            </div>
+                          )}
+                        </For>
+                      </Show>
+                    </div>
+                  </Show>
+
+                  <Show when={lmStudio()?.error}>
+                    <span class="px-1 text-11-regular text-text-weaker">{lmStudio()?.error}</span>
+                  </Show>
+                </Show>
+
+                <Button
+                  variant="secondary"
+                  class="h-8 self-start px-3 py-1.5"
+                  disabled={lmStudio.loading || governor.loading}
+                  onClick={() => void Promise.all([refetchLmStudio(), refetchGovernor()])}
+                >
+                  {lmStudio.loading || governor.loading
+                    ? language.t("common.loading")
+                    : language.t("status.popover.runtime.probe")}
+                </Button>
+              </div>
             </div>
-          </div>
-        </Tabs.Content>
+          </Tabs.Content>
+        </Show>
 
         <Show when={desktop()}>
           <Tabs.Content value="repository-map">
             <div class="flex flex-col px-2 pb-2">
               <div class="flex flex-col gap-3 p-3 bg-background-base rounded-sm min-h-32">
                 <Show
-                  when={!repositoryMap.loading}
+                  when={repositoryMap() || !repositoryMap.loading}
                   fallback={
                     <div class="text-14-regular text-text-base text-center my-auto">{language.t("common.loading")}</div>
                   }
@@ -575,54 +737,117 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
                     <span class="text-14-medium text-text-base">{repositoryMapStatus()}</span>
                   </div>
 
-                  <Show when={repositoryMap()} keyed>
+                  <Show when={repositoryMap()}>
                     {(map) => (
                       <>
                         <div class="flex items-center gap-2 px-1 min-w-0">
                           <span class="text-12-regular text-text-weaker shrink-0">
                             {language.t("status.popover.tab.lsp")}: {repositorySemanticStatus()}
                           </span>
-                          <Show when={map.semantic.servers.length > 0}>
+                          <Show when={map().semantic.servers.length > 0}>
                             <span class="text-12-regular text-text-base truncate">
-                              {map.semantic.servers.join(", ")}
+                              {map().semantic.servers.join(", ")}
                             </span>
                           </Show>
                           <span class="ml-auto text-11-regular text-text-weaker shrink-0">
-                            {map.semantic.files} {language.t("status.popover.repositoryMap.files")}
+                            {map().semantic.files} {language.t("status.popover.repositoryMap.files")}
                           </span>
                         </div>
 
                         <div class="grid grid-cols-4 gap-2">
                           <RepositoryMapMetric
                             label={language.t("status.popover.repositoryMap.files")}
-                            value={map.files}
+                            value={map().files}
                           />
                           <RepositoryMapMetric
                             label={language.t("status.popover.repositoryMap.areas")}
-                            value={map.modules.length}
+                            value={map().modules.length}
                           />
                           <RepositoryMapMetric
                             label={language.t("status.popover.repositoryMap.symbols")}
-                            value={map.symbols.length}
+                            value={map().symbols.length}
                           />
                           <RepositoryMapMetric
                             label={language.t("status.popover.repositoryMap.links")}
-                            value={map.edges.length}
+                            value={map().edges.length}
                           />
                         </div>
 
-                        <For each={map.modules.slice(0, 4)}>
+                        <Index each={map().modules.slice(0, 4)}>
                           {(module) => (
                             <div class="flex items-center gap-2 px-1 min-w-0">
-                              <span class="text-12-regular text-text-base truncate">{module.name ?? module.path}</span>
+                              <span class="text-12-regular text-text-base truncate">
+                                {module().name ?? module().path}
+                              </span>
                               <span class="flex-1 border-t border-border-weak-base" />
-                              <span class="text-11-regular text-text-weaker shrink-0">{module.files}</span>
+                              <span class="text-11-regular text-text-weaker shrink-0">{module().files}</span>
                             </div>
                           )}
-                        </For>
+                        </Index>
                       </>
                     )}
                   </Show>
+
+                  <div class="flex flex-col gap-2 pt-3 border-t border-border-weak-base">
+                    <div class="flex items-center gap-3 px-1">
+                      <span class="flex flex-col min-w-0 flex-1">
+                        <span class="text-12-medium text-text-base">
+                          {language.t("status.popover.repositoryMap.diagnostics")}
+                        </span>
+                        <span class="text-11-regular text-text-weaker">
+                          {language.t("status.popover.repositoryMap.diagnosticsDescription")}
+                        </span>
+                      </span>
+                      <Switch
+                        checked={repositoryDiagnostics.data()?.enabled === true}
+                        disabled={repositoryDiagnostics.updating()}
+                        onChange={(enabled) => void configureRepositoryDiagnostics(enabled, enabled)}
+                      />
+                    </div>
+
+                    <Show when={repositoryDiagnostics.data()?.enabled}>
+                      <div class="flex h-52 flex-col gap-1 overflow-y-auto rounded-md bg-surface-raised-base p-2 font-mono">
+                        <Show
+                          when={(repositoryDiagnostics.data()?.entries.length ?? 0) > 0}
+                          fallback={
+                            <span class="text-11-regular text-text-weaker py-2 text-center">
+                              {language.t("status.popover.repositoryMap.diagnosticsEmpty")}
+                            </span>
+                          }
+                        >
+                          <Index each={repositoryDiagnostics.data()?.entries.slice().reverse() ?? []}>
+                            {(entry) => (
+                              <div class="flex gap-2 py-1 border-b border-border-weak-base last:border-b-0">
+                                <div
+                                  classList={{
+                                    "mt-1 size-1.5 rounded-full shrink-0": true,
+                                    "bg-icon-success-base": entry().level === "info",
+                                    "bg-icon-warning-base": entry().level === "warning",
+                                    "bg-icon-critical-base": entry().level === "error",
+                                  }}
+                                />
+                                <span class="flex flex-col gap-0.5 min-w-0">
+                                  <span class="flex items-center gap-2 text-10-regular text-text-weaker">
+                                    <span>{diagnosticTime(entry().time)}</span>
+                                    <span class="uppercase text-text-base">{entry().stage}</span>
+                                  </span>
+                                  <span class="text-11-regular text-text-base break-words">{entry().message}</span>
+                                </span>
+                              </div>
+                            )}
+                          </Index>
+                        </Show>
+                      </div>
+                      <Button
+                        variant="secondary"
+                        class="self-start h-7 px-2.5 py-1"
+                        disabled={repositoryDiagnostics.updating()}
+                        onClick={() => void configureRepositoryDiagnostics(true, true)}
+                      >
+                        {language.t("common.clear")}
+                      </Button>
+                    </Show>
+                  </div>
                 </Show>
 
                 <Button
@@ -651,4 +876,46 @@ function RepositoryMapMetric(props: { label: string; value: number }) {
       <span class="text-11-regular text-text-weaker truncate">{props.label}</span>
     </div>
   )
+}
+
+function RuntimeApiStatus(props: { label: string; enabled: boolean }) {
+  return (
+    <div class="flex items-center gap-2 rounded-md bg-surface-raised-base px-2 py-1.5">
+      <span
+        classList={{
+          "size-1.5 shrink-0 rounded-full": true,
+          "bg-icon-success-base": props.enabled,
+          "bg-border-weak-base": !props.enabled,
+        }}
+      />
+      <span class="truncate text-11-regular text-text-base">{props.label}</span>
+    </div>
+  )
+}
+
+function RuntimeCapability(props: { label: string; enabled: boolean }) {
+  return (
+    <Show when={props.enabled}>
+      <span class="rounded bg-surface-base px-1.5 py-0.5 text-10-regular text-text-weaker">{props.label}</span>
+    </Show>
+  )
+}
+
+function RuntimeMetric(props: { label: string; value: string }) {
+  return (
+    <div class="flex flex-col gap-0.5 rounded-md bg-surface-raised-base px-2 py-1.5">
+      <span class="truncate text-12-medium tabular-nums text-text-base">{props.value}</span>
+      <span class="truncate text-10-regular text-text-weaker">{props.label}</span>
+    </div>
+  )
+}
+
+function formatRuntimeBytes(value: unknown) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "—"
+  return `${(value / 1024 ** 3).toFixed(1)} GB`
+}
+
+function diagnosticTime(value: number) {
+  const date = new Date(value)
+  return `${date.toLocaleTimeString([], { hour12: false })}.${String(date.getMilliseconds()).padStart(3, "0")}`
 }

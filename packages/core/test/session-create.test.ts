@@ -423,3 +423,39 @@ describe("SessionV2.create", () => {
     }),
   )
 })
+
+describe("SessionV2.remove", () => {
+  it.effect("removes a session and its descendants", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionV2.Service
+      const { db } = yield* Database.Service
+      const parent = yield* session.create({ location })
+      const child = yield* session.create({ location })
+      yield* db
+        .update(SessionTable)
+        .set({ parent_id: parent.id })
+        .where(eq(SessionTable.id, child.id))
+        .run()
+        .pipe(Effect.orDie)
+
+      yield* session.remove(parent.id)
+
+      expect(yield* session.list()).toEqual([])
+      expect(
+        yield* db.select().from(EventTable).where(eq(EventTable.aggregate_id, parent.id)).all().pipe(Effect.orDie),
+      ).toEqual([])
+      expect(
+        yield* db.select().from(EventTable).where(eq(EventTable.aggregate_id, child.id)).all().pipe(Effect.orDie),
+      ).toEqual([])
+    }),
+  )
+
+  it.effect("fails with the missing session ID", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionV2.Service
+      const sessionID = SessionV2.ID.make("ses_missing")
+
+      expect(yield* session.remove(sessionID).pipe(Effect.flip)).toMatchObject({ sessionID })
+    }),
+  )
+})

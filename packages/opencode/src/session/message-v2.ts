@@ -35,6 +35,7 @@ import { isMedia } from "@/util/media"
 import type { SystemError } from "bun"
 import type { Provider } from "@/provider/provider"
 import { Effect, Schema } from "effect"
+import { isContextOverflow } from "@opencode-ai/llm"
 
 /** Error shape thrown by Bun's fetch() when gzip/br decompression fails mid-stream */
 interface FetchDecompressionError extends Error {
@@ -124,7 +125,7 @@ function hydrate(db: Database.Interface["db"], rows: (typeof MessageTable.$infer
 
 function providerMeta(metadata: Record<string, any> | undefined) {
   if (!metadata) return undefined
-  const { providerExecuted: _, ...rest } = metadata
+  const { providerExecuted: _, compaction_normalized: _normalized, ...rest } = metadata
   return Object.keys(rest).length > 0 ? rest : undefined
 }
 
@@ -280,7 +281,7 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
           assistantMessage.parts.push({
             type: "text",
             text,
-            ...(differentModel ? {} : { providerMetadata: part.metadata }),
+            ...(differentModel ? {} : { providerMetadata: providerMeta(part.metadata) }),
           })
         }
         if (part.type === "step-start")
@@ -371,7 +372,7 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
           assistantMessage.parts.push({
             type: "reasoning",
             text: part.text,
-            providerMetadata: part.metadata,
+            providerMetadata: providerMeta(part.metadata),
           })
         }
       }
@@ -571,6 +572,23 @@ export function filterCompacted(msgs: Iterable<WithParts>) {
   return result
 }
 
+export function latestUserRequest(messages: WithParts[]) {
+  return messages
+    .filter(
+      (message): message is WithParts & { info: User } =>
+        message.info.role === "user" &&
+        !message.parts.some((part) => part.type === "compaction") &&
+        message.parts.some(
+          (part) =>
+            (part.type === "text" && part.synthetic !== true && part.text.trim().length > 0) || part.type === "file",
+        ),
+    )
+    .reduce<(WithParts & { info: User }) | undefined>(
+      (latest, message) => (!latest || message.info.id > latest.info.id ? message : latest),
+      undefined,
+    )
+}
+
 export const filterCompactedEffect = Effect.fnUntraced(function* (sessionID: SessionID) {
   return filterCompacted(yield* stream(sessionID))
 })
@@ -696,6 +714,14 @@ export function fromError(
           responseHeaders: parsed.responseHeaders,
           responseBody: parsed.responseBody,
           metadata: parsed.metadata,
+        },
+        { cause: e },
+      ).toObject()
+    case e instanceof Error && isContextOverflow(e.message):
+      return new ContextOverflowError(
+        {
+          message: e.message,
+          responseBody: e.message,
         },
         { cause: e },
       ).toObject()

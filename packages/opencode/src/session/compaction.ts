@@ -17,18 +17,26 @@ import { InstanceState } from "@/effect/instance-state"
 import { isOverflow as overflow, usable } from "./overflow"
 import { serviceUse } from "@opencode-ai/core/effect/service-use"
 import { RuntimeFlags } from "@/effect/runtime-flags"
+import { contextBudget } from "@/local-agent-runtime/resource-governor"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
-import { buildPrompt } from "@opencode-ai/core/session/compaction"
+import { buildPrompt, normalizeSummary } from "@opencode-ai/core/session/compaction"
 import { SessionCompactionEvent } from "@opencode-ai/schema/session-compaction-event"
+import type { ModelMessage, Tool } from "ai"
 
 export const Event = SessionCompactionEvent
 
 export const PRUNE_MINIMUM = 20_000
 export const PRUNE_PROTECT = 40_000
 const TOOL_OUTPUT_MAX_CHARS = 2_000
+const COMPACTION_PROMPT_HEADROOM = 512
 const PRUNE_PROTECTED_TOOLS = ["skill"]
+const REQUEST_HEADROOM = 128
+const REQUEST_ESTIMATE_MULTIPLIER = 1.35
+const TOOL_DESCRIPTION_MAX_CHARS = 160
+const TOOL_BUDGET_RATIO = 0.5
+const CORE_TOOL_ORDER = ["read", "grep", "glob", "edit", "write", "bash"]
 const DEFAULT_TAIL_TURNS = 2
 const MIN_PRESERVE_RECENT_TOKENS = 2_000
 const MAX_PRESERVE_RECENT_TOKENS = 8_000
@@ -49,6 +57,10 @@ type CompletedCompaction = {
   summary: string | undefined
 }
 
+function safeEstimate(input: string) {
+  return Math.ceil(Token.estimate(input) * REQUEST_ESTIMATE_MULTIPLIER)
+}
+
 function summaryText(message: SessionV1.WithParts) {
   const text = message.parts
     .filter((part): part is SessionV1.TextPart => part.type === "text")
@@ -57,6 +69,24 @@ function summaryText(message: SessionV1.WithParts) {
     .join("\n\n")
     .trim()
   return text || undefined
+}
+
+function compactionEvidence(messages: SessionV1.WithParts[]) {
+  return messages.flatMap((message) => {
+    if (message.info.role === "user") {
+      return message.parts.flatMap((part) => {
+        if (part.type === "text" && part.synthetic !== true) return [part.text]
+        if (part.type !== "file") return []
+        return [part.filename, part.url.startsWith("data:") ? undefined : part.url].filter(
+          (item): item is string => !!item,
+        )
+      })
+    }
+    return message.parts.flatMap((part) => {
+      if (part.type !== "tool" || part.state.status !== "completed") return []
+      return [part.state.title, part.state.output, JSON.stringify(part.state.metadata)]
+    })
+  })
 }
 
 function completedCompactions(messages: SessionV1.WithParts[]) {
@@ -132,6 +162,28 @@ export interface Interface {
     tokens: SessionV1.Assistant["tokens"]
     model: Provider.Model
   }) => Effect.Effect<boolean>
+  readonly isRequestOverflow: (input: {
+    system: string[]
+    messages: ModelMessage[]
+    tools: Record<string, Tool>
+    model: Provider.Model
+  }) => Effect.Effect<boolean>
+  readonly fitRequest: (input: {
+    fixedSystem: string[]
+    system: string[]
+    messages: ModelMessage[]
+    tools: Record<string, Tool>
+    model: Provider.Model
+    requiredTools?: string[]
+  }) => Effect.Effect<{
+    system: string[]
+    tools: Record<string, Tool>
+    tokens: number
+    limit: number
+    usage: number
+    compressed: boolean
+    overflow: boolean
+  }>
   readonly prune: (input: { sessionID: SessionID }) => Effect.Effect<void>
   readonly process: (input: {
     parentID: MessageID
@@ -183,6 +235,178 @@ const layer = Layer.effect(
     }) {
       const msgs = yield* MessageV2.toModelMessagesEffect(input.messages, input.model)
       return Token.estimate(JSON.stringify(msgs))
+    })
+
+    const isRequestOverflow = Effect.fn("SessionCompaction.isRequestOverflow")(function* (input: {
+      system: string[]
+      messages: ModelMessage[]
+      tools: Record<string, Tool>
+      model: Provider.Model
+    }) {
+      const cfg = yield* config.get()
+      if (cfg.compaction?.auto === false) return false
+      if (input.model.limit.context === 0) return false
+      return (
+        Token.estimate(JSON.stringify({ system: input.system, messages: input.messages, tools: input.tools })) >=
+        usable({ cfg, model: input.model, outputTokenMax: flags.outputTokenMax })
+      )
+    })
+
+    const fitRequest = Effect.fn("SessionCompaction.fitRequest")(function* (input: {
+      fixedSystem: string[]
+      system: string[]
+      messages: ModelMessage[]
+      tools: Record<string, Tool>
+      model: Provider.Model
+      requiredTools?: string[]
+    }) {
+      const cfg = yield* config.get()
+      const providerConfig = cfg.provider?.[input.model.providerID]
+      const governed = yield* Effect.promise(() =>
+        contextBudget({
+          providerID: input.model.providerID,
+          modelID: input.model.api.id,
+          requestedContext: input.model.limit.context,
+          outputTokens: Math.min(input.model.limit.output, flags.outputTokenMax ?? input.model.limit.output),
+          apiURL: input.model.api.url,
+          baseURL: providerConfig?.options?.baseURL,
+          apiKey: providerConfig?.options?.apiKey,
+        }),
+      )
+      const limit = Math.min(
+        usable({ cfg, model: input.model, outputTokenMax: flags.outputTokenMax }),
+        governed?.safeInputTokens ?? Number.POSITIVE_INFINITY,
+      )
+      const size = (system: string[], tools: Record<string, Tool>) =>
+        safeEstimate(JSON.stringify({ system: [...input.fixedSystem, ...system], messages: input.messages, tools }))
+      const tokens = size(input.system, input.tools)
+      const result = (system: string[], tools: Record<string, Tool>, compressed: boolean) => {
+        const count = size(system, tools)
+        return {
+          system,
+          tools,
+          tokens: count,
+          limit,
+          usage: limit ? Math.min(100, Math.round((count / limit) * 100)) : 0,
+          compressed,
+          overflow: limit > 0 && count >= limit,
+        }
+      }
+      if (limit === 0 || tokens < limit) return result(input.system, input.tools, false)
+
+      const budget = Math.max(0, limit - REQUEST_HEADROOM)
+      const notice =
+        "[Context budget applied: optional instructions and tools may be omitted. Inspect files when needed.]"
+      const compactTools = Object.fromEntries(
+        Object.entries(input.tools).map(([name, item]) => [
+          name,
+          {
+            ...item,
+            description:
+              typeof item.description === "string"
+                ? item.description.trim().split("\n").find(Boolean)?.slice(0, TOOL_DESCRIPTION_MAX_CHARS)
+                : item.description,
+          },
+        ]),
+      )
+      const required = new Set(input.requiredTools ?? [])
+      for (const message of input.messages) {
+        if (!Array.isArray(message.content)) continue
+        for (const part of message.content) {
+          if (part.type === "tool-call") required.add(part.toolName)
+        }
+      }
+      const query = JSON.stringify(input.messages.at(-1) ?? "").toLowerCase()
+      const words = new Set(query.match(/[\p{L}\p{N}_-]{3,}/gu) ?? [])
+      const relevance = (name: string) => {
+        const haystack = `${name} ${compactTools[name]?.description ?? ""}`.toLowerCase()
+        return [...words].filter((word) => haystack.includes(word)).length
+      }
+      const names = Object.keys(compactTools).toSorted((left, right) => {
+        const requiredOrder = Number(required.has(right)) - Number(required.has(left))
+        if (requiredOrder) return requiredOrder
+        const relevantOrder = relevance(right) - relevance(left)
+        if (relevantOrder) return relevantOrder
+        const leftCore = CORE_TOOL_ORDER.indexOf(left)
+        const rightCore = CORE_TOOL_ORDER.indexOf(right)
+        if (leftCore !== -1 || rightCore !== -1) {
+          if (leftCore === -1) return 1
+          if (rightCore === -1) return -1
+          return leftCore - rightCore
+        }
+        return JSON.stringify(compactTools[left]).length - JSON.stringify(compactTools[right]).length
+      })
+      const selectedTools: Record<string, Tool> = {}
+      const fixedTokens = size([notice], {})
+      if (fixedTokens >= budget) return result([], {}, true)
+      const toolBudget = Math.floor((budget - fixedTokens) * TOOL_BUDGET_RATIO)
+      for (const name of names) {
+        const candidate = { ...selectedTools, [name]: compactTools[name] }
+        const candidateSize = size([notice], candidate)
+        if (!required.has(name) && candidateSize - fixedTokens > toolBudget) continue
+        if (candidateSize >= budget) continue
+        selectedTools[name] = compactTools[name]
+      }
+
+      const orderedSystem = [input.system[0], input.system.at(-1), ...input.system.slice(1, -1)].filter(
+        (item, index, items): item is string => !!item && items.indexOf(item) === index,
+      )
+      const selectedSystem = [notice]
+      for (const item of orderedSystem) {
+        if (size([...selectedSystem, item], selectedTools) < budget) {
+          selectedSystem.push(item)
+          continue
+        }
+        const available = Math.max(0, (budget - size(selectedSystem, selectedTools)) * 4)
+        if (available < 256) continue
+        const truncated = `${item.slice(0, Math.max(0, available - 80))}\n[Instruction truncated to fit context]`
+        if (size([...selectedSystem, truncated], selectedTools) < budget) selectedSystem.push(truncated)
+      }
+
+      for (const name of names) {
+        if (selectedTools[name]) continue
+        const candidate = { ...selectedTools, [name]: compactTools[name] }
+        if (size(selectedSystem, candidate) >= budget) continue
+        selectedTools[name] = compactTools[name]
+      }
+      return result(selectedSystem, selectedTools, true)
+    })
+
+    const fitCompactionHead = Effect.fn("SessionCompaction.fitHead")(function* (input: {
+      messages: SessionV1.WithParts[]
+      model: Provider.Model
+      cfg: ConfigV1.Info
+      prompt: string
+    }) {
+      const budget = Math.max(
+        0,
+        usable({ cfg: input.cfg, model: input.model, outputTokenMax: flags.outputTokenMax }) -
+          safeEstimate(input.prompt) -
+          COMPACTION_PROMPT_HEADROOM,
+      )
+      const convert = (messages: SessionV1.WithParts[]) =>
+        MessageV2.toModelMessagesEffect(messages, input.model, {
+          stripMedia: true,
+          toolOutputMaxChars: TOOL_OUTPUT_MAX_CHARS,
+        })
+      const all = yield* convert(input.messages)
+      if (safeEstimate(JSON.stringify(all)) <= budget) return all
+
+      const candidates = turns(input.messages)
+      for (const turn of candidates.slice(1)) {
+        const messages = yield* convert(input.messages.slice(turn.start))
+        if (safeEstimate(JSON.stringify(messages)) > budget) continue
+        yield* Effect.logWarning("trimmed old history before compaction", {
+          dropped: turn.start,
+          budget,
+        })
+        return messages
+      }
+
+      const last = input.messages.findLast((message) => message.info.role === "user")
+      if (!last) return all
+      yield* Effect.logWarning("compaction history reduced to latest user turn", { budget })
+      return yield* convert([last])
     })
 
     const select = Effect.fn("SessionCompaction.select")(function* (input: {
@@ -345,13 +569,21 @@ const layer = Layer.effect(
         { sessionID: input.sessionID },
         { context: [], prompt: undefined },
       )
-      const nextPrompt = compacting.prompt ?? buildPrompt({ previousSummary, context: compacting.context })
+      const languageSample = input.messages
+        .findLast(
+          (message) =>
+            message.info.role === "user" &&
+            message.parts.some((part) => part.type === "text" && part.synthetic !== true && part.text.trim()),
+        )
+        ?.parts.flatMap((part) =>
+          part.type === "text" && part.synthetic !== true && part.text.trim() ? [part.text.trim()] : [],
+        )
+        .join("\n")
+      const nextPrompt =
+        compacting.prompt ?? buildPrompt({ previousSummary, context: compacting.context, languageSample })
       const msgs = structuredClone(selected.head)
       yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
-      const modelMessages = yield* MessageV2.toModelMessagesEffect(msgs, model, {
-        stripMedia: true,
-        toolOutputMaxChars: TOOL_OUTPUT_MAX_CHARS,
-      })
+      const modelMessages = yield* fitCompactionHead({ messages: msgs, model, cfg, prompt: nextPrompt })
       const ctx = yield* InstanceState.context
       const msg: SessionV1.Assistant = {
         id: MessageID.ascending(),
@@ -412,6 +644,27 @@ const layer = Layer.effect(
         return "stop"
       }
 
+      const summaryParts =
+        (yield* session.messages({ sessionID: input.sessionID }).pipe(Effect.orDie)).find(
+          (message) => message.info.id === processor.message.id,
+        )?.parts ?? []
+      const textParts = summaryParts.filter((part): part is SessionV1.TextPart => part.type === "text")
+      const firstText = textParts[0]
+      if (firstText) {
+        const summary = normalizeSummary({
+          text: textParts.map((part) => part.text).join("\n\n"),
+          evidence: [...compactionEvidence(msgs), ...compacting.context],
+        })
+        yield* session.updatePart({
+          ...firstText,
+          text: summary,
+          metadata: { ...firstText.metadata, compaction_normalized: true },
+        })
+        yield* Effect.forEach(textParts.slice(1), (part) =>
+          session.removePart({ sessionID: input.sessionID, messageID: processor.message.id, partID: part.id }),
+        )
+      }
+
       if (compactionPart && selected.tail_start_id && compactionPart.tail_start_id !== selected.tail_start_id) {
         yield* session.updatePart({
           ...compactionPart,
@@ -470,6 +723,7 @@ const layer = Layer.effect(
               { enabled: true },
             )).enabled
           ) {
+            const latestRequest = MessageV2.latestUserRequest(input.messages)
             const continueMsg = yield* session.updateMessage({
               id: MessageID.ascending(),
               role: "user",
@@ -477,12 +731,23 @@ const layer = Layer.effect(
               time: { created: Date.now() },
               agent: userMessage.agent,
               model: userMessage.model,
+              format: latestRequest?.info.format,
+              tools: latestRequest?.info.tools,
+              system: latestRequest?.info.system,
             })
-            const text =
-              (input.overflow
-                ? "The previous request exceeded the provider's size limit due to large media attachments. The conversation was compacted and media files were removed from context. If the user was asking about attached images or files, explain that the attachments were too large to process and suggest they try again with smaller or fewer files.\n\n"
-                : "") +
-              "Continue if you have next steps, or stop and ask for clarification if you are unsure how to proceed."
+            const requestText = latestRequest?.parts
+              .flatMap((part) =>
+                part.type === "text" && part.synthetic !== true && part.text.trim() ? [part.text.trim()] : [],
+              )
+              .join("\n")
+            const text = input.overflow
+              ? "The latest user request exceeded the provider's size limit because of large media attachments. Explain that the attachments were too large to process and suggest retrying with smaller or fewer files."
+              : [
+                  "Answer the latest real user request. It supersedes any stale Objective or Next Move preserved in the historical summary.",
+                  requestText ? `Latest real user request:\n${requestText.slice(0, 2_000)}` : undefined,
+                ]
+                  .filter((part): part is string => part !== undefined)
+                  .join("\n\n")
             yield* session.updatePart({
               id: PartID.ascending(),
               messageID: continueMsg.id,
@@ -537,6 +802,8 @@ const layer = Layer.effect(
 
     return Service.of({
       isOverflow,
+      isRequestOverflow,
+      fitRequest,
       prune,
       process: processCompaction,
       create,

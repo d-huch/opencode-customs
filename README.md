@@ -1,49 +1,62 @@
 <p align="center">
-  <a href="https://opencode.ai">
-    <picture>
-      <source srcset="packages/console/app/src/asset/logo-ornate-dark.svg" media="(prefers-color-scheme: dark)">
-      <source srcset="packages/console/app/src/asset/logo-ornate-light.svg" media="(prefers-color-scheme: light)">
-      <img src="packages/console/app/src/asset/logo-ornate-light.svg" alt="OpenCode logo">
-    </picture>
-  </a>
+  <img src="packages/desktop/icons/customs/icon.png" width="180" alt="OpenCode Customs icon">
 </p>
-<p align="center">The open source AI coding agent.</p>
-<p align="center">
-  <a href="https://opencode.ai/discord"><img alt="Discord" src="https://img.shields.io/discord/1391832426048651334?style=flat-square&label=discord" /></a>
-  <a href="https://www.npmjs.com/package/opencode-ai"><img alt="npm" src="https://img.shields.io/npm/v/opencode-ai?style=flat-square" /></a>
-  <a href="https://github.com/anomalyco/opencode/actions/workflows/publish.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/anomalyco/opencode/publish.yml?style=flat-square&branch=dev" /></a>
-</p>
+<h1 align="center">OpenCode Customs</h1>
+<p align="center">A desktop-focused, repository-aware customization of OpenCode.</p>
 
-<p align="center">
-  <a href="README.md">English</a> |
-  <a href="README.zh.md">简体中文</a> |
-  <a href="README.zht.md">繁體中文</a> |
-  <a href="README.ko.md">한국어</a> |
-  <a href="README.de.md">Deutsch</a> |
-  <a href="README.es.md">Español</a> |
-  <a href="README.fr.md">Français</a> |
-  <a href="README.it.md">Italiano</a> |
-  <a href="README.da.md">Dansk</a> |
-  <a href="README.ja.md">日本語</a> |
-  <a href="README.pl.md">Polski</a> |
-  <a href="README.ru.md">Русский</a> |
-  <a href="README.bs.md">Bosanski</a> |
-  <a href="README.ar.md">العربية</a> |
-  <a href="README.no.md">Norsk</a> |
-  <a href="README.br.md">Português (Brasil)</a> |
-  <a href="README.th.md">ไทย</a> |
-  <a href="README.tr.md">Türkçe</a> |
-  <a href="README.uk.md">Українська</a> |
-  <a href="README.bn.md">বাংলা</a> |
-  <a href="README.gr.md">Ελληνικά</a> |
-  <a href="README.vi.md">Tiếng Việt</a>
-</p>
+> [!NOTE]
+> OpenCode Customs is an independent customization built on the open-source
+> [OpenCode](https://github.com/anomalyco/opencode) project. It is not an official OpenCode release and is not
+> affiliated with the upstream OpenCode team.
 
 [![OpenCode Terminal UI](packages/web/src/assets/lander/screenshot.png)](https://opencode.ai)
 
 ---
 
-### Installation
+### What OpenCode Customs adds
+
+OpenCode Customs extends the desktop application with repository intelligence that runs before a request reaches the
+model:
+
+- An incremental, location-scoped repository map with files, languages, project areas, landmarks, symbols, and links.
+- File-watcher updates for added, changed, and removed files without a full reindex after every edit.
+- Optional LSP enrichment for definitions, references, calls, and workspace symbols.
+- A project-learned concept router for abstract tasks. It derives vocabulary from the current codebase instead of using
+  a fixed business-term dictionary or assuming a particular framework.
+- Context ranking that combines prompt evidence, analogous implementations, attached files, symbols, and graph
+  neighborhoods before selecting a compact set of files for the model.
+- Bounded RAG that retrieves small source windows around ranked symbols and concept evidence instead of injecting whole
+  files into the prompt.
+- Durable, project-scoped memory for verified compaction facts and successful file routes. Recall is query-specific and
+  contributes only a few matching notes and paths to each request.
+- Resource-aware prompt admission for custom models, including conservative fallback limits, full-request preflight,
+  budgeted tool/system context, bounded history compaction, a live context-usage indicator, and protection from duplicate
+  title-generation requests on the active model.
+- Local Agent Runtime layers for LM Studio: a read-only capability bridge, an adaptive Resource Governor, and durable
+  execution checkpoints that recover abandoned sessions after an OpenCode process restart without replaying completed
+  local tools.
+- A desktop **Map** panel with index metrics, manual reindexing, LSP status, and opt-in live routing diagnostics.
+- A separate **Extensions** menu that discovers installed ChatGPT/Codex plugin bundles, exposes their skills to the
+  agent, and starts enabled bundled MCP servers alongside native OpenCode plugins.
+- Custom OpenCode Customs desktop branding and macOS application/Dock icons.
+
+See [OpenCode Customs features](CUSTOM_FEATURES.md) for architecture, behavior, diagnostics, API endpoints, limitations,
+and local build instructions.
+
+### Build the OpenCode Customs desktop app
+
+From `packages/desktop`:
+
+```bash
+OPENCODE_CHANNEL=dev OPENCODE_ICON_CHANNEL=customs bun run build
+OPENCODE_CHANNEL=dev OPENCODE_ICON_CHANNEL=customs CSC_IDENTITY_AUTO_DISCOVERY=false \
+  bunx electron-builder --mac --dir --config electron-builder.config.ts --arm64
+```
+
+The unpacked Apple Silicon application is written to `packages/desktop/dist/mac-arm64/OpenCode Customs.app`. This
+command does not create a DMG and disables automatic signing-identity discovery.
+
+### Upstream OpenCode installation
 
 ```bash
 # YOLO
@@ -64,7 +77,7 @@ nix run nixpkgs#opencode           # or github:anomalyco/opencode for latest dev
 > [!TIP]
 > Remove versions older than 0.1.x before installing.
 
-### Desktop App (BETA)
+### Upstream Desktop App (BETA)
 
 OpenCode is also available as a desktop application. Download directly from the [releases page](https://github.com/anomalyco/opencode/releases) or [opencode.ai/download](https://opencode.ai/download).
 

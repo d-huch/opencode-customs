@@ -365,6 +365,10 @@ export type SessionsGetOutput = {
   }
 }["data"]
 
+export type SessionsRemoveInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
+
+export type SessionsRemoveOutput = void
+
 export type SessionsSwitchAgentInput = {
   readonly sessionID: { readonly sessionID: string }["sessionID"]
   readonly agent: { readonly agent: string }["agent"]
@@ -2901,5 +2905,55 @@ export type RepositoryMapRefreshOutput = {
       readonly files: number
       readonly servers: ReadonlyArray<string>
     }
+  }
+}
+
+export type RepositoryMapDiagnosticsInput = {
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+  }["location"]
+}
+
+export type RepositoryMapDiagnosticsOutput = {
+  readonly location: {
+    readonly directory: string
+    readonly workspaceID?: string
+    readonly project: { readonly id: string; readonly directory: string }
+  }
+  readonly data: {
+    readonly enabled: boolean
+    readonly entries: ReadonlyArray<{
+      readonly id: number
+      readonly time: number
+      readonly level: "info" | "warning" | "error"
+      readonly stage: string
+      readonly message: string
+    }>
+  }
+}
+
+export type RepositoryMapConfigureDiagnosticsInput = {
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+  }["location"]
+  readonly enabled: { readonly enabled: boolean; readonly clear?: boolean }["enabled"]
+  readonly clear?: { readonly enabled: boolean; readonly clear?: boolean }["clear"]
+}
+
+export type RepositoryMapConfigureDiagnosticsOutput = {
+  readonly location: {
+    readonly directory: string
+    readonly workspaceID?: string
+    readonly project: { readonly id: string; readonly directory: string }
+  }
+  readonly data: {
+    readonly enabled: boolean
+    readonly entries: ReadonlyArray<{
+      readonly id: number
+      readonly time: number
+      readonly level: "info" | "warning" | "error"
+      readonly stage: string
+      readonly message: string
+    }>
   }
 }

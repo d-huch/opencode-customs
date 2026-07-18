@@ -55,6 +55,27 @@ export const Semantic = Schema.Struct({
 }).annotate({ identifier: "RepositoryMap.Semantic" })
 export interface Semantic extends Schema.Schema.Type<typeof Semantic> {}
 
+export const DiagnosticEntry = Schema.Struct({
+  id: NonNegativeInt,
+  time: NonNegativeInt,
+  level: Schema.Literals(["info", "warning", "error"]),
+  stage: Schema.String,
+  message: Schema.String,
+}).annotate({ identifier: "RepositoryMap.DiagnosticEntry" })
+export interface DiagnosticEntry extends Schema.Schema.Type<typeof DiagnosticEntry> {}
+
+export const Diagnostics = Schema.Struct({
+  enabled: Schema.Boolean,
+  entries: Schema.Array(DiagnosticEntry),
+}).annotate({ identifier: "RepositoryMap.Diagnostics" })
+export interface Diagnostics extends Schema.Schema.Type<typeof Diagnostics> {}
+
+export const DiagnosticsConfig = Schema.Struct({
+  enabled: Schema.Boolean,
+  clear: optional(Schema.Boolean),
+}).annotate({ identifier: "RepositoryMap.DiagnosticsConfig" })
+export interface DiagnosticsConfig extends Schema.Schema.Type<typeof DiagnosticsConfig> {}
+
 export const Info = Schema.Struct({
   status: Schema.Literals(["complete", "truncated", "unavailable"]),
   files: NonNegativeInt,

@@ -10,6 +10,7 @@ import { useModels } from "@/context/models"
 import { popularProviders } from "@/hooks/use-providers"
 import { SettingsList } from "./settings-list"
 import { SettingsServerPicker, SettingsServerScope } from "./settings-server-picker"
+import { SettingsModelContextLimit } from "./settings-model-context-limit"
 
 type ModelItem = ReturnType<ReturnType<typeof useModels>["list"]>[number]
 
@@ -121,8 +122,20 @@ const SettingsModelsContent: Component = () => {
                           <div class="flex flex-wrap items-center justify-between gap-4 py-3 border-b border-border-weak-base last:border-none">
                             <div class="min-w-0">
                               <span class="text-14-regular text-text-strong truncate block">{item.name}</span>
+                              <span class="text-12-regular text-text-weak">
+                                {language.t("settings.models.context.current", {
+                                  limit: item.limit.context.toLocaleString(language.intl()),
+                                })}
+                              </span>
                             </div>
-                            <div class="flex-shrink-0">
+                            <div class="flex flex-wrap items-center justify-end gap-3">
+                              <SettingsModelContextLimit
+                                providerID={item.provider.id}
+                                modelID={item.id}
+                                context={item.limit.context}
+                                input={item.limit.input}
+                                output={item.limit.output}
+                              />
                               <Switch
                                 checked={models.visible(key)}
                                 onChange={(checked) => {

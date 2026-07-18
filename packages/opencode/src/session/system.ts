@@ -10,6 +10,7 @@ import PROMPT_GEMINI from "./prompt/gemini.txt"
 import PROMPT_GPT from "./prompt/gpt.txt"
 import PROMPT_KIMI from "./prompt/kimi.txt"
 import PROMPT_META from "./prompt/meta.txt"
+import PROMPT_COMPACT from "./prompt/compact.txt"
 
 import PROMPT_CODEX from "./prompt/codex.txt"
 import PROMPT_TRINITY from "./prompt/trinity.txt"
@@ -26,6 +27,7 @@ import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { RepositoryContextRouter } from "@opencode-ai/core/repository-context-router"
 
 export function provider(model: Provider.Model) {
+  if (model.limit?.context > 0 && model.limit.context <= 8_192) return [PROMPT_COMPACT]
   if (model.api.id.includes("muse-spark")) return [PROMPT_META]
   if (model.api.id.includes("gpt-4") || model.api.id.includes("o1") || model.api.id.includes("o3"))
     return [PROMPT_BEAST]
@@ -46,7 +48,11 @@ export interface Interface {
   readonly environment: (model: Provider.Model) => Effect.Effect<string[]>
   readonly skills: (agent: Agent.Info) => Effect.Effect<string | undefined>
   readonly mcp: (agent: Agent.Info, permission?: PermissionV1.Ruleset) => Effect.Effect<string | undefined>
-  readonly repository: (input: RepositoryContextRouter.Input) => Effect.Effect<RepositoryContextRouter.Selection | undefined>
+  readonly repository: (
+    input: RepositoryContextRouter.Input,
+  ) => Effect.Effect<RepositoryContextRouter.Selection | undefined>
+  readonly repositoryTrace: (input: RepositoryContextRouter.TraceInput) => Effect.Effect<void>
+  readonly repositoryRemember: (summary: string) => Effect.Effect<void>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SystemPrompt") {}
@@ -131,13 +137,41 @@ const layer = Layer.effect(
 
       repository: Effect.fn("SystemPrompt.repository")(function* (input: RepositoryContextRouter.Input) {
         const ctx = yield* InstanceState.context
-        return yield* RepositoryContextRouter.Service.use((router) => router.route(input)).pipe(
+        return yield* RepositoryContextRouter.Service.use((router) =>
+          router.route(input).pipe(
+            Effect.catchCause((cause) =>
+              router
+                .trace({
+                  level: "error",
+                  stage: "router",
+                  message: `Router failed: ${Cause.pretty(cause).split("\n")[0] || "Unknown error"}`,
+                })
+                .pipe(Effect.as(undefined)),
+            ),
+          ),
+        ).pipe(
           Effect.provide(locations.get(Location.Ref.make({ directory: AbsolutePath.make(ctx.directory) }))),
           Effect.catchCause((cause) =>
             Effect.logWarning("repository context unavailable", { cause: Cause.pretty(cause) }).pipe(
               Effect.as(undefined),
             ),
           ),
+        )
+      }),
+
+      repositoryTrace: Effect.fn("SystemPrompt.repositoryTrace")(function* (input) {
+        const ctx = yield* InstanceState.context
+        yield* RepositoryContextRouter.Service.use((router) => router.trace(input)).pipe(
+          Effect.provide(locations.get(Location.Ref.make({ directory: AbsolutePath.make(ctx.directory) }))),
+          Effect.catchCause(() => Effect.void),
+        )
+      }),
+
+      repositoryRemember: Effect.fn("SystemPrompt.repositoryRemember")(function* (summary) {
+        const ctx = yield* InstanceState.context
+        yield* RepositoryContextRouter.Service.use((router) => router.remember(summary)).pipe(
+          Effect.provide(locations.get(Location.Ref.make({ directory: AbsolutePath.make(ctx.directory) }))),
+          Effect.catchCause(() => Effect.void),
         )
       }),
     })

@@ -2365,6 +2365,32 @@ export type Agent = {
   steps?: number
 }
 
+export type ExtensionPlugin = {
+  id: string
+  name: string
+  displayName: string
+  version?: string
+  description?: string
+  location: string
+  source: "installed" | "repository" | "personal"
+  enabled: boolean
+  skills: number
+  mcp: boolean
+  apps: boolean
+  hooks: boolean
+}
+
+export type ExtensionSkill = {
+  name: string
+  description?: string
+  location: string
+}
+
+export type ExtensionOverview = {
+  plugins: Array<ExtensionPlugin>
+  skills: Array<ExtensionSkill>
+}
+
 export type LspStatus = {
   id: string
   name: string
@@ -2480,6 +2506,77 @@ export type PermissionNotFoundError = {
   _tag: "PermissionNotFoundError"
   requestID: string
   message: string
+}
+
+export type LmStudioProbe = {
+  provider: "lmstudio"
+  status: "unconfigured" | "ready" | "degraded" | "offline" | "unauthorized"
+  baseURL: string
+  checkedAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  latencyMs: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  api: {
+    native: boolean
+    openai: boolean
+    chatCompletions: boolean
+    responses: boolean
+    embeddings: boolean
+  }
+  models: Array<{
+    id: string
+    name: string
+    type: "llm" | "embedding" | "unknown"
+    loaded: boolean
+    instances: Array<string>
+    context: {
+      active?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      supported?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    }
+    capabilities: {
+      tools: boolean
+      vision: boolean
+      reasoning: boolean
+      embeddings: boolean
+    }
+  }>
+  error?: string
+}
+
+export type ResourceGovernorSnapshot = {
+  status: "healthy" | "pressured" | "critical"
+  checkedAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  memory: {
+    totalBytes: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    availableBytes: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    availablePercent: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    processRssBytes: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    processHeapBytes: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  }
+  limits: {
+    modelConcurrency: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    contextPercent: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    pressureAvailablePercent: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    criticalAvailablePercent: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    minFreeBytes: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    criticalFreeBytes: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  }
+  activity: {
+    activeModelRequests: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    waitingModelRequests: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  }
+  counters: {
+    contextAdjustments: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    throttledModelRequests: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    rejectedModelRequests: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  }
+  lastDecision?: {
+    time: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    providerID: string
+    modelID: string
+    requestedContext: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    runtimeContext?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    safeInputTokens: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    reason: string
+  }
 }
 
 export type ProviderAuthMethod = {
@@ -6204,6 +6301,24 @@ export type RepositoryMapInfo = {
   semantic: RepositoryMapSemantic
 }
 
+export type RepositoryMapDiagnosticEntry = {
+  id: number
+  time: number
+  level: "info" | "warning" | "error"
+  stage: string
+  message: string
+}
+
+export type RepositoryMapDiagnostics = {
+  enabled: boolean
+  entries: Array<RepositoryMapDiagnosticEntry>
+}
+
+export type RepositoryMapDiagnosticsConfig = {
+  enabled: boolean
+  clear?: boolean
+}
+
 export type EventModelsDevRefreshed = {
   id: string
   type: "models-dev.refreshed"
@@ -8425,6 +8540,34 @@ export type AppSkillsResponses = {
 
 export type AppSkillsResponse = AppSkillsResponses[keyof AppSkillsResponses]
 
+export type AppExtensionsData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/extension"
+}
+
+export type AppExtensionsErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type AppExtensionsError = AppExtensionsErrors[keyof AppExtensionsErrors]
+
+export type AppExtensionsResponses = {
+  /**
+   * ExtensionOverview
+   */
+  200: ExtensionOverview
+}
+
+export type AppExtensionsResponse = AppExtensionsResponses[keyof AppExtensionsResponses]
+
 export type LspStatusData = {
   body?: never
   path?: never
@@ -9384,6 +9527,63 @@ export type ProviderListResponses = {
 }
 
 export type ProviderListResponse = ProviderListResponses[keyof ProviderListResponses]
+
+export type ProviderLmstudioProbeData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/provider/lmstudio/probe"
+}
+
+export type ProviderLmstudioProbeErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type ProviderLmstudioProbeError = ProviderLmstudioProbeErrors[keyof ProviderLmstudioProbeErrors]
+
+export type ProviderLmstudioProbeResponses = {
+  /**
+   * LM Studio bridge capability snapshot
+   */
+  200: LmStudioProbe
+}
+
+export type ProviderLmstudioProbeResponse = ProviderLmstudioProbeResponses[keyof ProviderLmstudioProbeResponses]
+
+export type ProviderRuntimeResourcesData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/provider/runtime/resources"
+}
+
+export type ProviderRuntimeResourcesErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type ProviderRuntimeResourcesError = ProviderRuntimeResourcesErrors[keyof ProviderRuntimeResourcesErrors]
+
+export type ProviderRuntimeResourcesResponses = {
+  /**
+   * Local Agent Runtime resource snapshot
+   */
+  200: ResourceGovernorSnapshot
+}
+
+export type ProviderRuntimeResourcesResponse =
+  ProviderRuntimeResourcesResponses[keyof ProviderRuntimeResourcesResponses]
 
 export type ProviderAuthData = {
   body?: never
@@ -11491,6 +11691,41 @@ export type V2SessionActiveResponses = {
 }
 
 export type V2SessionActiveResponse = V2SessionActiveResponses[keyof V2SessionActiveResponses]
+
+export type V2SessionDeleteData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: never
+  url: "/api/session/{sessionID}"
+}
+
+export type V2SessionDeleteErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * SessionNotFoundError
+   */
+  404: SessionNotFoundError
+}
+
+export type V2SessionDeleteError = V2SessionDeleteErrors[keyof V2SessionDeleteErrors]
+
+export type V2SessionDeleteResponses = {
+  /**
+   * <No Content>
+   */
+  204: void
+}
+
+export type V2SessionDeleteResponse = V2SessionDeleteResponses[keyof V2SessionDeleteResponses]
 
 export type V2SessionGetData = {
   body?: never
@@ -13711,6 +13946,83 @@ export type V2RepositoryMapRefreshResponses = {
 }
 
 export type V2RepositoryMapRefreshResponse = V2RepositoryMapRefreshResponses[keyof V2RepositoryMapRefreshResponses]
+
+export type V2RepositoryMapDiagnosticsData = {
+  body?: never
+  path?: never
+  query?: {
+    location?: {
+      directory?: string
+      workspace?: string
+    }
+  }
+  url: "/api/repository-map/diagnostics"
+}
+
+export type V2RepositoryMapDiagnosticsErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2RepositoryMapDiagnosticsError = V2RepositoryMapDiagnosticsErrors[keyof V2RepositoryMapDiagnosticsErrors]
+
+export type V2RepositoryMapDiagnosticsResponses = {
+  /**
+   * Success
+   */
+  200: {
+    location: LocationInfo
+    data: RepositoryMapDiagnostics
+  }
+}
+
+export type V2RepositoryMapDiagnosticsResponse =
+  V2RepositoryMapDiagnosticsResponses[keyof V2RepositoryMapDiagnosticsResponses]
+
+export type V2RepositoryMapConfigureDiagnosticsData = {
+  body: RepositoryMapDiagnosticsConfig
+  path?: never
+  query?: {
+    location?: {
+      directory?: string
+      workspace?: string
+    }
+  }
+  url: "/api/repository-map/diagnostics"
+}
+
+export type V2RepositoryMapConfigureDiagnosticsErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2RepositoryMapConfigureDiagnosticsError =
+  V2RepositoryMapConfigureDiagnosticsErrors[keyof V2RepositoryMapConfigureDiagnosticsErrors]
+
+export type V2RepositoryMapConfigureDiagnosticsResponses = {
+  /**
+   * Success
+   */
+  200: {
+    location: LocationInfo
+    data: RepositoryMapDiagnostics
+  }
+}
+
+export type V2RepositoryMapConfigureDiagnosticsResponse =
+  V2RepositoryMapConfigureDiagnosticsResponses[keyof V2RepositoryMapConfigureDiagnosticsResponses]
 
 export type PtyConnectData = {
   body?: never

@@ -96,4 +96,11 @@ describe("getSessionContext", () => {
 
     expect(ctx).toBeUndefined()
   })
+
+  test("caps over-budget estimates at 100 percent", () => {
+    const messages = [assistant("a1", { input: 1_200, output: 0, reasoning: 0, read: 0, write: 0 }, 0)]
+    const providers = [{ id: "openai", models: { "gpt-4.1": { limit: { context: 1_000 } } } }]
+
+    expect(getSessionContext(messages, providers)?.usage).toBe(100)
+  })
 })

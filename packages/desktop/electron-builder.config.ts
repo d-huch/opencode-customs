@@ -31,6 +31,7 @@ const channel = (() => {
   if (raw === "dev" || raw === "beta" || raw === "prod") return raw
   return "dev"
 })()
+const customIcons = process.env.OPENCODE_ICON_CHANNEL === "customs"
 
 const APP_IDS = {
   dev: "ai.opencode.desktop.dev",
@@ -55,6 +56,10 @@ const getBase = (appId: string): Configuration => ({
   files: ["out/**/*", "resources/**/*"],
   extraResources: [
     {
+      from: "resources/icons/dock.png",
+      to: "icons/dock.png",
+    },
+    {
       from: "native/",
       to: "native/",
       filter: ["index.js", "index.d.ts", "build/Release/mac_window.node", "swift-build/**"],
@@ -62,7 +67,7 @@ const getBase = (appId: string): Configuration => ({
   ],
   mac: {
     category: "public.app-category.developer-tools",
-    icon: `resources/icons/icon.icns`,
+    icon: `resources/icons/icon.${customIcons ? "png" : "icns"}`,
     hardenedRuntime: true,
     gatekeeperAssess: false,
     entitlements: "resources/entitlements.plist",
@@ -115,7 +120,8 @@ function getConfig() {
       return {
         ...base,
         appId,
-        productName: "OpenCode Dev",
+        productName: customIcons ? "OpenCode Customs" : "OpenCode Dev",
+        protocols: customIcons ? { name: "OpenCode Customs", schemes: ["opencode"] } : base.protocols,
         rpm: { packageName: "opencode-dev" },
       }
     }

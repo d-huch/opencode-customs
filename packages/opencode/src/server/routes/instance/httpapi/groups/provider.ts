@@ -8,6 +8,8 @@ import { InstanceContextMiddleware } from "../middleware/instance-context"
 import { WorkspaceRoutingMiddleware, WorkspaceRoutingQuery } from "../middleware/workspace-routing"
 import { described } from "./metadata"
 import { ProviderV2 } from "@opencode-ai/core/provider"
+import { LmStudioProbe } from "@/local-agent-runtime/lmstudio"
+import { ResourceGovernorSnapshot } from "@/local-agent-runtime/resource-governor"
 
 const root = "/provider"
 
@@ -43,6 +45,28 @@ export const ProviderApi = HttpApi.make("provider")
             identifier: "provider.list",
             summary: "List providers",
             description: "Get a list of all available AI providers, including both available and connected ones.",
+          }),
+        ),
+        HttpApiEndpoint.get("lmStudioProbe", `${root}/lmstudio/probe`, {
+          query: WorkspaceRoutingQuery,
+          success: described(LmStudioProbe, "LM Studio bridge capability snapshot"),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "provider.lmstudio.probe",
+            summary: "Probe LM Studio capabilities",
+            description:
+              "Check LM Studio connectivity and discover loaded models, context limits, tool use, vision, reasoning, and embedding capabilities without running inference.",
+          }),
+        ),
+        HttpApiEndpoint.get("resourceGovernor", `${root}/runtime/resources`, {
+          query: WorkspaceRoutingQuery,
+          success: described(ResourceGovernorSnapshot, "Local Agent Runtime resource snapshot"),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "provider.runtime.resources",
+            summary: "Inspect Local Agent Runtime resources",
+            description:
+              "Report host memory pressure, local model concurrency, context safety limits, and recent governor decisions.",
           }),
         ),
         HttpApiEndpoint.get("auth", `${root}/auth`, {

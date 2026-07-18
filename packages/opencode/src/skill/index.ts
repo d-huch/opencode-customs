@@ -17,12 +17,14 @@ import { Glob } from "@opencode-ai/core/util/glob"
 import { Discovery } from "./discovery"
 import { isRecord } from "@/util/record"
 import { escapeHtml } from "@/util/html"
+import { PluginBundle } from "@/plugin/bundle"
 
 const CLAUDE_EXTERNAL_DIR = ".claude"
 const AGENTS_EXTERNAL_DIR = ".agents"
 const EXTERNAL_SKILL_PATTERN = "skills/**/SKILL.md"
 const OPENCODE_SKILL_PATTERN = "{skill,skills}/**/SKILL.md"
 const SKILL_PATTERN = "**/SKILL.md"
+const ADMIN_SKILL_DIR = "/etc/codex/skills"
 
 // Built-in skill that ships with opencode. The model's intuition for what an
 // opencode.json should look like is often wrong, and opencode hard-fails on
@@ -182,8 +184,16 @@ const discoverSkills = Effect.fnUntraced(function* (
 ) {
   const state: ScanState = { matches: new Set(), dirs: new Set() }
 
+  const pluginSkills = yield* Effect.promise(() => PluginBundle.skillDirectories({ home: global.home, worktree }))
+  for (const root of pluginSkills) {
+    yield* scan(state, root, SKILL_PATTERN, { dot: true, scope: "plugin" })
+  }
+
   const externalDirs: string[] = []
   if (!disableExternalSkills) {
+    if (process.platform !== "win32" && (yield* fsys.isDir(ADMIN_SKILL_DIR))) {
+      yield* scan(state, ADMIN_SKILL_DIR, SKILL_PATTERN, { dot: true, scope: "admin" })
+    }
     if (!disableClaudeCodeSkills) externalDirs.push(CLAUDE_EXTERNAL_DIR)
     externalDirs.push(AGENTS_EXTERNAL_DIR)
 

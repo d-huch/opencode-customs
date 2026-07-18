@@ -281,6 +281,16 @@ it.instance(
   },
 )
 
+it.instance("agent asks before installing host dependencies by default", () =>
+  Effect.gen(function* () {
+    const build = yield* load((svc) => svc.get("build"))
+    expect(build).toBeDefined()
+    expect(Permission.evaluate("bash", "brew install libreoffice", build!.permission).action).toBe("ask")
+    expect(Permission.evaluate("bash", "pip3 install python-docx", build!.permission).action).toBe("ask")
+    expect(Permission.evaluate("bash", "ls -la", build!.permission).action).toBe("allow")
+  }),
+)
+
 it.instance(
   "global permission config applies to all agents",
   () =>

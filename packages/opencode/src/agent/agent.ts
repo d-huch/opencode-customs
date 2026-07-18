@@ -118,6 +118,22 @@ const layer = Layer.effect(
 
         const defaults = Permission.fromConfig({
           "*": "allow",
+          bash: {
+            "*": "allow",
+            "brew install *": "ask",
+            "pip install *": "ask",
+            "pip3 install *": "ask",
+            "python -m pip install *": "ask",
+            "python3 -m pip install *": "ask",
+            "npm install *": "ask",
+            "npm i *": "ask",
+            "pnpm add *": "ask",
+            "yarn add *": "ask",
+            "bun add *": "ask",
+            "composer require *": "ask",
+            "cargo add *": "ask",
+            "dotnet add *": "ask",
+          },
           doom_loop: "ask",
           external_directory: {
             "*": "ask",

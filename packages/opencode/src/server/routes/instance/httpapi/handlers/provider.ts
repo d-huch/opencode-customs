@@ -10,6 +10,8 @@ import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
 import { ProviderAuthApiError } from "../groups/provider"
 import { ProviderV2 } from "@opencode-ai/core/provider"
+import { probeLmStudio } from "@/local-agent-runtime/lmstudio"
+import { snapshot } from "@/local-agent-runtime/resource-governor"
 
 function mapProviderAuthError<A, R>(self: Effect.Effect<A, ProviderAuth.Error, R>) {
   return self.pipe(
@@ -62,6 +64,22 @@ export const providerHandlers = HttpApiBuilder.group(InstanceHttpApi, "provider"
       return yield* svc.methods()
     })
 
+    const lmStudioProbe = Effect.fn("ProviderHttpApi.lmStudioProbe")(function* () {
+      const config = yield* cfg.get()
+      const info = config.provider?.lmstudio
+      return yield* Effect.promise(() =>
+        probeLmStudio({
+          baseURL: info?.options?.baseURL,
+          apiKey: info?.options?.apiKey,
+          refresh: true,
+        }),
+      )
+    })
+
+    const resourceGovernor = Effect.fn("ProviderHttpApi.resourceGovernor")(function* () {
+      return snapshot()
+    })
+
     const authorize = Effect.fn("ProviderHttpApi.authorize")(function* (ctx: {
       params: { providerID: ProviderV2.ID }
       payload: ProviderAuth.AuthorizeInput
@@ -106,6 +124,8 @@ export const providerHandlers = HttpApiBuilder.group(InstanceHttpApi, "provider"
 
     return handlers
       .handle("list", list)
+      .handle("lmStudioProbe", lmStudioProbe)
+      .handle("resourceGovernor", resourceGovernor)
       .handle("auth", auth)
       .handleRaw("authorize", authorizeRaw)
       .handle("callback", callback)

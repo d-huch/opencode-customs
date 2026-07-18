@@ -25,6 +25,9 @@ import { isRecord } from "@/util/record"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Database } from "@opencode-ai/core/database/database"
 import { Usage, type LLMEvent } from "@opencode-ai/llm"
+import { completedCheckpoint } from "@/local-agent-runtime/checkpoint"
+import { recordModelFailure } from "@/local-agent-runtime/resource-governor"
+import { SessionExecutionCheckpoint } from "@opencode-ai/core/session/execution-checkpoint"
 
 const DOOM_LOOP_THRESHOLD = 3
 export type Result = "compact" | "stop" | "continue"
@@ -44,6 +47,7 @@ export interface Handle {
       attachments?: SessionV1.FilePart[]
     },
   ) => Effect.Effect<void>
+  readonly beginToolCall: (toolCallID: string) => Effect.Effect<void>
   readonly process: (streamInput: LLM.StreamInput) => Effect.Effect<Result>
 }
 
@@ -51,6 +55,8 @@ type Input = {
   assistantMessage: SessionV1.Assistant
   sessionID: SessionID
   model: Provider.Model
+  checkpoint?: SessionExecutionCheckpoint.Token
+  step?: number
 }
 
 export interface Interface {
@@ -124,6 +130,14 @@ const layer = Layer.effect(
         const done = ctx.toolcalls[toolCallID]?.done
         delete ctx.toolcalls[toolCallID]
         if (done) yield* Deferred.succeed(done, undefined).pipe(Effect.ignore)
+      })
+
+      const beginToolCall = Effect.fn("SessionProcessor.beginToolCall")(function* (_toolCallID: string) {
+        if (!input.checkpoint) return
+        yield* SessionExecutionCheckpoint.advance(database.db, input.checkpoint, {
+          state: "settling_tools",
+          step: input.step ?? 1,
+        })
       })
 
       const readToolCall = Effect.fn("SessionProcessor.readToolCall")(function* (toolCallID: string) {
@@ -332,6 +346,7 @@ const layer = Layer.effect(
             if (ctx.assistantMessage.summary) {
               throw new Error(`Tool call not allowed while generating summary: ${value.name}`)
             }
+            yield* beginToolCall(value.id)
             yield* ensureToolCall(value)
             const input = isRecord(value.input) ? value.input : { value: value.input }
             yield* updateToolCall(value.id, (match) => ({
@@ -603,6 +618,31 @@ const layer = Layer.effect(
           error: errorMessage(e),
           stack: e instanceof Error ? e.stack : undefined,
         })
+        if (
+          recordModelFailure({
+            providerID: input.model.providerID,
+            apiURL: input.model.api.url,
+            error: e,
+          })
+        ) {
+          const checkpoint = completedCheckpoint(
+            yield* session.messages({ sessionID: ctx.sessionID, limit: 50 }).pipe(Effect.orDie),
+            ctx.assistantMessage,
+          )
+          if (checkpoint) {
+            ctx.assistantMessage.finish = "stop"
+            yield* session.updateMessage(ctx.assistantMessage)
+            yield* Effect.logWarning("local model crashed after durable tool checkpoint; preserving completed work", {
+              "session.id": input.sessionID,
+              messageID: input.assistantMessage.id,
+              checkpointMessageID: checkpoint.messageID,
+              checkpointPartID: checkpoint.partID,
+              checkpointTool: checkpoint.tool,
+              checkpointTitle: checkpoint.title,
+            })
+            return
+          }
+        }
         const error = parse(e)
         if (SessionV1.ContextOverflowError.isInstance(error)) {
           if ((yield* config.get()).compaction?.auto === false && !ctx.assistantMessage.summary) {
@@ -631,6 +671,11 @@ const layer = Layer.effect(
         })
         ctx.needsCompaction = false
         ctx.shouldBreak = (yield* config.get()).experimental?.continue_loop_on_deny !== true
+        if (input.checkpoint)
+          yield* SessionExecutionCheckpoint.advance(database.db, input.checkpoint, {
+            state: "streaming",
+            step: input.step ?? 1,
+          })
 
         return yield* Effect.gen(function* () {
           yield* Effect.gen(function* () {
@@ -688,6 +733,7 @@ const layer = Layer.effect(
         },
         updateToolCall,
         completeToolCall,
+        beginToolCall,
         process,
       } satisfies Handle
     })

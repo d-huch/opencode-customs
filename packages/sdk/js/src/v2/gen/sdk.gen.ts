@@ -6,6 +6,8 @@ import type {
   AgentPartInput,
   AppAgentsErrors,
   AppAgentsResponses,
+  AppExtensionsErrors,
+  AppExtensionsResponses,
   AppLogErrors,
   AppLogResponses,
   AppSkillsErrors,
@@ -147,10 +149,14 @@ import type {
   ProviderAuthResponses,
   ProviderListErrors,
   ProviderListResponses,
+  ProviderLmstudioProbeErrors,
+  ProviderLmstudioProbeResponses,
   ProviderOauthAuthorizeErrors,
   ProviderOauthAuthorizeResponses,
   ProviderOauthCallbackErrors,
   ProviderOauthCallbackResponses,
+  ProviderRuntimeResourcesErrors,
+  ProviderRuntimeResourcesResponses,
   PtyConnectErrors,
   PtyConnectResponses,
   PtyConnectTokenErrors,
@@ -175,6 +181,7 @@ import type {
   QuestionReplyErrors,
   QuestionReplyResponses,
   QuestionV2Reply,
+  RepositoryMapDiagnosticsConfig,
   SessionAbortErrors,
   SessionAbortResponses,
   SessionChildrenErrors,
@@ -333,6 +340,10 @@ import type {
   V2QuestionRequestListResponses,
   V2ReferenceListErrors,
   V2ReferenceListResponses,
+  V2RepositoryMapConfigureDiagnosticsErrors,
+  V2RepositoryMapConfigureDiagnosticsResponses,
+  V2RepositoryMapDiagnosticsErrors,
+  V2RepositoryMapDiagnosticsResponses,
   V2RepositoryMapGetErrors,
   V2RepositoryMapGetResponses,
   V2RepositoryMapRefreshErrors,
@@ -345,6 +356,8 @@ import type {
   V2SessionContextResponses,
   V2SessionCreateErrors,
   V2SessionCreateResponses,
+  V2SessionDeleteErrors,
+  V2SessionDeleteResponses,
   V2SessionEventsErrors,
   V2SessionEventsResponses,
   V2SessionGetErrors,
@@ -612,6 +625,36 @@ export class App extends HeyApiClient {
     )
     return (options?.client ?? this.client).get<AppSkillsResponses, AppSkillsErrors, ThrowOnError>({
       url: "/skill",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * List extensions
+   *
+   * List ChatGPT/Codex plugin bundles and compact skill metadata available to OpenCode.
+   */
+  public extensions<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<AppExtensionsResponses, AppExtensionsErrors, ThrowOnError>({
+      url: "/extension",
       ...options,
       ...params,
     })
@@ -3202,6 +3245,78 @@ export class Permission extends HeyApiClient {
   }
 }
 
+export class Lmstudio extends HeyApiClient {
+  /**
+   * Probe LM Studio capabilities
+   *
+   * Check LM Studio connectivity and discover loaded models, context limits, tool use, vision, reasoning, and embedding capabilities without running inference.
+   */
+  public probe<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      ProviderLmstudioProbeResponses,
+      ProviderLmstudioProbeErrors,
+      ThrowOnError
+    >({
+      url: "/provider/lmstudio/probe",
+      ...options,
+      ...params,
+    })
+  }
+}
+
+export class Runtime extends HeyApiClient {
+  /**
+   * Inspect Local Agent Runtime resources
+   *
+   * Report host memory pressure, local model concurrency, context safety limits, and recent governor decisions.
+   */
+  public resources<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      ProviderRuntimeResourcesResponses,
+      ProviderRuntimeResourcesErrors,
+      ThrowOnError
+    >({
+      url: "/provider/runtime/resources",
+      ...options,
+      ...params,
+    })
+  }
+}
+
 export class Oauth extends HeyApiClient {
   /**
    * Start OAuth authorization
@@ -3355,6 +3470,16 @@ export class Provider extends HeyApiClient {
       ...options,
       ...params,
     })
+  }
+
+  private _lmstudio?: Lmstudio
+  get lmstudio(): Lmstudio {
+    return (this._lmstudio ??= new Lmstudio({ client: this.client }))
+  }
+
+  private _runtime?: Runtime
+  get runtime(): Runtime {
+    return (this._runtime ??= new Runtime({ client: this.client }))
   }
 
   private _oauth?: Oauth
@@ -5522,6 +5647,25 @@ export class Session3 extends HeyApiClient {
   }
 
   /**
+   * Delete session
+   *
+   * Delete a session and its child sessions.
+   */
+  public delete<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "sessionID" }] }])
+    return (options?.client ?? this.client).delete<V2SessionDeleteResponses, V2SessionDeleteErrors, ThrowOnError>({
+      url: "/api/session/{sessionID}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
    * Get session
    *
    * Retrieve a session by ID.
@@ -7037,6 +7181,74 @@ export class RepositoryMap extends HeyApiClient {
       url: "/api/repository-map/refresh",
       ...options,
       ...params,
+    })
+  }
+
+  /**
+   * Get repository diagnostics
+   *
+   * Get the location-scoped repository routing and LSP diagnostic timeline.
+   */
+  public diagnostics<ThrowOnError extends boolean = false>(
+    parameters?: {
+      location?: {
+        directory?: string
+        workspace?: string
+      }
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "query", key: "location" }] }])
+    return (options?.client ?? this.client).get<
+      V2RepositoryMapDiagnosticsResponses,
+      V2RepositoryMapDiagnosticsErrors,
+      ThrowOnError
+    >({
+      url: "/api/repository-map/diagnostics",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Configure repository diagnostics
+   *
+   * Enable, disable, or clear the location-scoped diagnostic timeline.
+   */
+  public configureDiagnostics<ThrowOnError extends boolean = false>(
+    parameters: {
+      location?: {
+        directory?: string
+        workspace?: string
+      }
+      repositoryMapDiagnosticsConfig: RepositoryMapDiagnosticsConfig
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "location" },
+            { key: "repositoryMapDiagnosticsConfig", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      V2RepositoryMapConfigureDiagnosticsResponses,
+      V2RepositoryMapConfigureDiagnosticsErrors,
+      ThrowOnError
+    >({
+      url: "/api/repository-map/diagnostics",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
     })
   }
 }

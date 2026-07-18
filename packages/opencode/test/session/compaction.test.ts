@@ -3,7 +3,7 @@ import { ConfigV1 } from "@opencode-ai/core/v1/config/config"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { Database } from "@opencode-ai/core/database/database"
 import { EventV2Bridge } from "@/event-v2-bridge"
-import { APICallError } from "ai"
+import { APICallError, type Tool } from "ai"
 import { Cause, Deferred, Effect, Exit, Fiber, Layer, Schema } from "effect"
 import * as Stream from "effect/Stream"
 import { Config } from "@/config/config"
@@ -204,6 +204,7 @@ function fake(
     },
     updateToolCall: Effect.fn("TestSessionProcessor.updateToolCall")(() => Effect.succeed(undefined)),
     completeToolCall: Effect.fn("TestSessionProcessor.completeToolCall")(() => Effect.void),
+    beginToolCall: Effect.fn("TestSessionProcessor.beginToolCall")(() => Effect.void),
     process: Effect.fn("TestSessionProcessor.process")(() => Effect.succeed(result)),
   } satisfies SessionProcessorModule.SessionProcessor.Handle
 }
@@ -545,6 +546,83 @@ describe("session.compaction.isOverflow", () => {
           compaction: { auto: false },
         },
       },
+    ),
+  )
+})
+
+describe("session.compaction.isRequestOverflow", () => {
+  it.live(
+    "includes serialized messages in the preflight budget",
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const compact = yield* SessionCompaction.Service
+        const model = createModel({ context: 100, output: 20 })
+        expect(
+          yield* compact.isRequestOverflow({
+            system: [],
+            messages: [{ role: "user", content: "x".repeat(400) }],
+            tools: {},
+            model,
+          }),
+        ).toBe(true)
+      }),
+    ),
+  )
+
+  it.live(
+    "allows a request inside the safe input budget",
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const compact = yield* SessionCompaction.Service
+        const model = createModel({ context: 1_000, output: 200 })
+        expect(
+          yield* compact.isRequestOverflow({
+            system: ["system"],
+            messages: [{ role: "user", content: "short" }],
+            tools: {},
+            model,
+          }),
+        ).toBe(false)
+      }),
+    ),
+  )
+})
+
+describe("session.compaction.fitRequest", () => {
+  it.live(
+    "fits system context and tools into a small local model budget",
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const compact = yield* SessionCompaction.Service
+        const tools = Object.fromEntries(
+          ["read", "grep", "glob", "edit", "write", "bash", "question", "task"].map((name) => [
+            name,
+            {
+              description: `${name} ${"description ".repeat(200)}`,
+              inputSchema: {
+                jsonSchema: {
+                  type: "object",
+                  properties: { value: { type: "string", description: "schema ".repeat(400) } },
+                },
+              },
+            } as unknown as Tool,
+          ]),
+        )
+        const result = yield* compact.fitRequest({
+          fixedSystem: ["compact agent prompt"],
+          system: ["environment", "repository context ".repeat(500), "optional skills ".repeat(500)],
+          messages: [{ role: "user", content: "inspect the project" }],
+          tools,
+          model: createModel({ context: 4_096, output: 512 }),
+          requiredTools: ["read"],
+        })
+
+        expect(result.compressed).toBe(true)
+        expect(result.overflow).toBe(false)
+        expect(result.tokens).toBeLessThan(result.limit)
+        expect(result.tools.read).toBeDefined()
+        expect(Object.keys(result.tools).length).toBeLessThan(Object.keys(tools).length)
+      }),
     ),
   )
 })
@@ -891,7 +969,7 @@ describe("session.compaction.process", () => {
   )
 
   it.instance(
-    "adds synthetic continue prompt when auto is enabled",
+    "anchors synthetic continuation to the latest real user request",
     Effect.gen(function* () {
       const ssn = yield* SessionNs.Service
       const session = yield* ssn.create({})
@@ -916,8 +994,37 @@ describe("session.compaction.process", () => {
         metadata: { compaction_continue: true },
       })
       if (last?.parts[0]?.type === "text") {
-        expect(last.parts[0].text).toContain("Continue if you have next steps")
+        expect(last.parts[0].text).toContain("Answer the latest real user request")
+        expect(last.parts[0].text).toContain("hello")
       }
+    }),
+  )
+
+  it.instance(
+    "does not resume an older summary objective after a new user request",
+    Effect.gen(function* () {
+      const ssn = yield* SessionNs.Service
+      const session = yield* ssn.create({})
+      yield* createUserMessage(session.id, "Create a PDF containing Hello World")
+      const latest = yield* createUserMessage(session.id, "Де знайти журнал спеціалістів?")
+      yield* SessionCompaction.use.create({ sessionID: session.id, agent: "build", model: ref, auto: true })
+      const msgs = yield* ssn.messages({ sessionID: session.id })
+      const parent = msgs.at(-1)?.info.id
+      expect(parent).toBeTruthy()
+
+      yield* SessionCompaction.use.process({
+        parentID: parent!,
+        messages: msgs,
+        sessionID: session.id,
+        auto: true,
+      })
+
+      const all = yield* ssn.messages({ sessionID: session.id })
+      const continuation = all.at(-1)?.parts.find((part): part is SessionV1.TextPart => part.type === "text")
+      expect(continuation?.synthetic).toBe(true)
+      expect(continuation?.text).toContain("Де знайти журнал спеціалістів?")
+      expect(continuation?.text).not.toContain("Create a PDF containing Hello World")
+      expect(MessageV2.latestUserRequest(all)?.info.id).toBe(latest.id)
     }),
   )
 
@@ -996,6 +1103,38 @@ describe("session.compaction.process", () => {
         expect(part?.tail_start_id).toBeUndefined()
         expect(captured).toContain("yyyy")
       }).pipe(withCompaction({ llm: stub.llmLayer, config: cfg({ tail_turns: 1, preserve_recent_tokens: 20 }) }))
+    },
+    { git: true },
+  )
+
+  itCompaction.instance(
+    "trims the oldest summary input to the model context budget",
+    () => {
+      const stub = llm()
+      let captured = ""
+      stub.push(reply("summary", (input) => (captured = JSON.stringify(input.messages))))
+      return Effect.gen(function* () {
+        const ssn = yield* SessionNs.Service
+        const session = yield* ssn.create({})
+        yield* createUserMessage(session.id, `ancient-marker ${"x".repeat(16_000)}`)
+        yield* createUserMessage(session.id, "newer summary input")
+        yield* createUserMessage(session.id, "retained tail")
+        yield* createSummaryCompaction(session.id)
+
+        const msgs = yield* ssn.messages({ sessionID: session.id })
+        const parent = msgs.at(-1)?.info.id
+        expect(parent).toBeTruthy()
+        yield* SessionCompaction.use.process({ parentID: parent!, messages: msgs, sessionID: session.id, auto: false })
+
+        expect(captured).toContain("newer summary input")
+        expect(captured).not.toContain("ancient-marker")
+      }).pipe(
+        withCompaction({
+          llm: stub.llmLayer,
+          provider: ProviderTest.fake({ model: createModel({ context: 4_000, output: 1_000 }) }),
+          config: cfg({ tail_turns: 1, preserve_recent_tokens: 100 }),
+        }),
+      )
     },
     { git: true },
   )
@@ -1317,6 +1456,56 @@ describe("session.compaction.process", () => {
         expect(summary?.parts.some((part) => part.type === "reasoning")).toBe(false)
         // Sanity: the text part still got through.
         expect(summary?.parts.some((part) => part.type === "text" && part.text === "summary")).toBe(true)
+      }).pipe(withCompaction({ llm: stub.llmLayer }))
+    },
+    { git: true },
+  )
+
+  itCompaction.instance(
+    "normalizes repeated summaries before persisting them",
+    () => {
+      const stub = llm()
+      const block = `## Objective
+- Знайти журнал
+
+## Important Details
+- Меню нібито у resources/js/components/NavigationSidebar.vue
+
+## Work State
+### Completed
+- (none)
+
+### Active
+- Відкрити resources/js/components/NavigationSidebar.vue
+
+### Blocked
+- (none)
+
+## Next Move
+1. Прочитати resources/js/components/NavigationSidebar.vue
+
+## Relevant Files
+- resources/js/components/NavigationSidebar.vue: неперевірений файл`
+      stub.push(reply(`${block}\n\n${block}`))
+      return Effect.gen(function* () {
+        const ssn = yield* SessionNs.Service
+        const session = yield* ssn.create({})
+        const msg = yield* createUserMessage(session.id, "знайти журнал правопорушень")
+        const msgs = yield* ssn.messages({ sessionID: session.id })
+        yield* SessionCompaction.use.process({
+          parentID: msg.id,
+          messages: msgs,
+          sessionID: session.id,
+          auto: false,
+        })
+
+        const text = (yield* ssn.messages({ sessionID: session.id }))
+          .flatMap((item) => item.parts)
+          .filter((part): part is SessionV1.TextPart => part.type === "text")
+          .map((part) => part.text)
+          .join("\n")
+        expect(text.match(/## Objective/g)).toHaveLength(1)
+        expect(text).not.toContain("NavigationSidebar.vue")
       }).pipe(withCompaction({ llm: stub.llmLayer }))
     },
     { git: true },

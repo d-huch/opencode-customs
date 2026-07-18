@@ -66,14 +66,17 @@ import { Persist, persisted } from "@/utils/persist"
 import { useMarked } from "@opencode-ai/ui/context/marked"
 import { preloadMarkdown } from "@opencode-ai/session-ui/markdown-cache"
 import { archiveHomeSession } from "./home-session-archive"
+import { deleteHomeSession } from "./home-session-delete"
 import { shouldOpenSessionInBackground } from "./home-session-open"
 import { showToast } from "@/utils/toast"
 import { fileManagerApp } from "@/utils/file-manager"
+import { isSessionNotFoundError } from "@/utils/server-errors"
 import {
   loadHomeSessionIndex,
   retainHomeSessions,
   type HomeSessionEvents,
 } from "@/context/global-sync/home-session-index"
+import { DialogFooter, DialogHeader, DialogTitleGroup, DialogV2 } from "@opencode-ai/ui/v2/dialog-v2"
 
 const HOME_SESSION_LIMIT = 64
 const HOME_SESSION_HEADER_STICKY_TOP = 12
@@ -617,6 +620,42 @@ export function NewHome() {
     })
   }
 
+  async function deleteSession(session: Session) {
+    const conn = focusedServer()
+    const ctx = focusedServerCtx()
+    if (!conn || !ctx) return false
+    const [store, setStore] = ctx.sync.child(session.directory)
+    return deleteHomeSession({
+      server: ServerConnection.key(conn),
+      session,
+      sessions: store.session,
+      request: () => ctx.sdk.client.v2.session.delete({ sessionID: session.id }).then(() => true),
+      remove: (sessionIDs) => {
+        homeSessions().apply({
+          type: "session.deleted",
+          properties: { sessionID: session.id, info: session },
+        })
+        setStore(
+          produce((draft) => {
+            const removed = new Set(sessionIDs)
+            draft.session = draft.session.filter((item) => !removed.has(item.id))
+          }),
+        )
+      },
+      evict: ctx.sync.session.evict,
+      isAlreadyDeleted: (error) => isSessionNotFoundError(error, session.id),
+      onError: (error) =>
+        showToast({
+          title: language.t("session.delete.failed.title"),
+          description: errorMessage(error, language.t("session.delete.failed.title")),
+        }),
+    })
+  }
+
+  function confirmDeleteSession(session: Session) {
+    void dialog.show(() => <DialogDeleteHomeSession session={session} onDelete={deleteSession} />)
+  }
+
   function chooseProject(conn: ServerConnection.Any) {
     if (global.servers.health[ServerConnection.key(conn)]?.healthy === false) return
 
@@ -765,6 +804,7 @@ export function NewHome() {
                                   server={selection().server}
                                   openSession={openSession}
                                   archiveSession={archiveSession}
+                                  deleteSession={confirmDeleteSession}
                                 />
                               )}
                             </For>
@@ -1569,6 +1609,7 @@ function HomeSessionRow(props: {
   server: ServerConnection.Key
   openSession: (session: Session, options?: OpenSessionOptions) => void
   archiveSession: (session: Session) => Promise<void>
+  deleteSession: (session: Session) => void
 }) {
   const language = useLanguage()
   const title = createMemo(() => sessionTitle(props.record.session.title) || props.record.session.id)
@@ -1628,7 +1669,59 @@ function HomeSessionRow(props: {
           </TooltipV2>
         </div>
       </Show>
+      <div class="hover-reveal absolute right-1.5 top-1/2 flex -translate-y-1/2 items-center gap-1 group-hover/session:opacity-100 focus-within:opacity-100">
+        <TooltipV2 class="flex shrink-0 items-center" placement="bottom" value={language.t("session.delete.title")}>
+          <IconButtonV2
+            data-action="home-session-delete"
+            variant="ghost-muted"
+            size="large"
+            icon={<Icon name="trash" size="normal" />}
+            aria-label={language.t("session.delete.title")}
+            onClick={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+              props.deleteSession(props.record.session)
+            }}
+          />
+        </TooltipV2>
+      </div>
     </div>
+  )
+}
+
+function DialogDeleteHomeSession(props: { session: Session; onDelete: (session: Session) => Promise<boolean> }) {
+  const dialog = useDialog()
+  const language = useLanguage()
+  const [deleting, setDeleting] = createSignal(false)
+  const title = createMemo(() => sessionTitle(props.session.title) || props.session.id)
+
+  async function remove() {
+    setDeleting(true)
+    const deleted = await props.onDelete(props.session)
+    if (deleted) {
+      dialog.close()
+      return
+    }
+    setDeleting(false)
+  }
+
+  return (
+    <DialogV2 fit>
+      <DialogHeader hideClose>
+        <DialogTitleGroup
+          title={language.t("session.delete.title")}
+          description={language.t("session.delete.confirm", { name: title() })}
+        />
+      </DialogHeader>
+      <DialogFooter>
+        <ButtonV2 variant="ghost" disabled={deleting()} onClick={() => dialog.close()}>
+          {language.t("common.cancel")}
+        </ButtonV2>
+        <ButtonV2 variant={deleting() ? "loading" : "danger"} disabled={deleting()} onClick={remove}>
+          {language.t("session.delete.button")}
+        </ButtonV2>
+      </DialogFooter>
+    </DialogV2>
   )
 }
 

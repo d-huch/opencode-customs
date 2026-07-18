@@ -25,6 +25,7 @@ import { QuestionV2 } from "./question"
 import { Reference } from "./reference"
 import { ReferenceGuidance } from "./reference/guidance"
 import { RepositoryContextRouter } from "./repository-context-router"
+import { RepositoryMemory } from "./repository-memory"
 import { RepositoryMap } from "./repository-map"
 import * as SessionRunnerLLM from "./session/runner/llm"
 import { SessionRunnerModel } from "./session/runner/model"
@@ -63,6 +64,7 @@ export const locationServices = LayerNode.group([
   SystemContextRegistry.node,
   SystemContextBuiltIns.node,
   RepositoryMap.node,
+  RepositoryMemory.node,
   RepositoryContextRouter.node,
   LocationMutation.node,
   FileMutation.node,

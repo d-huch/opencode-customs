@@ -6,6 +6,7 @@ import { Global } from "@opencode-ai/core/global"
 import { LSP } from "@/lsp/lsp"
 import { Vcs } from "@/project/vcs"
 import { Skill } from "@/skill"
+import { PluginBundle } from "@/plugin/bundle"
 import { Effect } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
@@ -85,6 +86,17 @@ export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance"
       return yield* skill.all()
     })
 
+    const getExtension = Effect.fn("InstanceHttpApi.extension")(function* () {
+      const ctx = yield* InstanceState.context
+      const plugins = yield* Effect.promise(() => PluginBundle.list({ home: Global.Path.home, worktree: ctx.worktree }))
+      const skills = (yield* skill.all()).map((item) => ({
+        name: item.name,
+        description: item.description,
+        location: item.location,
+      }))
+      return { plugins, skills }
+    })
+
     const getLsp = Effect.fn("InstanceHttpApi.lsp")(function* () {
       return yield* lsp.status()
     })
@@ -104,6 +116,7 @@ export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance"
       .handle("command", getCommand)
       .handle("agent", getAgent)
       .handle("skill", getSkill)
+      .handle("extension", getExtension)
       .handle("lsp", getLsp)
       .handle("formatter", getFormatter)
   }),

@@ -32,6 +32,35 @@ export const RepositoryMapGroup = HttpApiGroup.make("server.repositoryMap")
         }),
       ),
   )
+  .add(
+    HttpApiEndpoint.get("repositoryMap.diagnostics", "/api/repository-map/diagnostics", {
+      query: LocationQuery,
+      success: Location.response(RepositoryMap.Diagnostics),
+    })
+      .annotateMerge(locationQueryOpenApi)
+      .annotateMerge(
+        OpenApi.annotations({
+          identifier: "v2.repositoryMap.diagnostics",
+          summary: "Get repository diagnostics",
+          description: "Get the location-scoped repository routing and LSP diagnostic timeline.",
+        }),
+      ),
+  )
+  .add(
+    HttpApiEndpoint.post("repositoryMap.configureDiagnostics", "/api/repository-map/diagnostics", {
+      query: LocationQuery,
+      payload: RepositoryMap.DiagnosticsConfig,
+      success: Location.response(RepositoryMap.Diagnostics),
+    })
+      .annotateMerge(locationQueryOpenApi)
+      .annotateMerge(
+        OpenApi.annotations({
+          identifier: "v2.repositoryMap.configureDiagnostics",
+          summary: "Configure repository diagnostics",
+          description: "Enable, disable, or clear the location-scoped diagnostic timeline.",
+        }),
+      ),
+  )
   .annotateMerge(
     OpenApi.annotations({
       title: "repositoryMap",

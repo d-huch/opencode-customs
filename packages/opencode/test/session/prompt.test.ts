@@ -26,7 +26,8 @@ import { Image } from "../../src/image/image"
 import { Question } from "../../src/question"
 import { Todo } from "../../src/session/todo"
 import { Session } from "@/session/session"
-import { SessionMessageTable } from "@opencode-ai/core/session/sql"
+import { SessionExecutionCheckpointTable, SessionMessageTable } from "@opencode-ai/core/session/sql"
+import { SessionExecutionCheckpoint } from "@opencode-ai/core/session/execution-checkpoint"
 import { LLM } from "../../src/session/llm"
 import { MessageV2 } from "../../src/session/message-v2"
 import { FSUtil } from "@opencode-ai/core/fs-util"
@@ -461,6 +462,39 @@ noLLMServer.instance(
   { config: cfg },
 )
 
+noLLMServer.instance(
+  "recovers an abandoned desktop execution in the active project",
+  () =>
+    Effect.gen(function* () {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const db = (yield* Database.Service).db
+      const chat = yield* sessions.create({ title: "Pinned" })
+      yield* seed(chat.id, { finish: "stop" })
+      yield* SessionExecutionCheckpoint.begin(db, chat.id, "v1")
+      yield* db
+        .update(SessionExecutionCheckpointTable)
+        .set({ state: "continuing", owner_pid: 2_147_483_647 })
+        .where(eq(SessionExecutionCheckpointTable.session_id, chat.id))
+        .run()
+        .pipe(Effect.orDie)
+
+      yield* prompt.recover()
+      const recovered = yield* pollWithTimeout(
+        SessionExecutionCheckpoint.load(db, chat.id).pipe(
+          Effect.map((checkpoint) => (checkpoint?.state === "completed" ? checkpoint : undefined)),
+        ),
+        "abandoned desktop execution was not recovered",
+        "2 seconds",
+      )
+
+      expect(recovered.runtime).toBe("v1")
+      expect(recovered.generation).toBe(2)
+      expect(recovered.recoveries).toBe(1)
+    }),
+  { config: cfg },
+)
+
 it.instance("loop exits without an LLM request for interrupted orphan tool calls", () =>
   Effect.gen(function* () {
     const { llm } = yield* useServerConfig(providerCfg)
@@ -539,6 +573,29 @@ withMcpInstructions.instance(
       yield* Fiber.interrupt(fiber)
     }),
   15_000,
+)
+
+it.instance("loop instructs the model to match the user's language", () =>
+  Effect.gen(function* () {
+    const { llm } = yield* useServerConfig(providerCfg)
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const chat = yield* sessions.create({
+      title: "Pinned",
+      permission: [{ permission: "*", pattern: "*", action: "allow" }],
+    })
+    yield* llm.hang
+    yield* user(chat.id, "Поясни, як працює цей модуль")
+
+    const fiber = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.forkChild)
+    yield* awaitWithTimeout(llm.wait(1), "timed out waiting for language instruction request", "10 seconds")
+
+    const body = JSON.stringify((yield* llm.hits)[0]?.body)
+    expect(body).toContain("Always answer in the same natural language")
+    expect(body).not.toContain("response-contract")
+    expect(body).toContain("Поясни, як працює цей модуль")
+    yield* Fiber.interrupt(fiber)
+  }),
 )
 
 it.instance("legacy prompt emits message events without session.next events", () =>

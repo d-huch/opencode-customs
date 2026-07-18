@@ -34,6 +34,8 @@ import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { McpCatalog } from "./catalog"
 import { McpEvent } from "@opencode-ai/schema/mcp-event"
 import { McpBrowser } from "./browser"
+import { PluginBundle } from "@/plugin/bundle"
+import { Global } from "@opencode-ai/core/global"
 
 const DEFAULT_TIMEOUT = 30_000
 const CLIENT_OPTIONS = {
@@ -492,10 +494,14 @@ const layer = Layer.effect(
     const state = yield* InstanceState.make<State>(
       Effect.fn("MCP.state")(function* () {
         const cfg = yield* cfgSvc.get()
+        const ctx = yield* InstanceState.context
         const bridge = yield* EffectBridge.make()
-        const config = cfg.mcp ?? {}
+        const bundled = yield* Effect.promise(() =>
+          PluginBundle.mcpServers({ home: Global.Path.home, worktree: ctx.worktree }),
+        )
+        const config = { ...bundled, ...(cfg.mcp ?? {}) }
         const s: State = {
-          config: {},
+          config: bundled,
           status: {},
           clients: {},
           defs: {},

@@ -84,6 +84,12 @@ const it = testEffect(
 )
 
 describe("session.system", () => {
+  test("selects the compact prompt for small context models", () => {
+    expect(
+      SystemPrompt.provider({ api: { id: "local/model" }, limit: { context: 4_096 } } as Provider.Model)[0],
+    ).toContain("working in the user's project")
+  })
+
   test("selects the Meta prompt for Muse Spark model IDs", () => {
     expect(SystemPrompt.provider({ api: { id: "meta/muse-spark-preview" } } as Provider.Model)[0]).toContain(
       "Meta Muse Spark",

@@ -31,8 +31,14 @@ import { ModelV2 } from "@opencode-ai/core/model"
 import { ModelStatus } from "./model-status"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderError } from "./error"
+import { findLmStudioModel, lmStudioContextLimits, probeLmStudio } from "./lmstudio"
 
 const OPENAI_HEADER_TIMEOUT_DEFAULT = 10_000
+// A missing model limit is unknown capacity, not unlimited capacity. Conservative
+// defaults keep custom/local providers from admitting prompts that can exhaust the
+// host before the provider has a chance to return a context-length error.
+const UNKNOWN_CONTEXT_LIMIT = 4_096
+const UNKNOWN_OUTPUT_LIMIT = 512
 
 function wrapSSE(res: Response, ms: number, ctl: AbortController) {
   if (typeof ms !== "number" || ms <= 0) return res
@@ -1427,10 +1433,21 @@ const layer = Layer.effect(
             source: "config",
             models: existing?.models ?? {},
           }
+          const lmStudioProbe =
+            providerID === "lmstudio"
+              ? yield* Effect.promise(() =>
+                  probeLmStudio({
+                    baseURL: parsed.options.baseURL,
+                    apiKey: parsed.options.apiKey,
+                  }),
+                )
+              : undefined
+          const discoveredContextLimits = lmStudioContextLimits(lmStudioProbe)
 
           for (const [modelID, model] of Object.entries(provider.models ?? {})) {
             const existingModel = parsed.models[model.id ?? modelID]
             const apiID = model.id ?? existingModel?.api.id ?? modelID
+            const localModel = findLmStudioModel(lmStudioProbe, apiID) ?? findLmStudioModel(lmStudioProbe, modelID)
             const apiNpm =
               model.provider?.npm ??
               provider.npm ??
@@ -1442,6 +1459,16 @@ const layer = Layer.effect(
               if (model.id && model.id !== modelID) return modelID
               return existingModel?.name ?? modelID
             })
+            const contextLimit =
+              model.limit?.context ||
+              discoveredContextLimits[apiID] ||
+              discoveredContextLimits[modelID] ||
+              existingModel?.limit?.context ||
+              UNKNOWN_CONTEXT_LIMIT
+            const outputLimit =
+              model.limit?.output ||
+              existingModel?.limit?.output ||
+              Math.min(UNKNOWN_OUTPUT_LIMIT, Math.floor(contextLimit / 4))
             const parsedModel: Model = {
               id: ModelV2.ID.make(modelID),
               api: {
@@ -1454,13 +1481,17 @@ const layer = Layer.effect(
               providerID: ProviderV2.ID.make(providerID),
               capabilities: {
                 temperature: model.temperature ?? existingModel?.capabilities.temperature ?? false,
-                reasoning: model.reasoning ?? existingModel?.capabilities.reasoning ?? false,
-                attachment: model.attachment ?? existingModel?.capabilities.attachment ?? false,
-                toolcall: model.tool_call ?? existingModel?.capabilities.toolcall ?? true,
+                reasoning: model.reasoning ?? localModel?.capabilities.reasoning ?? existingModel?.capabilities.reasoning ?? false,
+                attachment: model.attachment ?? localModel?.capabilities.vision ?? existingModel?.capabilities.attachment ?? false,
+                toolcall: model.tool_call ?? localModel?.capabilities.tools ?? existingModel?.capabilities.toolcall ?? true,
                 input: {
                   text: model.modalities?.input?.includes("text") ?? existingModel?.capabilities.input.text ?? true,
                   audio: model.modalities?.input?.includes("audio") ?? existingModel?.capabilities.input.audio ?? false,
-                  image: model.modalities?.input?.includes("image") ?? existingModel?.capabilities.input.image ?? false,
+                  image:
+                    model.modalities?.input?.includes("image") ??
+                    localModel?.capabilities.vision ??
+                    existingModel?.capabilities.input.image ??
+                    false,
                   video: model.modalities?.input?.includes("video") ?? existingModel?.capabilities.input.video ?? false,
                   pdf: model.modalities?.input?.includes("pdf") ?? existingModel?.capabilities.input.pdf ?? false,
                 },
@@ -1491,9 +1522,9 @@ const layer = Layer.effect(
               },
               options: mergeDeep(existingModel?.options ?? {}, model.options ?? {}),
               limit: {
-                context: model.limit?.context ?? existingModel?.limit?.context ?? 0,
-                input: model.limit?.input ?? existingModel?.limit?.input,
-                output: model.limit?.output ?? existingModel?.limit?.output ?? 0,
+                context: contextLimit,
+                input: model.limit?.input || existingModel?.limit?.input || undefined,
+                output: outputLimit,
               },
               headers: mergeDeep(existingModel?.headers ?? {}, model.headers ?? {}),
               family: model.family ?? existingModel?.family ?? "",

@@ -43,6 +43,7 @@ import { ConfigCompaction } from "@opencode-ai/core/config/compaction"
 import { Tool } from "@opencode-ai/core/tool/tool"
 import {
   SessionContextEpochTable,
+  SessionExecutionCheckpointTable,
   SessionInputTable,
   SessionMessageTable,
   SessionTable,
@@ -655,6 +656,28 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
+  it.effect("keeps a non-English user message latest while adding a system language contract", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      const prompt = "Поясни, як працює цей модуль"
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: prompt }), resume: false })
+
+      requests.length = 0
+      response = []
+      yield* session.resume(sessionID)
+
+      expect(requests).toHaveLength(1)
+      expect(requests[0]?.system.map((part) => part.text)).toContainEqual(
+        expect.stringContaining("Always answer in the same natural language"),
+      )
+      expect(requests[0]?.system.map((part) => part.text)).toContainEqual(expect.stringContaining(prompt))
+      expect(requests[0]?.messages.map((message) => ({ role: message.role, content: message.content }))).toEqual([
+        { role: "user", content: [{ type: "text", text: prompt }] },
+      ])
+    }),
+  )
+
   it.effect("retries the first provider turn after system context becomes available", () =>
     Effect.gen(function* () {
       yield* setup
@@ -1161,9 +1184,9 @@ describe("SessionRunnerLLM", () => {
 
       expect(requests).toHaveLength(3)
       expect(userTexts(requests[1])[0]).toContain("## Objective")
-      expect(userTexts(requests[2])[0]).toContain("<summary>\n## Objective\n- Recover overflow\n</summary>")
+      expect(userTexts(requests[2])[0]).toContain("<summary>\n## Objective\n- Recover overflow")
       expect(yield* session.context(sessionID)).toMatchObject([
-        { type: "compaction", summary: "## Objective\n- Recover overflow" },
+        { type: "compaction", summary: expect.stringContaining("## Objective\n- Recover overflow") },
         { type: "assistant", finish: "stop" },
       ])
       yield* replaySessionProjection(sessionID)
@@ -1219,7 +1242,7 @@ describe("SessionRunnerLLM", () => {
 
       expect(requests).toHaveLength(3)
       expect(yield* session.context(sessionID)).toMatchObject([
-        { type: "compaction", summary: "## Objective\n- Recover raw overflow" },
+        { type: "compaction", summary: expect.stringContaining("## Objective\n- Recover raw overflow") },
         { type: "assistant", finish: "stop" },
       ])
     }),
@@ -2312,6 +2335,104 @@ describe("SessionRunnerLLM", () => {
         },
         { type: "tool-result", id: "call-hosted-interrupted", providerExecuted: true, result: { type: "error" } },
       ])
+    }),
+  )
+
+  it.effect("recovers an abandoned continuation without executing a completed local tool twice", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      const events = yield* EventV2.Service
+      const db = (yield* Database.Service).db
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Recover completed tool" }), resume: false })
+      yield* SessionInput.promoteSteers(db, events, sessionID, Number.MAX_SAFE_INTEGER)
+      const assistantMessageID = SessionMessage.ID.create()
+      yield* events.publish(SessionEvent.Step.Started, {
+        sessionID,
+        assistantMessageID,
+        timestamp: yield* DateTime.now,
+        agent: "build",
+        model: { id: ModelV2.ID.make("fake-model"), providerID: ProviderV2.ID.make("fake") },
+      })
+      yield* events.publish(SessionEvent.Tool.Input.Started, {
+        sessionID,
+        timestamp: yield* DateTime.now,
+        assistantMessageID,
+        callID: "call-completed-before-crash",
+        name: "echo",
+      })
+      yield* events.publish(SessionEvent.Tool.Input.Ended, {
+        sessionID,
+        timestamp: yield* DateTime.now,
+        assistantMessageID,
+        callID: "call-completed-before-crash",
+        text: '{"text":"already done"}',
+      })
+      yield* events.publish(SessionEvent.Tool.Called, {
+        sessionID,
+        timestamp: yield* DateTime.now,
+        assistantMessageID,
+        callID: "call-completed-before-crash",
+        tool: "echo",
+        input: { text: "already done" },
+        provider: { executed: false },
+      })
+      yield* events.publish(SessionEvent.Tool.Success, {
+        sessionID,
+        timestamp: yield* DateTime.now,
+        assistantMessageID,
+        callID: "call-completed-before-crash",
+        structured: { text: "already done" },
+        content: [{ type: "text", text: "already done" }],
+        provider: { executed: false },
+      })
+      const now = Date.now()
+      yield* db
+        .insert(SessionExecutionCheckpointTable)
+        .values({
+          session_id: sessionID,
+          runtime: "v2",
+          execution_id: "abandoned-execution",
+          generation: 1,
+          state: "continuing",
+          step: 2,
+          assistant_message_id: assistantMessageID,
+          owner_pid: 2_147_483_647,
+          time_started: now,
+          time_updated: now,
+        })
+        .run()
+        .pipe(Effect.orDie)
+      requests.length = 0
+      executions.length = 0
+      response = [
+        LLMEvent.stepStart({ index: 0 }),
+        LLMEvent.stepFinish({ index: 0, reason: "stop" }),
+        LLMEvent.finish({ reason: "stop" }),
+      ]
+
+      yield* session.resume(sessionID)
+
+      expect(executions).toEqual([])
+      expect(requests).toHaveLength(1)
+      expect(requests[0]?.messages.map((message) => message.role)).toEqual(["user", "assistant", "tool"])
+      expect(yield* session.context(sessionID)).toMatchObject([
+        { type: "user", text: "Recover completed tool" },
+        {
+          type: "assistant",
+          finish: "error",
+          content: [{ type: "tool", id: "call-completed-before-crash", state: { status: "completed" } }],
+        },
+        { type: "assistant", finish: "stop" },
+      ])
+      expect(
+        yield* db
+          .select()
+          .from(SessionExecutionCheckpointTable)
+          .where(eq(SessionExecutionCheckpointTable.session_id, sessionID))
+          .get()
+          .pipe(Effect.orDie),
+      ).toMatchObject({ state: "completed", generation: 2, recoveries: 1 })
     }),
   )
 

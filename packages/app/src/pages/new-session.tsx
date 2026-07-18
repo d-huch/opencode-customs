@@ -9,6 +9,7 @@ import { TooltipV2 } from "@opencode-ai/ui/v2/tooltip-v2"
 import { NewSessionDesignView } from "@/components/session"
 import { PromptInputV2Composer, usePromptInputV2Controller } from "@/components/prompt-input-v2"
 import { StatusPopoverV2 } from "@/components/status-popover"
+import { ExtensionsPopover } from "@/components/extensions-popover"
 import {
   PromptProjectAddButton,
   PromptProjectSelector,
@@ -155,11 +156,16 @@ export default function NewSessionPage() {
       <Show when={rightMount()}>
         {(mount) => (
           <Portal mount={mount()}>
-            <Show when={settings.visibility.status()}>
-              <Tooltip placement="bottom" value={language.t("status.popover.trigger")}>
-                <StatusPopoverV2 />
+            <div class="flex items-center gap-2">
+              <Tooltip placement="bottom" value={language.t("extensions.trigger")}>
+                <ExtensionsPopover />
               </Tooltip>
-            </Show>
+              <Show when={settings.visibility.status()}>
+                <Tooltip placement="bottom" value={language.t("status.popover.trigger")}>
+                  <StatusPopoverV2 />
+                </Tooltip>
+              </Show>
+            </div>
           </Portal>
         )}
       </Show>

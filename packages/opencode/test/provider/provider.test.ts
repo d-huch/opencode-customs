@@ -1231,12 +1231,12 @@ it.instance("closest checks multiple query terms in order", () =>
 )
 
 it.instance(
-  "model limit defaults to zero when not specified",
+  "model limit defaults to a conservative budget when not specified",
   Effect.gen(function* () {
     const providers = yield* list
     const model = providers[ProviderV2.ID.make("no-limit")].models["model"]
-    expect(model.limit.context).toBe(0)
-    expect(model.limit.output).toBe(0)
+    expect(model.limit.context).toBe(4_096)
+    expect(model.limit.output).toBe(512)
   }),
   {
     config: {

@@ -18,7 +18,7 @@ import { createSessionTabs } from "@/pages/session/helpers"
 import { useSettings } from "@/context/settings"
 
 interface SessionContextUsageProps {
-  variant?: "button" | "indicator"
+  variant?: "button" | "indicator" | "compact"
   buttonAppearance?: "default" | "v2"
   placement?: ComponentProps<typeof TooltipV2>["placement"]
 }
@@ -64,6 +64,7 @@ export function SessionContextUsage(props: SessionContextUsageProps) {
   })
   const messages = createMemo(() => (params.id ? (sync().data.message[params.id] ?? []) : []))
   const info = createMemo(() => (params.id ? sync().session.get(params.id) : undefined))
+  const busy = createMemo(() => (params.id ? sync().data.session_status[params.id]?.type !== "idle" : false))
 
   const usd = createMemo(
     () =>
@@ -78,6 +79,7 @@ export function SessionContextUsage(props: SessionContextUsageProps) {
     return usd().format(info()?.cost ?? 0)
   })
   const contextVisible = createMemo(() => view().reviewPanel.opened() && tabState.activeTab() === "context")
+  const usage = createMemo(() => context()?.usage ?? 0)
   const hasOtherTabs = createMemo(() =>
     tabs()
       .all()
@@ -130,6 +132,10 @@ export function SessionContextUsage(props: SessionContextUsageProps) {
       <ContextTooltipRow name={language.t("context.usage.cost")} value={cost()} />
       <ContextTooltipRow name={language.t("context.usage.usage")} value={`${context()?.usage ?? 0}%`} />
       <ContextTooltipRow
+        name={language.t("context.usage.limit")}
+        value={context()?.limit?.toLocaleString(language.intl()) ?? "—"}
+      />
+      <ContextTooltipRow
         name={language.t("context.usage.tokens")}
         value={context()?.total.toLocaleString(language.intl()) ?? "0"}
       />
@@ -141,6 +147,22 @@ export function SessionContextUsage(props: SessionContextUsageProps) {
       <TooltipV2 value={tooltipValue()} placement={props.placement ?? "top"} shift={-8}>
         <Switch>
           <Match when={variant() === "indicator"}>{circle()}</Match>
+          <Match when={variant() === "compact"}>
+            <button
+              type="button"
+              class="h-7 shrink-0 flex items-center gap-1.5 rounded-md px-2 text-12-medium text-v2-text-text-muted hover:bg-v2-background-bg-interactive-hover hover:text-v2-text-text-base"
+              classList={{
+                "animate-pulse": busy(),
+                "text-v2-state-fg-warning": usage() >= 75 && usage() < 90,
+                "text-v2-state-fg-danger": usage() >= 90,
+              }}
+              onClick={openContext}
+              aria-label={`${language.t("context.usage.view")} · ${usage()}%`}
+            >
+              {circle()}
+              <span class="tabular-nums">{usage()}%</span>
+            </button>
+          </Match>
           <Match when={buttonAppearance() === "v2"}>
             <IconButtonV2
               type="button"

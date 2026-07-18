@@ -209,6 +209,15 @@ const providerErrorLLM = Layer.succeed(
 const providerErrorEnv = LayerNode.compile(root, [...replacements, [LLM.node, providerErrorLLM]])
 const itProviderError = testEffect(providerErrorEnv)
 
+const localModelCrashLLM = Layer.succeed(
+  LLM.Service,
+  LLM.Service.of({
+    stream: () => Stream.fail(new Error("The model has crashed without additional information. (Exit code: null)")),
+  }),
+)
+const localModelCrashEnv = LayerNode.compile(root, [...replacements, [LLM.node, localModelCrashLLM]])
+const itLocalModelCrash = testEffect(localModelCrashEnv)
+
 const fragmentFailureLLM = Layer.succeed(
   LLM.Service,
   LLM.Service.of({
@@ -554,6 +563,69 @@ it.live("session.processor effect tests do not retry unknown json errors", () =>
         expect(handle.message.error?.name).toBe("APIError")
       }),
     { config: (url) => providerCfg(url) },
+  ),
+)
+
+itLocalModelCrash.instance("preserves a completed tool checkpoint when the local model crashes", () =>
+  provideTmpdirInstance(() =>
+    Effect.gen(function* () {
+      const { processors, session, provider } = yield* boot()
+      const chat = yield* session.create({})
+      const parent = yield* user(chat.id, "create artifact")
+      const previous = yield* assistant(chat.id, parent.id, chat.directory)
+      previous.finish = "tool-calls"
+      yield* session.updateMessage(previous)
+      yield* session.updatePart({
+        id: PartID.ascending(),
+        messageID: previous.id,
+        sessionID: chat.id,
+        type: "tool",
+        tool: "shell",
+        callID: "checkpoint-call",
+        state: {
+          status: "completed",
+          input: { command: "create artifact" },
+          output: "artifact created",
+          title: "create artifact",
+          metadata: { exit: 0 },
+          time: { start: 1, end: 2 },
+        },
+      })
+      const msg = yield* assistant(chat.id, parent.id, chat.directory)
+      const base = yield* provider.getModel(ref.providerID, ref.modelID)
+      const model = {
+        ...base,
+        providerID: ProviderV2.ID.make("lmstudio"),
+        api: { ...base.api, url: "http://127.0.0.1:1234/v1" },
+      }
+      const handle = yield* processors.create({
+        assistantMessage: msg,
+        sessionID: chat.id,
+        model,
+      })
+
+      const result = yield* handle.process({
+        user: {
+          id: parent.id,
+          sessionID: chat.id,
+          role: "user",
+          time: parent.time,
+          agent: parent.agent,
+          model: { providerID: ref.providerID, modelID: ref.modelID },
+        } satisfies SessionV1.User,
+        sessionID: chat.id,
+        model,
+        agent: agent(),
+        system: [],
+        messages: [{ role: "user", content: "create artifact" }],
+        tools: {},
+      })
+
+      expect(result).toBe("continue")
+      expect(handle.message.finish).toBe("stop")
+      expect(handle.message.error).toBeUndefined()
+    }),
+    { config: cfg },
   ),
 )
 

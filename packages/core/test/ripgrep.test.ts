@@ -62,4 +62,26 @@ describe("Ripgrep", () => {
       (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
     ),
   )
+
+  it.live("continues past generated lines that exceed the JSON record limit", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) =>
+        Effect.gen(function* () {
+          yield* Effect.promise(() =>
+            fs.writeFile(path.join(tmp.path, "generated.js"), `needle ${"x".repeat(70_000)}\n`),
+          )
+          yield* Effect.promise(() => fs.writeFile(path.join(tmp.path, "source.js"), "const needle = true\n"))
+
+          const matches = yield* (yield* Ripgrep.Service).grep({
+            cwd: tmp.path,
+            pattern: "needle",
+            limit: 10,
+          })
+
+          expect(matches.map((item) => item.entry.path)).toContain(RelativePath.make("source.js"))
+        }),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ),
+  )
 })

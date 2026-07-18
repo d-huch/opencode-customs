@@ -174,3 +174,36 @@ export const SessionContextEpochTable = sqliteTable("session_context_epoch", {
   snapshot: text({ mode: "json" }).notNull().$type<SystemContext.Snapshot>(),
   baseline_seq: integer().notNull(),
 })
+
+export const SessionExecutionCheckpointTable = sqliteTable(
+  "session_execution_checkpoint",
+  {
+    session_id: text()
+      .$type<SessionSchema.ID>()
+      .primaryKey()
+      .references(() => SessionTable.id, { onDelete: "cascade" }),
+    runtime: text().$type<"v1" | "v2">().notNull().default("v2"),
+    execution_id: text().notNull(),
+    generation: integer().notNull(),
+    state: text()
+      .$type<
+        | "preparing"
+        | "streaming"
+        | "settling_tools"
+        | "continuing"
+        | "completed"
+        | "interrupted"
+        | "failed"
+      >()
+      .notNull(),
+    step: integer().notNull(),
+    assistant_message_id: text().$type<SessionMessage.ID>(),
+    owner_pid: integer().notNull(),
+    recoveries: integer().notNull().default(0),
+    error: text(),
+    time_started: integer().notNull(),
+    time_updated: integer().notNull(),
+    time_completed: integer(),
+  },
+  (table) => [index("session_execution_checkpoint_state_idx").on(table.state, table.time_updated)],
+)

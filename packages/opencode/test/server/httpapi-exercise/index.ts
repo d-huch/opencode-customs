@@ -84,6 +84,23 @@ function repositoryMap(value: unknown) {
   array(value.semantic.servers)
 }
 
+function repositoryDiagnostics(value: unknown) {
+  object(value)
+  boolean(value.enabled)
+  array(value.entries)
+  value.entries.forEach((entry) => {
+    object(entry)
+    check(typeof entry.id === "number", "repository diagnostic should have an id")
+    check(typeof entry.time === "number", "repository diagnostic should have a timestamp")
+    check(
+      entry.level === "info" || entry.level === "warning" || entry.level === "error",
+      "repository diagnostic should have a valid level",
+    )
+    check(typeof entry.stage === "string", "repository diagnostic should have a stage")
+    check(typeof entry.message === "string", "repository diagnostic should have a message")
+  })
+}
+
 const scenarios: Scenario[] = [
   http.protected
     .get("/global/health", "global.health")
@@ -169,6 +186,7 @@ const scenarios: Scenario[] = [
   http.protected.get("/command", "command.list").json(200, array, "status"),
   http.protected.get("/agent", "app.agents").json(200, array, "status"),
   http.protected.get("/skill", "app.skills").json(200, array, "status"),
+  http.protected.get("/extension", "app.extensions").json(200, object, "status"),
   http.protected.get("/lsp", "lsp.status").json(200, array),
   http.protected.get("/formatter", "formatter.status").json(200, array),
   http.protected.get("/config", "config.get").json(200, undefined, "status"),
@@ -692,6 +710,17 @@ const scenarios: Scenario[] = [
   http.protected.get("/api/location", "v2.location.get").json(200, object),
   http.protected.get("/api/repository-map", "v2.repositoryMap.get").json(200, locationData(repositoryMap)),
   http.protected.post("/api/repository-map/refresh", "v2.repositoryMap.refresh").json(200, locationData(repositoryMap)),
+  http.protected
+    .get("/api/repository-map/diagnostics", "v2.repositoryMap.diagnostics")
+    .json(200, locationData(repositoryDiagnostics)),
+  http.protected
+    .post("/api/repository-map/diagnostics", "v2.repositoryMap.configureDiagnostics")
+    .at((ctx) => ({
+      path: "/api/repository-map/diagnostics",
+      headers: ctx.headers(),
+      body: { enabled: true, clear: true },
+    }))
+    .json(200, locationData(repositoryDiagnostics)),
   http.protected.get("/api/agent", "v2.agent.list").json(200, locationData(array)),
   http.protected.get("/api/model", "v2.model.list").json(200, locationData(array)),
   http.protected.get("/api/provider", "v2.provider.list").json(200, locationData(array)),

@@ -4,6 +4,7 @@ import { Format } from "@/format"
 import { LSP } from "@/lsp/lsp"
 import { Vcs } from "@/project/vcs"
 import { Skill } from "@/skill"
+import { PluginBundle } from "@/plugin/bundle"
 import { Schema } from "effect"
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiSchema, OpenApi } from "effect/unstable/httpapi"
 import { Authorization } from "../middleware/authorization"
@@ -51,6 +52,7 @@ export const InstancePaths = {
   command: "/command",
   agent: "/agent",
   skill: "/skill",
+  extension: "/extension",
   lsp: "/lsp",
   formatter: "/formatter",
 } as const
@@ -164,6 +166,16 @@ export const InstanceApi = HttpApi.make("instance")
             identifier: "app.skills",
             summary: "List skills",
             description: "Get a list of all available skills in the OpenCode system.",
+          }),
+        ),
+        HttpApiEndpoint.get("extension", InstancePaths.extension, {
+          query: WorkspaceRoutingQuery,
+          success: PluginBundle.Overview,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "app.extensions",
+            summary: "List extensions",
+            description: "List ChatGPT/Codex plugin bundles and compact skill metadata available to OpenCode.",
           }),
         ),
         HttpApiEndpoint.get("lsp", InstancePaths.lsp, {

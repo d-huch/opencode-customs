@@ -56,6 +56,10 @@ import { SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionReminders } from "./reminders"
 import { SessionTools } from "./tools"
 import { LLMEvent } from "@opencode-ai/llm"
+import { normalizeSummary } from "@opencode-ai/core/session/compaction"
+import { RepositoryContextRouter } from "@opencode-ai/core/repository-context-router"
+import { ResponseLanguage } from "@opencode-ai/core/response-language"
+import { SessionExecutionCheckpoint } from "@opencode-ai/core/session/execution-checkpoint"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -101,6 +105,7 @@ function isOrphanedInterruptedTool(part: SessionV1.ToolPart) {
 
 export interface Interface {
   readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
+  readonly recover: () => Effect.Effect<void>
   readonly prompt: (input: PromptInput) => Effect.Effect<SessionV1.WithParts, Image.Error>
   readonly loop: (input: LoopInput) => Effect.Effect<SessionV1.WithParts>
   readonly shell: (input: ShellInput) => Effect.Effect<SessionV1.WithParts, Session.BusyError>
@@ -217,29 +222,39 @@ const layer = Layer.effect(
       if (!ag) return
       const mdl = ag.model
         ? yield* provider.getModel(ag.model.providerID, ag.model.modelID)
-        : ((yield* provider.getSmallModel(input.providerID)) ??
-          (yield* provider.getModel(input.providerID, input.modelID)))
-      const msgs = onlySubtasks
-        ? [{ role: "user" as const, content: subtasks.map((p) => p.prompt).join("\n") }]
-        : yield* MessageV2.toModelMessagesEffect(context, mdl)
-      const text = yield* llm
-        .stream({
-          agent: ag,
-          user: firstInfo,
-          system: [],
-          small: true,
-          tools: {},
-          model: mdl,
-          sessionID: input.session.id,
-          retries: 2,
-          messages: [{ role: "user", content: "Generate a title for this conversation:\n" }, ...msgs],
-        })
-        .pipe(
-          Stream.filter(LLMEvent.is.textDelta),
-          Stream.map((e) => e.text),
-          Stream.mkString,
-          Effect.orDie,
-        )
+        : yield* provider.getSmallModel(input.providerID)
+      const sameAsMain = mdl?.providerID === input.providerID && mdl.id === input.modelID
+      const text =
+        !mdl || sameAsMain
+          ? onlySubtasks
+            ? subtasks.map((p) => p.prompt).join(" ")
+            : firstUser.parts
+                .filter((part): part is SessionV1.TextPart => part.type === "text")
+                .map((part) => part.text)
+                .join(" ")
+          : yield* llm
+              .stream({
+                agent: ag,
+                user: firstInfo,
+                system: [],
+                small: true,
+                tools: {},
+                model: mdl,
+                sessionID: input.session.id,
+                retries: 2,
+                messages: [
+                  { role: "user", content: "Generate a title for this conversation:\n" },
+                  ...(onlySubtasks
+                    ? [{ role: "user" as const, content: subtasks.map((p) => p.prompt).join("\n") }]
+                    : yield* MessageV2.toModelMessagesEffect(context, mdl)),
+                ],
+              })
+              .pipe(
+                Stream.filter(LLMEvent.is.textDelta),
+                Stream.map((e) => e.text),
+                Stream.mkString,
+                Effect.orDie,
+              )
       const cleaned = text
         .replace(/<think>[\s\S]*?<\/think>\s*/g, "")
         .split("\n")
@@ -1078,12 +1093,51 @@ const layer = Layer.effect(
       throw new Error("Impossible")
     })
 
-    const runLoop: (sessionID: SessionID) => Effect.Effect<SessionV1.WithParts> = Effect.fn("SessionPrompt.run")(
-      function* (sessionID: SessionID) {
+    const runLoop: (
+      sessionID: SessionID,
+      checkpoint: SessionExecutionCheckpoint.Token,
+    ) => Effect.Effect<SessionV1.WithParts> = Effect.fn("SessionPrompt.run")(
+      function* (sessionID: SessionID, checkpoint: SessionExecutionCheckpoint.Token) {
         const ctx = yield* InstanceState.context
         let structured: unknown
         let step = 0
         const session = yield* sessions.get(sessionID).pipe(Effect.orDie)
+
+        if (checkpoint.recovered) {
+          const interrupted = yield* sessions.messages({ sessionID }).pipe(Effect.orDie)
+          yield* Effect.forEach(
+            interrupted.flatMap((message) =>
+              message.info.role === "assistant"
+                ? message.parts.filter(
+                    (part): part is SessionV1.ToolPart =>
+                      part.type === "tool" && (part.state.status === "pending" || part.state.status === "running"),
+                  )
+                : [],
+            ),
+            (part) => {
+              const end = Date.now()
+              return sessions.updatePart({
+                ...part,
+                state: {
+                  status: "error",
+                  input: part.state.input,
+                  error: "Tool execution interrupted before checkpoint completion",
+                  metadata: { interrupted: true, recovered: true },
+                  time: {
+                    start: part.state.status === "running" ? part.state.time.start : end,
+                    end,
+                  },
+                },
+              })
+            },
+            { discard: true },
+          )
+          yield* Effect.logWarning("recovering abandoned session execution", {
+            "session.id": sessionID,
+            executionID: checkpoint.executionID,
+            generation: checkpoint.generation,
+          })
+        }
 
         while (true) {
           yield* status.set(sessionID, { type: "busy" })
@@ -1091,6 +1145,37 @@ const layer = Layer.effect(
 
           let msgs = yield* MessageV2.filterCompactedEffect(sessionID).pipe(
             Effect.provideService(Database.Service, database),
+          )
+          const compactionEvidence = msgs.flatMap((message) => {
+            if (message.info.role === "user") {
+              return message.parts.flatMap((part) => {
+                if (part.type === "text" && part.synthetic !== true) return [part.text]
+                if (part.type !== "file") return []
+                return [part.filename, part.url.startsWith("data:") ? undefined : part.url].filter(
+                  (item): item is string => !!item,
+                )
+              })
+            }
+            if (message.info.summary) return []
+            return message.parts.flatMap((part) => {
+              if (part.type !== "tool" || part.state.status !== "completed") return []
+              return [part.state.title, part.state.output, JSON.stringify(part.state.metadata)]
+            })
+          })
+          yield* Effect.forEach(
+            msgs.flatMap((message) =>
+              message.info.role === "assistant" && message.info.summary
+                ? message.parts.filter(
+                    (part): part is SessionV1.TextPart =>
+                      part.type === "text" && part.metadata?.compaction_normalized !== true,
+                  )
+                : [],
+            ),
+            (part) => {
+              part.text = normalizeSummary({ text: part.text, evidence: compactionEvidence })
+              part.metadata = { ...part.metadata, compaction_normalized: true }
+              return sessions.updatePart(part)
+            },
           )
 
           const { user: lastUser, assistant: lastAssistant, finished: lastFinished, tasks } = MessageV2.latest(msgs)
@@ -1130,6 +1215,7 @@ const layer = Layer.effect(
           }
 
           step++
+          yield* SessionExecutionCheckpoint.advance(db, checkpoint, { state: "preparing", step })
           if (step === 1)
             yield* title({
               session,
@@ -1155,6 +1241,13 @@ const layer = Layer.effect(
               overflow: task.overflow,
             })
             if (result === "stop") break
+            const compacted = (yield* sessions.messages({ sessionID }).pipe(Effect.orDie)).findLast(
+              (message) => message.info.role === "assistant" && message.info.summary === true && !message.info.error,
+            )
+            const compactedText = compacted?.parts
+              .flatMap((part) => (part.type === "text" && part.text.trim() ? [part.text.trim()] : []))
+              .join("\n\n")
+            if (compactedText) yield* sys.repositoryRemember(compactedText)
             continue
           }
 
@@ -1215,12 +1308,22 @@ const layer = Layer.effect(
               assistantMessage: msg,
               sessionID,
               model,
+              checkpoint,
+              step,
             })
             .pipe(Effect.onInterrupt(() => finalizeInterruptedAssistant))
 
           const outcome: "break" | "continue" = yield* Effect.gen(function* () {
             const lastUserMsg = msgs.findLast((m) => m.info.role === "user")
-            const bypassAgentCheck = lastUserMsg?.parts.some((p) => p.type === "agent") ?? false
+            const requestUserMsg = MessageV2.latestUserRequest(msgs)
+            const responseLanguageSample = requestUserMsg?.parts
+              .flatMap((part) =>
+                part.type === "text" && part.synthetic !== true && part.text.trim() ? [part.text.trim()] : [],
+              )
+              .join("\n")
+              .slice(0, 240)
+            const responseLanguageInstruction = ResponseLanguage.instruction(responseLanguageSample ?? "")
+            const bypassAgentCheck = requestUserMsg?.parts.some((p) => p.type === "agent") ?? false
             const promptOps = yield* ops()
 
             const tools = yield* SessionTools.resolve({
@@ -1262,35 +1365,85 @@ const layer = Layer.effect(
               MessageV2.toModelMessagesEffect(msgs, model),
             ])
             const repositoryContext = yield* sys.repository({
-              query: (lastUserMsg?.parts ?? [])
+              query: (requestUserMsg?.parts ?? [])
                 .flatMap((part) => (part.type === "text" && part.synthetic !== true ? [part.text] : []))
                 .join("\n"),
-              files: (lastUserMsg?.parts ?? []).filter((part) => part.type === "file").map((part) => part.url),
+              files: (requestUserMsg?.parts ?? []).filter((part) => part.type === "file").map((part) => part.url),
+              budget: RepositoryContextRouter.contextBudget(model.limit.context),
             })
             const system = [
+              ...(responseLanguageInstruction ? [responseLanguageInstruction] : []),
               ...env,
               ...instructions,
               ...(mcpInstructions ? [mcpInstructions] : []),
               ...(skills ? [skills] : []),
               ...(repositoryContext ? [repositoryContext.text] : []),
             ]
-            const format = lastUser.format ?? { type: "text" as const }
+            const format = requestUserMsg?.info.format ?? lastUser.format ?? { type: "text" as const }
             if (format.type === "json_schema") system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
-            const result = yield* handle.process({
-              user: lastUser,
-              agent,
-              permission: session.permission,
-              sessionID,
-              parentSessionID: session.parentID,
-              system,
-              messages: [
-                ...modelMsgs,
-                ...(isLastStep ? [{ role: "assistant" as const, content: MAX_STEPS_PROMPT }] : []),
+            const requestMessages = [
+              ...modelMsgs,
+              ...(isLastStep ? [{ role: "assistant" as const, content: MAX_STEPS_PROMPT }] : []),
+            ]
+            const fitted = yield* compaction.fitRequest({
+              fixedSystem: [
+                ...(agent.prompt ? [agent.prompt] : SystemPrompt.provider(model)),
+                ...(lastUser.system ? [lastUser.system] : []),
               ],
+              system,
+              messages: requestMessages,
               tools,
               model,
-              toolChoice: format.type === "json_schema" ? "required" : undefined,
+              requiredTools: format.type === "json_schema" ? ["StructuredOutput"] : undefined,
             })
+            msg.tokens.input = fitted.tokens
+            yield* sessions.updateMessage(msg)
+            if (fitted.overflow) {
+              yield* sys.repositoryTrace({
+                level: "warning",
+                stage: "model",
+                message: `Request uses ${fitted.tokens}/${fitted.limit} safe context tokens after fitting; compacting history before model execution`,
+              })
+              yield* sessions.removeMessage({ sessionID, messageID: msg.id })
+              yield* compaction.create({ sessionID, agent: lastUser.agent, model: lastUser.model, auto: true })
+              return "continue" as const
+            }
+            yield* sys.repositoryTrace({
+              level: fitted.compressed ? "warning" : "info",
+              stage: "model",
+              message: `Request started: ${model.providerID}/${model.id}; ${fitted.tokens}/${fitted.limit} safe context tokens (${fitted.usage}%); ${requestMessages.length} history messages; ${Object.keys(fitted.tools).length}/${Object.keys(tools).length} tools${fitted.compressed ? "; context fitted" : ""}`,
+            })
+            const result = yield* handle
+              .process({
+                user: lastUser,
+                agent,
+                permission: session.permission,
+                sessionID,
+                parentSessionID: session.parentID,
+                system: fitted.system,
+                messages: requestMessages,
+                tools: fitted.tools,
+                model,
+                toolChoice: format.type === "json_schema" ? "required" : undefined,
+              })
+              .pipe(
+                Effect.catchCause((cause) =>
+                  sys
+                    .repositoryTrace({
+                      level: "error",
+                      stage: "model",
+                      message: `Request failed: ${Cause.pretty(cause).split("\n")[0] || "Unknown error"}`,
+                    })
+                    .pipe(Effect.andThen(Effect.failCause(cause))),
+                ),
+              )
+            yield* sys.repositoryTrace({
+              level: result === "stop" ? "warning" : "info",
+              stage: "model",
+              message: `Request finished: ${result}`,
+            })
+            if (result !== "stop")
+              yield* SessionExecutionCheckpoint.advance(db, checkpoint, { state: "continuing", step: step + 1 })
 
             if (structured !== undefined) {
               handle.message.structured = structured
@@ -1350,7 +1503,59 @@ const layer = Layer.effect(
     const loop: (input: LoopInput) => Effect.Effect<SessionV1.WithParts> = Effect.fn("SessionPrompt.loop")(function* (
       input: LoopInput,
     ) {
-      return yield* state.ensureRunning(input.sessionID, lastAssistant(input.sessionID), runLoop(input.sessionID))
+      const work = Effect.gen(function* () {
+        const checkpoint = yield* SessionExecutionCheckpoint.begin(db, input.sessionID, "v1")
+        return yield* runLoop(input.sessionID, checkpoint).pipe(
+          Effect.onExit((exit) =>
+            SessionExecutionCheckpoint.finish(
+              db,
+              checkpoint,
+              exit._tag === "Success"
+                ? exit.value.info.role === "assistant" && exit.value.info.error
+                  ? { state: "failed", error: JSON.stringify(exit.value.info.error) }
+                  : { state: "completed" }
+                : Cause.hasInterrupts(exit.cause)
+                  ? { state: "interrupted", error: Cause.pretty(exit.cause) }
+                  : { state: "failed", error: Cause.pretty(exit.cause) },
+            ).pipe(Effect.asVoid),
+          ),
+        )
+      })
+      return yield* state.ensureRunning(input.sessionID, lastAssistant(input.sessionID), work)
+    })
+
+    const recovering = new Set<SessionID>()
+    const recover = Effect.fn("SessionPrompt.recover")(function* () {
+      const instance = yield* InstanceState.context
+      yield* Effect.forEach(
+        yield* SessionExecutionCheckpoint.abandoned(db, "v1"),
+        (sessionID) =>
+          sessions.get(sessionID).pipe(
+            Effect.flatMap((session) => {
+              if (session.directory !== instance.directory || recovering.has(sessionID)) return Effect.void
+              recovering.add(sessionID)
+              return loop({ sessionID }).pipe(
+                Effect.asVoid,
+                Effect.catchCause((cause) =>
+                  Effect.logError("failed to recover abandoned session execution", {
+                    "session.id": sessionID,
+                    error: Cause.pretty(cause),
+                  }),
+                ),
+                Effect.ensuring(Effect.sync(() => recovering.delete(sessionID))),
+                Effect.forkIn(scope),
+                Effect.asVoid,
+              )
+            }),
+            Effect.catchCause((cause) =>
+              Effect.logError("failed to inspect abandoned session execution", {
+                "session.id": sessionID,
+                error: Cause.pretty(cause),
+              }),
+            ),
+          ),
+        { discard: true },
+      )
     })
 
     const shell: (input: ShellInput) => Effect.Effect<SessionV1.WithParts, Session.BusyError> = Effect.fn(
@@ -1489,6 +1694,7 @@ const layer = Layer.effect(
 
     return Service.of({
       cancel,
+      recover,
       prompt,
       loop,
       shell,

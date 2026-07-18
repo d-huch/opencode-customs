@@ -56,7 +56,7 @@ const build = (messages: Message[] = [], providers: Provider[] = []): Context | 
     limit,
     input: message.tokens.input,
     total,
-    usage: limit ? Math.round((total / limit) * 100) : null,
+    usage: limit ? Math.min(100, Math.round((total / limit) * 100)) : null,
   }
 }
 

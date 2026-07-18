@@ -11,6 +11,7 @@ import { popularProviders } from "@/hooks/use-providers"
 import { SettingsListV2 } from "./parts/list"
 import { SettingsRowV2 } from "./parts/row"
 import "./settings-v2.css"
+import { SettingsModelContextLimit } from "../settings-model-context-limit"
 
 type ModelItem = ReturnType<ReturnType<typeof useModels>["list"]>[number]
 
@@ -110,8 +111,21 @@ export const SettingsModelsV2: Component = () => {
                       {(item) => {
                         const key = { providerID: item.provider.id, modelID: item.id }
                         return (
-                          <SettingsRowV2 title={item.name} description="">
-                            <div>
+                          <SettingsRowV2
+                            title={item.name}
+                            description={language.t("settings.models.context.current", {
+                              limit: item.limit.context.toLocaleString(language.intl()),
+                            })}
+                          >
+                            <div class="flex flex-wrap items-center justify-end gap-3">
+                              <SettingsModelContextLimit
+                                providerID={item.provider.id}
+                                modelID={item.id}
+                                context={item.limit.context}
+                                input={item.limit.input}
+                                output={item.limit.output}
+                                variant="v2"
+                              />
                               <Switch
                                 checked={models.visible(key)}
                                 onChange={(checked) => {

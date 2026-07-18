@@ -11,6 +11,8 @@ import type {
   SessionsActiveOutput,
   SessionsGetInput,
   SessionsGetOutput,
+  SessionsRemoveInput,
+  SessionsRemoveOutput,
   SessionsSwitchAgentInput,
   SessionsSwitchAgentOutput,
   SessionsSwitchModelInput,
@@ -116,6 +118,10 @@ import type {
   RepositoryMapGetOutput,
   RepositoryMapRefreshInput,
   RepositoryMapRefreshOutput,
+  RepositoryMapDiagnosticsInput,
+  RepositoryMapDiagnosticsOutput,
+  RepositoryMapConfigureDiagnosticsInput,
+  RepositoryMapConfigureDiagnosticsOutput,
 } from "./types"
 import { ClientError } from "./client-error"
 
@@ -347,6 +353,17 @@ export function make(options: ClientOptions) {
           },
           requestOptions,
         ).then((value) => value.data),
+      remove: (input: SessionsRemoveInput, requestOptions?: RequestOptions) =>
+        request<SessionsRemoveOutput>(
+          {
+            method: "DELETE",
+            path: `/api/session/${encodeURIComponent(input.sessionID)}`,
+            successStatus: 204,
+            declaredStatuses: [404, 400, 401],
+            empty: true,
+          },
+          requestOptions,
+        ),
       switchAgent: (input: SessionsSwitchAgentInput, requestOptions?: RequestOptions) =>
         request<SessionsSwitchAgentOutput>(
           {
@@ -1010,6 +1027,31 @@ export function make(options: ClientOptions) {
             method: "POST",
             path: `/api/repository-map/refresh`,
             query: { location: input?.["location"] },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      diagnostics: (input?: RepositoryMapDiagnosticsInput, requestOptions?: RequestOptions) =>
+        request<RepositoryMapDiagnosticsOutput>(
+          {
+            method: "GET",
+            path: `/api/repository-map/diagnostics`,
+            query: { location: input?.["location"] },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      configureDiagnostics: (input: RepositoryMapConfigureDiagnosticsInput, requestOptions?: RequestOptions) =>
+        request<RepositoryMapConfigureDiagnosticsOutput>(
+          {
+            method: "POST",
+            path: `/api/repository-map/diagnostics`,
+            query: { location: input["location"] },
+            body: { enabled: input["enabled"], clear: input["clear"] },
             successStatus: 200,
             declaredStatuses: [401, 400],
             empty: false,

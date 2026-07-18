@@ -24,6 +24,7 @@ import { SessionID } from "@/session/schema"
 import { Auth } from "@/auth"
 import { EffectBridge } from "@/effect/bridge"
 import { RuntimeFlags } from "@/effect/runtime-flags"
+import { acquireModel } from "@/local-agent-runtime/resource-governor"
 import * as Option from "effect/Option"
 import * as OtelTracer from "@effect/opentelemetry/Tracer"
 import { LLMAISDK } from "./llm/ai-sdk"
@@ -100,6 +101,16 @@ const live: Layer.Layer<
           auth.get(input.model.providerID),
         ],
         { concurrency: "unbounded" },
+      )
+      yield* Effect.acquireRelease(
+        Effect.tryPromise(() =>
+          acquireModel({
+            providerID: input.model.providerID,
+            apiURL: typeof item.options.baseURL === "string" ? item.options.baseURL : input.model.api.url,
+            signal: input.abort,
+          }),
+        ),
+        (permit) => Effect.promise(() => permit.release()),
       )
 
       const isWorkflow = language instanceof GitLabWorkflowLanguageModel

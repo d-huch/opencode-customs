@@ -261,6 +261,54 @@ function setEnvScoped(key: string, value: string) {
 }
 
 describe("provider HttpApi", () => {
+  it.instance(
+    "returns an unconfigured LM Studio capability snapshot",
+    Effect.gen(function* () {
+      const directory = (yield* TestInstance).directory
+      const response = yield* request("/provider/lmstudio/probe", {
+        headers: { "x-opencode-directory": directory },
+      })
+
+      expect(response.status).toBe(200)
+      expect(yield* response.json).toMatchObject({
+        provider: "lmstudio",
+        status: "unconfigured",
+        api: {
+          native: false,
+          openai: false,
+          chatCompletions: false,
+          responses: false,
+          embeddings: false,
+        },
+        models: [],
+      })
+    }),
+    projectOptions,
+  )
+
+  it.instance(
+    "returns the Local Agent Runtime resource snapshot",
+    Effect.gen(function* () {
+      const directory = (yield* TestInstance).directory
+      const response = yield* request("/provider/runtime/resources", {
+        headers: { "x-opencode-directory": directory },
+      })
+
+      expect(response.status).toBe(200)
+      const body = (yield* response.json) as {
+        status: string
+        limits: { modelConcurrency: number }
+        memory: { availableBytes: number }
+        activity: { activeModelRequests: number }
+      }
+      expect(["healthy", "pressured", "critical"]).toContain(body.status)
+      expect(body.limits.modelConcurrency).toBe(1)
+      expect(typeof body.memory.availableBytes).toBe("number")
+      expect(typeof body.activity.activeModelRequests).toBe("number")
+    }),
+    projectOptions,
+  )
+
   it.instance.skip(
     "returns public v2 provider not found errors",
     Effect.gen(function* () {

@@ -155,6 +155,24 @@ export default {
         );
       `)
       yield* tx.run(`
+        CREATE TABLE \`session_execution_checkpoint\` (
+          \`session_id\` text PRIMARY KEY,
+          \`runtime\` text DEFAULT 'v2' NOT NULL,
+          \`execution_id\` text NOT NULL,
+          \`generation\` integer NOT NULL,
+          \`state\` text NOT NULL,
+          \`step\` integer NOT NULL,
+          \`assistant_message_id\` text,
+          \`owner_pid\` integer NOT NULL,
+          \`recoveries\` integer DEFAULT 0 NOT NULL,
+          \`error\` text,
+          \`time_started\` integer NOT NULL,
+          \`time_updated\` integer NOT NULL,
+          \`time_completed\` integer,
+          CONSTRAINT \`fk_session_execution_checkpoint_session_id_session_id_fk\` FOREIGN KEY (\`session_id\`) REFERENCES \`session\`(\`id\`) ON DELETE CASCADE
+        );
+      `)
+      yield* tx.run(`
         CREATE TABLE \`session_input\` (
           \`id\` text PRIMARY KEY,
           \`session_id\` text NOT NULL,
@@ -246,6 +264,9 @@ export default {
       )
       yield* tx.run(`CREATE INDEX \`part_message_id_id_idx\` ON \`part\` (\`message_id\`,\`id\`);`)
       yield* tx.run(`CREATE INDEX \`part_session_idx\` ON \`part\` (\`session_id\`);`)
+      yield* tx.run(
+        `CREATE INDEX \`session_execution_checkpoint_state_idx\` ON \`session_execution_checkpoint\` (\`state\`,\`time_updated\`);`,
+      )
       yield* tx.run(
         `CREATE INDEX \`session_input_session_pending_delivery_seq_idx\` ON \`session_input\` (\`session_id\`,\`promoted_seq\`,\`delivery\`,\`admitted_seq\`);`,
       )

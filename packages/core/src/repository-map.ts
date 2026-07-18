@@ -22,7 +22,7 @@ const MAX_EDGES = 1_000
 const MAX_MODULES = 20
 const MAX_RELATIONSHIPS = 30
 const MAX_LANDMARKS_PER_KIND = 6
-const MAX_SEMANTIC_FILES = 48
+const MAX_SEMANTIC_FILES = 8
 
 const manifestNames = new Set([
   "package.json",
@@ -133,6 +133,15 @@ export type FileEdge = RepositoryMap.FileEdge
 export const Semantic = RepositoryMap.Semantic
 export type Semantic = RepositoryMap.Semantic
 
+export const DiagnosticEntry = RepositoryMap.DiagnosticEntry
+export type DiagnosticEntry = RepositoryMap.DiagnosticEntry
+
+export const Diagnostics = RepositoryMap.Diagnostics
+export type Diagnostics = RepositoryMap.Diagnostics
+
+export const DiagnosticsConfig = RepositoryMap.DiagnosticsConfig
+export type DiagnosticsConfig = RepositoryMap.DiagnosticsConfig
+
 export const Info = RepositoryMap.Info
 export type Info = RepositoryMap.Info
 
@@ -170,7 +179,15 @@ export interface Interface {
 export class Service extends Context.Service<Service, Interface>()("@opencode/v2/RepositoryMap") {}
 
 const key = SystemContext.Key.make("core/repository-map")
-const MapCodec = Schema.toCodecJson(Info)
+const ModelContext = Schema.Struct({
+  status: Schema.Literals(["complete", "truncated"]),
+  languages: Schema.Array(Schema.String),
+  areas: Schema.Array(Schema.String),
+  relationships: Schema.Array(Schema.String),
+  landmarks: Schema.Array(Schema.String),
+})
+type ModelContext = typeof ModelContext.Type
+const MapCodec = Schema.toCodecJson(ModelContext)
 
 const layer = Layer.effect(
   Service,
@@ -183,7 +200,11 @@ const layer = Layer.effect(
     const scope = yield* Scope.Scope
     const state = yield* Ref.make<Indexed | undefined>(undefined)
     const indexLock = Semaphore.makeUnsafe(1)
-    const semanticLock = Semaphore.makeUnsafe(1)
+    const semanticQueue = yield* Ref.make<{
+      readonly files: ReadonlySet<string>
+      readonly replace: boolean
+      readonly running: boolean
+    }>({ files: new Set(), replace: false, running: false })
 
     const markSemantic = (status: Semantic["status"]) =>
       Ref.update(state, (current) => {
@@ -267,6 +288,32 @@ const layer = Layer.effect(
       )
     })
 
+    const drainSemantic = Effect.fn("RepositoryMap.drainSemantic")(function* () {
+      while (true) {
+        const pending = yield* Ref.modify(semanticQueue, (current) => {
+          if (current.files.size === 0) return [undefined, { ...current, running: false }]
+          return [
+            { files: Array.from(current.files), replace: current.replace },
+            { files: new Set<string>(), replace: false, running: true },
+          ]
+        })
+        if (!pending) return
+        yield* markSemantic("indexing")
+        yield* enrich(pending.files, pending.replace).pipe(
+          Effect.catch((error) =>
+            indexLock.withPermit(failSemantic(pending.replace)).pipe(
+              Effect.andThen(
+                Effect.logWarning("repository map semantic index unavailable", {
+                  directory: location.directory,
+                  error,
+                }),
+              ),
+            ),
+          ),
+        )
+      }
+    })
+
     const scheduleSemantic = Effect.fn("RepositoryMap.scheduleSemantic")(function* (
       files: ReadonlyArray<string>,
       replace: boolean,
@@ -276,22 +323,16 @@ const layer = Layer.effect(
         yield* markSemantic("unavailable")
         return
       }
-      yield* markSemantic("indexing")
-      yield* semanticLock
-        .withPermit(enrich(files, replace))
-        .pipe(
-          Effect.catch((error) =>
-            indexLock.withPermit(failSemantic(replace)).pipe(
-              Effect.andThen(
-                Effect.logWarning("repository map semantic index unavailable", {
-                  directory: location.directory,
-                  error,
-                }),
-              ),
-            ),
-          ),
-          Effect.forkIn(scope, { startImmediately: true }),
-        )
+      const start = yield* Ref.modify(semanticQueue, (current) => [
+        !current.running,
+        {
+          files: new Set((replace ? files : [...current.files, ...files]).slice(0, MAX_SEMANTIC_FILES)),
+          replace: current.replace || replace,
+          running: true,
+        },
+      ])
+      if (!start) return
+      yield* drainSemantic().pipe(Effect.forkIn(scope, { startImmediately: true }))
     })
 
     const build = Effect.fn("RepositoryMap.build")(function* () {
@@ -487,10 +528,10 @@ const layer = Layer.effect(
             : SystemContext.make({
                 key,
                 codec: MapCodec,
-                load: Effect.succeed(info),
-                baseline: render,
+                load: Effect.succeed(modelContext(info)),
+                baseline: renderModelContext,
                 update: (_previous, current) =>
-                  `The repository structure changed. Replace the previous repository map with this one:\n\n${render(current)}`,
+                  `The repository outline changed. Replace the previous outline with this one:\n\n${renderModelContext(current)}`,
               }),
         ),
       ),
@@ -722,6 +763,34 @@ export function render(info: Info) {
   return lines.join("\n")
 }
 
+function modelContext(info: Info): ModelContext {
+  return ModelContext.make({
+    status: info.status === "truncated" ? "truncated" : "complete",
+    languages: info.languages.map((item) => item.name).toSorted(),
+    areas: info.modules
+      .map((module) =>
+        [module.path, module.name, ...module.manifests, ...module.entrypoints].filter(Boolean).join("; "),
+      )
+      .toSorted(),
+    relationships: info.relationships.map((item) => `${item.from} -> ${item.to}`).toSorted(),
+    landmarks: info.landmarks.map((item) => `${item.kind}: ${item.path}`).toSorted(),
+  })
+}
+
+function renderModelContext(info: ModelContext) {
+  return [
+    `<repository_outline status="${info.status}">`,
+    `Languages: ${info.languages.join(", ") || "unknown"}`,
+    ...(info.areas.length ? ["Project areas:", ...info.areas.map((item) => `- ${item}`)] : []),
+    ...(info.relationships.length
+      ? ["Observed local relationships:", ...info.relationships.map((item) => `- ${item}`)]
+      : []),
+    ...(info.landmarks.length ? ["Navigation landmarks:", ...info.landmarks.map((item) => `- ${item}`)] : []),
+    "</repository_outline>",
+    "This compact outline is a navigation aid, not proof that omitted files or relationships do not exist.",
+  ].join("\n")
+}
+
 function indexed(input: Input): Indexed {
   const files = input.files.map(normalize).filter(Boolean)
   const imports = group(input.imports ?? [], (item) => normalize(item.path))
@@ -741,10 +810,7 @@ function indexed(input: Input): Indexed {
 function dedupeImports(imports: ReadonlyArray<Import>) {
   return Array.from(
     new Map(
-      imports.map((item) => [
-        `${normalize(item.path)}\0${importSpecifier(item.text) ?? item.text.trim()}`,
-        item,
-      ]),
+      imports.map((item) => [`${normalize(item.path)}\0${importSpecifier(item.text) ?? item.text.trim()}`, item]),
     ).values(),
   )
 }
@@ -768,6 +834,7 @@ function parseSource(file: string, content?: string) {
 }
 
 function scanSource(file: string, content: string) {
+  if (typeof Bun === "undefined") return undefined
   const extension = path.posix.extname(file).toLowerCase()
   if (extension === ".ts") return new Bun.Transpiler({ loader: "ts" }).scan(content)
   if (extension === ".tsx") return new Bun.Transpiler({ loader: "tsx" }).scan(content)

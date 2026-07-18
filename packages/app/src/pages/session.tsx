@@ -81,6 +81,7 @@ import {
   sessionPanelWidthMax,
 } from "@/pages/session/session-panel-width"
 import { SessionSidePanel } from "@/pages/session/session-side-panel"
+import { RepositoryDiagnosticsPanel } from "@/components/repository-diagnostics-panel"
 import { sessionPanelLayout } from "@/pages/session/session-panel-layout"
 import { SessionReviewEmptyChangesV2 } from "@opencode-ai/session-ui/v2/session-review-empty-changes-v2"
 import { SessionReviewEmptyNoGitV2 } from "@opencode-ai/session-ui/v2/session-review-empty-no-git-v2"
@@ -2159,6 +2160,10 @@ export default function Page() {
           </Match>
         </Switch>
       </div>
+
+      <Show when={params.id && !mobileChanges()}>
+        <RepositoryDiagnosticsPanel />
+      </Show>
 
       <Show when={(params.id || !newSessionDesign()) && !mobileChanges()}>
         {(_) => {

@@ -552,7 +552,7 @@ const layer = Layer.effect(
   }),
 )
 
-const MAX_RELATION_SYMBOLS = 48
+const MAX_RELATION_SYMBOLS = 12
 const fileURL = Option.liftThrowable(fileURLToPath)
 const semanticClassKinds = new Set([5, 23])
 const semanticCallableKinds = new Set([6, 9, 12])
@@ -602,7 +602,7 @@ export function enrichRepository(lsp: Interface, input: RepositorySemantic.Input
           ),
         )
       },
-      { concurrency: 2 },
+      { concurrency: 1 },
     )
     const servers = (yield* lsp.status()).map((item) => item.name).toSorted()
     const active = documents.filter((item): item is NonNullable<typeof item> => item !== undefined)
@@ -635,7 +635,7 @@ export function enrichRepository(lsp: Interface, input: RepositorySemantic.Input
           Effect.timeout("15 seconds"),
           Effect.catch(() => Effect.succeed([])),
         ),
-      { concurrency: 3 },
+      { concurrency: 1 },
     )
 
     return {
@@ -677,14 +677,14 @@ export function searchRepository(lsp: Interface, input: RepositorySemantic.Searc
           if (key && !result.has(key)) result.set(key, absolute)
           return result
         }, new Map<string, string>()).values(),
-      ).slice(0, 3),
+      ).slice(0, 2),
       (file) =>
         Effect.gen(function* () {
           const servers = semanticServers(file)
           if (!(yield* lsp.hasClients(file, servers))) return
           yield* lsp.touchFile(file, undefined, servers)
         }).pipe(Effect.timeout("8 seconds"), Effect.catch(() => Effect.void)),
-      { concurrency: 2, discard: true },
+      { concurrency: 1, discard: true },
     )
 
     const query = input.query.toLocaleLowerCase()
@@ -698,9 +698,9 @@ export function searchRepository(lsp: Interface, input: RepositorySemantic.Searc
         const rightExact = right.symbol.name.toLocaleLowerCase() === query ? 0 : 1
         return leftExact - rightExact || left.symbol.path.localeCompare(right.symbol.path)
       })
-      .slice(0, 8)
+      .slice(0, 6)
     const edges = yield* Effect.forEach(
-      symbols.slice(0, 4),
+      symbols.slice(0, 2),
       (item) =>
         Effect.gen(function* () {
           const absolute = path.join(input.directory, item.symbol.path)
@@ -718,7 +718,7 @@ export function searchRepository(lsp: Interface, input: RepositorySemantic.Searc
             ...callEdges(item.symbol.path, calls, input.directory),
           ]
         }).pipe(Effect.timeout("8 seconds"), Effect.catch(() => Effect.succeed([]))),
-      { concurrency: 2 },
+      { concurrency: 1 },
     )
     return {
       query: input.query,

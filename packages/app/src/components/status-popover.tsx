@@ -3,16 +3,14 @@ import { Icon } from "@opencode-ai/ui/icon"
 import { IconButtonV2 } from "@opencode-ai/ui/v2/icon-button-v2"
 import { Icon as IconV2 } from "@opencode-ai/ui/v2/icon"
 import { Popover } from "@opencode-ai/ui/popover"
-import { Suspense, createMemo, createSignal, lazy, Show, type JSX } from "solid-js"
+import { createMemo, createSignal, Show, type JSX } from "solid-js"
 import { useLanguage } from "@/context/language"
 import { ServerConnection, useServer } from "@/context/server"
 import { useServerSDK } from "@/context/server-sdk"
 import { useSync } from "@/context/sync"
 import { useGlobal } from "@/context/global"
 import { hasNonBlockingServiceIssue, serverStatusDotClass } from "./status-popover-indicator"
-
-const Body = lazy(() => import("./status-popover-body").then((x) => ({ default: x.StatusPopoverBody })))
-const ServerBody = lazy(() => import("./status-popover-body").then((x) => ({ default: x.StatusPopoverServerBody })))
+import { StatusPopoverBody as Body, StatusPopoverServerBody as ServerBody } from "./status-popover-body"
 
 export function StatusPopover() {
   const language = useLanguage()
@@ -60,13 +58,7 @@ export function StatusPopover() {
       shift={-168}
     >
       <Show when={shown()}>
-        <Suspense
-          fallback={
-            <div class="w-[360px] h-14 rounded-xl bg-background-strong shadow-[var(--shadow-lg-border-base)]" />
-          }
-        >
-          <Body shown={shown} />
-        </Suspense>
+        <Body shown={shown} />
       </Show>
     </Popover>
   )
@@ -142,15 +134,7 @@ type StatusPopoverState = {
 }
 
 function StatusPopoverBody(props: { shown: boolean; children: JSX.Element }) {
-  return (
-    <Show when={props.shown}>
-      <Suspense
-        fallback={<div class="w-[360px] h-14 rounded-xl bg-background-strong shadow-[var(--shadow-lg-border-base)]" />}
-      >
-        {props.children}
-      </Suspense>
-    </Show>
-  )
+  return <Show when={props.shown}>{props.children}</Show>
 }
 
 function StatusPopoverView(props: { state: StatusPopoverState }) {

@@ -26,6 +26,7 @@ import { useSDK } from "@/context/sdk"
 import { useSync } from "@/context/sync"
 import { createSessionTabs } from "@/pages/session/helpers"
 import { showToast } from "@/utils/toast"
+import { SessionContextUsage } from "@/components/session-context-usage"
 import { PromptInputV2, type PromptInputV2Suggestion } from "@opencode-ai/session-ui/v2/prompt-input"
 import {
   createPromptInputV2Controller,
@@ -58,6 +59,7 @@ export function PromptInputV2Composer(props: PromptInputV2ComposerProps) {
       <PromptInputV2
         controller={props.controller}
         class={props.class}
+        contextControl={<SessionContextUsage variant="compact" />}
         modelControl={
           <PromptInputV2ModelControl
             loading={props.controller.model.loading}

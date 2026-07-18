@@ -7,6 +7,7 @@ import { and, asc, desc, eq, gt, like, lt, or, type SQL } from "drizzle-orm"
 import { ProjectV2 } from "./project"
 import { WorkspaceV2 } from "./workspace"
 import { ModelV2 } from "./model"
+import { ProviderV2 } from "./provider"
 import { Location } from "./location"
 import { SessionMessage } from "./session/message"
 import { Prompt } from "./session/prompt"
@@ -114,6 +115,7 @@ export interface Interface {
   readonly list: (input?: ListInput) => Effect.Effect<SessionSchema.Info[]>
   readonly create: (input: CreateInput) => Effect.Effect<SessionSchema.Info>
   readonly get: (sessionID: SessionSchema.ID) => Effect.Effect<SessionSchema.Info, NotFoundError>
+  readonly remove: (sessionID: SessionSchema.ID) => Effect.Effect<void, NotFoundError>
   readonly messages: (input: {
     sessionID: SessionSchema.ID
     limit?: number
@@ -265,6 +267,30 @@ const layer = Layer.effect(
         if (!session) return yield* new NotFoundError({ sessionID })
         return session
       }),
+      remove: Effect.fn("V2Session.remove")((sessionID) =>
+        Effect.uninterruptible(
+          Effect.gen(function* () {
+            const row = yield* db
+              .select()
+              .from(SessionTable)
+              .where(eq(SessionTable.id, sessionID))
+              .get()
+              .pipe(Effect.orDie)
+            if (!row) return yield* new NotFoundError({ sessionID })
+
+            yield* execution.interrupt(sessionID)
+            const children = yield* db
+              .select({ id: SessionTable.id })
+              .from(SessionTable)
+              .where(eq(SessionTable.parent_id, sessionID))
+              .all()
+              .pipe(Effect.orDie)
+            yield* Effect.forEach(children, (child) => result.remove(child.id), { discard: true })
+            yield* events.publish(SessionV1.Event.Deleted, { sessionID, info: legacyInfo(row) })
+            yield* events.remove(sessionID)
+          }),
+        ),
+      ),
       list: Effect.fn("V2Session.list")(function* (input = {}) {
         const direction = input.anchor?.direction ?? "next"
         const requestedOrder = input.order ?? "desc"
@@ -470,6 +496,61 @@ const resolvePrompt = (input: PromptInput.Prompt) =>
       }
     }),
   })
+
+function legacyInfo(row: typeof SessionTable.$inferSelect) {
+  return SessionV1.SessionInfo.make({
+    id: row.id,
+    slug: row.slug,
+    projectID: row.project_id,
+    workspaceID: row.workspace_id ?? undefined,
+    directory: row.directory,
+    path: row.path ?? undefined,
+    parentID: row.parent_id ?? undefined,
+    summary:
+      row.summary_additions !== null || row.summary_deletions !== null || row.summary_files !== null
+        ? {
+            additions: row.summary_additions ?? 0,
+            deletions: row.summary_deletions ?? 0,
+            files: row.summary_files ?? 0,
+            diffs: row.summary_diffs ?? undefined,
+          }
+        : undefined,
+    cost: row.cost,
+    tokens: {
+      input: row.tokens_input,
+      output: row.tokens_output,
+      reasoning: row.tokens_reasoning,
+      cache: { read: row.tokens_cache_read, write: row.tokens_cache_write },
+    },
+    share: row.share_url ? { url: row.share_url } : undefined,
+    title: row.title,
+    agent: row.agent ?? undefined,
+    model: row.model
+      ? {
+          id: ModelV2.ID.make(row.model.id),
+          providerID: ProviderV2.ID.make(row.model.providerID),
+          variant: row.model.variant,
+        }
+      : undefined,
+    version: row.version,
+    metadata: row.metadata ?? undefined,
+    time: {
+      created: row.time_created,
+      updated: row.time_updated,
+      compacting: row.time_compacting ?? undefined,
+      archived: row.time_archived ?? undefined,
+    },
+    permission: row.permission ?? undefined,
+    revert: row.revert
+      ? {
+          messageID: SessionV1.MessageID.make(row.revert.messageID),
+          partID: row.revert.partID ? SessionV1.PartID.make(row.revert.partID) : undefined,
+          snapshot: row.revert.snapshot,
+          diff: row.revert.diff,
+        }
+      : undefined,
+  })
+}
 
 export const node = makeGlobalNode({
   service: Service,

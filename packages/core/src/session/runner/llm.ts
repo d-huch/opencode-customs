@@ -23,10 +23,12 @@ import { SystemContextRegistry } from "../../system-context/registry"
 import { SkillGuidance } from "../../skill/guidance"
 import { ReferenceGuidance } from "../../reference/guidance"
 import { RepositoryContextRouter } from "../../repository-context-router"
+import { ResponseLanguage } from "../../response-language"
 import { ToolRegistry } from "../../tool/registry"
 import { ToolOutputStore } from "../../tool-output-store"
 import { SessionContextEpoch } from "../context-epoch"
 import { SessionCompaction } from "../compaction"
+import { SessionExecutionCheckpoint } from "../execution-checkpoint"
 import { SessionEvent } from "../event"
 import { SessionHistory } from "../history"
 import { SessionInput } from "../input"
@@ -50,8 +52,8 @@ import { llmClient } from "../../effect/app-node-platform"
  * - Session ownership and controls
  *   - [x] Coordinate one local active drain per Session; explicit resumes join and prompt wakeups coalesce.
  *   - [ ] Replace local ownership with durable multi-node ownership when clustered.
- *   - [ ] Mark busy, retrying, idle, interrupted, or terminal-failure status durably.
- *   - [ ] Honor interruption and reject stale work after runtime attachment replacement.
+ *   - [x] Mark active, interrupted, completed, or terminal-failure status durably.
+ *   - [x] Recover abandoned local execution at a fresh provider boundary and reject stale checkpoint writes.
  *   - [x] Honor optional agent step limits.
  *   - [ ] Bound provider retries and repeated identical tool calls.
  *
@@ -84,7 +86,8 @@ import { llmClient } from "../../effect/app-node-platform"
  *   - [ ] Update title, summaries, compaction state, and cleanup in bounded background work.
  *
  * Use `llm.stream(request)` for each provider turn. Keep tool execution and continuation here.
- * Durable continuation recovery remains a separate future slice with an explicit retry policy.
+ * Abandoned local continuation recovery resumes from durable projected history. Provider failures remain terminal
+ * until an explicit resume or a new durable prompt to avoid an unbounded local-model crash loop.
  *
  * The current slice loads V2 history, translates it, resolves a model through a core service, and persists one
  * provider turn. Registry definitions are advertised, local tool calls are settled durably, and an
@@ -108,7 +111,12 @@ const layer = Layer.effect(
     const config = yield* Config.Service
     const snapshots = yield* Snapshot.Service
     const db = (yield* Database.Service).db
-    const compaction = SessionCompaction.make({ events, llm, config: yield* config.entries() })
+    const compaction = SessionCompaction.make({
+      events,
+      llm,
+      config: yield* config.entries(),
+      remember: repositoryContextRouter.remember,
+    })
     const getSession = Effect.fn("SessionRunner.getSession")(function* (sessionID: SessionSchema.ID) {
       const session = yield* store.get(sessionID)
       if (!session) return yield* Effect.die(`Session not found: ${sessionID}`)
@@ -118,7 +126,7 @@ const layer = Layer.effect(
     const getContext = Effect.fn("SessionRunner.getContext")(function* (sessionID: SessionSchema.ID) {
       return yield* store.context(sessionID)
     })
-    const failInterruptedTools = Effect.fn("SessionRunner.failInterruptedTools")(function* (
+    const reconcileInterruptedTurn = Effect.fn("SessionRunner.reconcileInterruptedTurn")(function* (
       sessionID: SessionSchema.ID,
     ) {
       for (const message of yield* getContext(sessionID)) {
@@ -137,6 +145,13 @@ const layer = Layer.effect(
             },
           })
         }
+        if (message.finish !== undefined || message.time.completed !== undefined) continue
+        yield* events.publish(SessionEvent.Step.Failed, {
+          sessionID,
+          timestamp: yield* DateTime.now,
+          assistantMessageID: message.id,
+          error: { type: "unknown", message: "Provider turn interrupted before checkpoint completion" },
+        })
       }
     })
 
@@ -176,6 +191,7 @@ const layer = Layer.effect(
       sessionID: SessionSchema.ID,
       promotion: SessionInput.Delivery | undefined,
       step: number,
+      checkpoint: SessionExecutionCheckpoint.Token,
       recoverOverflow?: typeof compaction.compactAfterOverflow,
     ) {
       const session = yield* getSession(sessionID)
@@ -202,12 +218,29 @@ const layer = Layer.effect(
       const entries = yield* SessionHistory.entriesForRunner(db, session.id, system.baselineSeq)
       const context = entries.map((entry) => entry.message)
       const latestUser = context.findLast((message) => message.type === "user")
+      const responseLanguageInstruction =
+        latestUser?.type === "user" && ResponseLanguage.needsExplicitInstruction(latestUser.text)
+          ? ResponseLanguage.instruction(latestUser.text)
+          : undefined
       const routed =
         latestUser?.type === "user"
-          ? yield* repositoryContextRouter.route({
-              query: latestUser.text,
-              files: latestUser.files?.map((file) => file.uri),
-            })
+          ? yield* repositoryContextRouter
+              .route({
+                query: latestUser.text,
+                files: latestUser.files?.map((file) => file.uri),
+                budget: RepositoryContextRouter.contextBudget(model.route.defaults.limits?.context),
+              })
+              .pipe(
+                Effect.catchCause((cause) =>
+                  repositoryContextRouter
+                    .trace({
+                      level: "error",
+                      stage: "router",
+                      message: `Router failed: ${Cause.pretty(cause).split("\n")[0] || "Unknown error"}`,
+                    })
+                    .pipe(Effect.as(undefined)),
+                ),
+              )
           : undefined
       const isLastStep = agent.info?.steps !== undefined && currentStep >= agent.info.steps
       const toolMaterialization = isLastStep ? undefined : yield* tools.materialize(agent.info?.permissions)
@@ -215,7 +248,7 @@ const layer = Layer.effect(
       const request = LLM.request({
         model,
         providerOptions: { openai: { promptCacheKey } },
-        system: [agent.info?.system, system.baseline, routed?.text]
+        system: [responseLanguageInstruction, agent.info?.system, system.baseline, routed?.text]
           .filter((part): part is string => part !== undefined && part.length > 0)
           .map(SystemPart.make),
         messages: [...toLLMMessages(context, model), ...(isLastStep ? [Message.assistant(MAX_STEPS_PROMPT)] : [])],
@@ -224,6 +257,7 @@ const layer = Layer.effect(
       })
       if (yield* compaction.compactIfNeeded({ sessionID: session.id, entries, model, request }))
         return yield* Effect.die(continueAfterCompaction(currentStep))
+      yield* SessionExecutionCheckpoint.advance(db, checkpoint, { state: "streaming", step: currentStep })
       const startSnapshot = yield* snapshots.capture()
       const publisher = createLLMEventPublisher(events, {
         sessionID: session.id,
@@ -257,6 +291,11 @@ const layer = Layer.effect(
             }
             needsContinuation = true
             const assistantMessageID = yield* publisher.assistantMessageID(event.id)
+            yield* SessionExecutionCheckpoint.advance(db, checkpoint, {
+              state: "settling_tools",
+              step: currentStep,
+              assistantMessageID,
+            })
             yield* Effect.uninterruptibleMask((restore) =>
               restore(
                 toolMaterialization.settle({
@@ -286,7 +325,22 @@ const layer = Layer.effect(
 
       return yield* Effect.uninterruptibleMask((restore) =>
         Effect.gen(function* () {
+          yield* repositoryContextRouter.trace({
+            level: "info",
+            stage: "model",
+            message: `Request started: ${model.provider}/${model.id}; ${context.length} history messages; ${routed?.files.length ?? 0} context files; ${routed?.text.length ?? 0} context chars`,
+          })
           const stream = yield* restore(providerStream).pipe(Effect.exit)
+          yield* repositoryContextRouter.trace({
+            level: stream._tag === "Failure" || publisher.hasProviderError() ? "error" : "info",
+            stage: "model",
+            message:
+              stream._tag === "Failure"
+                ? `Request failed: ${Cause.pretty(stream.cause).split("\n")[0] || "Unknown error"}`
+                : publisher.hasProviderError()
+                  ? "Request finished with a provider error"
+                  : "Request finished successfully",
+          })
           const failure =
             stream._tag === "Failure" ? Option.getOrUndefined(Cause.findErrorOption(stream.cause)) : undefined
           if (
@@ -360,31 +414,32 @@ const layer = Layer.effect(
       sessionID: SessionSchema.ID,
       promotion: SessionInput.Delivery | undefined,
       step: number,
+      checkpoint: SessionExecutionCheckpoint.Token,
     ) => Effect.Effect<{ readonly needsContinuation: boolean; readonly step: number }, RunError>
 
-    const runAfterOverflowCompaction: RunTurn = Effect.fnUntraced(function* (sessionID, promotion, step) {
-      return yield* runTurnAttempt(sessionID, promotion, step).pipe(
+    const runAfterOverflowCompaction: RunTurn = Effect.fnUntraced(function* (sessionID, promotion, step, checkpoint) {
+      return yield* runTurnAttempt(sessionID, promotion, step, checkpoint).pipe(
         Effect.catchDefect(
           Effect.fnUntraced(function* (defect) {
             if (!(defect instanceof TurnTransitionError)) return yield* Effect.die(defect)
             if (defect.transition._tag === "ContinueAfterOverflowCompaction")
               return yield* Effect.die("Post-compaction provider attempt cannot recover another overflow")
             yield* Effect.yieldNow
-            return yield* runAfterOverflowCompaction(sessionID, undefined, defect.transition.step)
+            return yield* runAfterOverflowCompaction(sessionID, undefined, defect.transition.step, checkpoint)
           }),
         ),
       )
     })
 
-    const runTurn: RunTurn = Effect.fnUntraced(function* (sessionID, promotion, step) {
-      return yield* runTurnAttempt(sessionID, promotion, step, compaction.compactAfterOverflow).pipe(
+    const runTurn: RunTurn = Effect.fnUntraced(function* (sessionID, promotion, step, checkpoint) {
+      return yield* runTurnAttempt(sessionID, promotion, step, checkpoint, compaction.compactAfterOverflow).pipe(
         Effect.catchDefect(
           Effect.fnUntraced(function* (defect) {
             if (!(defect instanceof TurnTransitionError)) return yield* Effect.die(defect)
             yield* Effect.yieldNow
             if (defect.transition._tag === "ContinueAfterOverflowCompaction")
-              return yield* runAfterOverflowCompaction(sessionID, undefined, defect.transition.step)
-            return yield* runTurn(sessionID, undefined, defect.transition.step)
+              return yield* runAfterOverflowCompaction(sessionID, undefined, defect.transition.step, checkpoint)
+            return yield* runTurn(sessionID, undefined, defect.transition.step, checkpoint)
           }),
         ),
       )
@@ -396,23 +451,42 @@ const layer = Layer.effect(
     }) {
       const hasSteer = yield* SessionInput.hasPending(db, input.sessionID, "steer")
       const hasQueue = hasSteer ? false : yield* SessionInput.hasPending(db, input.sessionID, "queue")
-      if (!input.force && !hasSteer && !hasQueue) return
-      yield* failInterruptedTools(input.sessionID)
-      let promotion: SessionInput.Delivery | undefined = hasSteer ? "steer" : hasQueue ? "queue" : undefined
-      let shouldRun = input.force || hasSteer || hasQueue
-      while (shouldRun) {
-        let needsContinuation = true
-        let step = 1
-        while (needsContinuation) {
-          const result = yield* runTurn(input.sessionID, promotion, step)
-          needsContinuation = result.needsContinuation
-          step = result.step + 1
-          promotion = "steer"
-          if (!needsContinuation) needsContinuation = yield* SessionInput.hasPending(db, input.sessionID, "steer")
+      const needsRecovery = yield* SessionExecutionCheckpoint.needsRecovery(db, input.sessionID, "v2")
+      if (!input.force && !hasSteer && !hasQueue && !needsRecovery) return
+      const checkpoint = yield* SessionExecutionCheckpoint.begin(db, input.sessionID, "v2")
+      return yield* Effect.gen(function* () {
+        yield* reconcileInterruptedTurn(input.sessionID)
+        let promotion: SessionInput.Delivery | undefined = hasSteer ? "steer" : hasQueue ? "queue" : undefined
+        let shouldRun = input.force || hasSteer || hasQueue || checkpoint.recovered
+        while (shouldRun) {
+          let needsContinuation = true
+          let step = 1
+          while (needsContinuation) {
+            yield* SessionExecutionCheckpoint.advance(db, checkpoint, { state: "preparing", step })
+            const result = yield* runTurn(input.sessionID, promotion, step, checkpoint)
+            needsContinuation = result.needsContinuation
+            step = result.step + 1
+            promotion = "steer"
+            if (!needsContinuation) needsContinuation = yield* SessionInput.hasPending(db, input.sessionID, "steer")
+            if (needsContinuation)
+              yield* SessionExecutionCheckpoint.advance(db, checkpoint, { state: "continuing", step })
+          }
+          shouldRun = yield* SessionInput.hasPending(db, input.sessionID, "queue")
+          promotion = shouldRun ? "queue" : undefined
         }
-        shouldRun = yield* SessionInput.hasPending(db, input.sessionID, "queue")
-        promotion = shouldRun ? "queue" : undefined
-      }
+      }).pipe(
+        Effect.onExit((exit) =>
+          SessionExecutionCheckpoint.finish(
+            db,
+            checkpoint,
+            exit._tag === "Success"
+              ? { state: "completed" }
+              : Cause.hasInterrupts(exit.cause)
+                ? { state: "interrupted", error: Cause.pretty(exit.cause) }
+                : { state: "failed", error: Cause.pretty(exit.cause) },
+          ).pipe(Effect.asVoid),
+        ),
+      )
     })
 
     return Service.of({

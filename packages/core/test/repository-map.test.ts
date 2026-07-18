@@ -36,7 +36,111 @@ const repositoryLayer = AppNodeBuilder.build(
           glob: () => Effect.succeed([]),
           // Import discovery is enrichment. A pathological generated line must not
           // prevent the structural map and per-file parser from being available.
-          grep: () => Effect.fail(new Ripgrep.Error({ message: "Ripgrep JSON record exceeded 65536 bytes" })),
+          grep: (input) =>
+            input.pattern.includes("журна")
+              ? Effect.succeed([
+                  FileSystem.Match.make({
+                    entry: FileSystem.Entry.make({
+                      path: RelativePath.make("app/Http/Controllers/Api/UserController.php"),
+                      type: "file",
+                    }),
+                    line: 160,
+                    offset: 0,
+                    text: "Журнали NavigationItem getNavigationItems journals",
+                    submatches: [],
+                  }),
+                  FileSystem.Match.make({
+                    entry: FileSystem.Entry.make({
+                      path: RelativePath.make("resources/js/components/NavigationSidebar.vue"),
+                      type: "file",
+                    }),
+                    line: 24,
+                    offset: 0,
+                    text: "Меню NavigationSidebar navigationItems",
+                    submatches: [],
+                  }),
+                  FileSystem.Match.make({
+                    entry: FileSystem.Entry.make({
+                      path: RelativePath.make("app/Models/Soldier.php"),
+                      type: "file",
+                    }),
+                    line: 30,
+                    offset: 0,
+                    text: "солдатами Soldier People Person",
+                    submatches: [],
+                  }),
+                  FileSystem.Match.make({
+                    entry: FileSystem.Entry.make({
+                      path: RelativePath.make("resources/js/pages/journals/SoldierStatusJournal.vue"),
+                      type: "file",
+                    }),
+                    line: 1,
+                    offset: 0,
+                    text: "статусом SoldierStatusJournal status state",
+                    submatches: [],
+                  }),
+                ])
+              : input.pattern.includes("Navigation") || input.pattern.includes("Soldier")
+                ? Effect.succeed([
+                    FileSystem.Match.make({
+                      entry: FileSystem.Entry.make({
+                        path: RelativePath.make("app/Http/Controllers/Api/UserController.php"),
+                        type: "file",
+                      }),
+                      line: 160,
+                      offset: 0,
+                      text: "getNavigationItems journals",
+                      submatches: [],
+                    }),
+                    FileSystem.Match.make({
+                      entry: FileSystem.Entry.make({ path: RelativePath.make("routes/web.php"), type: "file" }),
+                      line: 80,
+                      offset: 0,
+                      text: "SoldierStatusJournal journals.soldier-status-page",
+                      submatches: [],
+                    }),
+                    FileSystem.Match.make({
+                      entry: FileSystem.Entry.make({
+                        path: RelativePath.make("app/Http/Controllers/Journals/SoldierStatusJournalController.php"),
+                        type: "file",
+                      }),
+                      line: 12,
+                      offset: 0,
+                      text: "SoldierStatusJournalController",
+                      submatches: [],
+                    }),
+                    FileSystem.Match.make({
+                      entry: FileSystem.Entry.make({
+                        path: RelativePath.make("app/Models/Soldier.php"),
+                        type: "file",
+                      }),
+                      line: 30,
+                      offset: 0,
+                      text: "soldier status",
+                      submatches: [],
+                    }),
+                    FileSystem.Match.make({
+                      entry: FileSystem.Entry.make({
+                        path: RelativePath.make("resources/js/pages/journals/SoldierStatusJournal.vue"),
+                        type: "file",
+                      }),
+                      line: 1,
+                      offset: 0,
+                      text: "SoldierStatusJournal",
+                      submatches: [],
+                    }),
+                    FileSystem.Match.make({
+                      entry: FileSystem.Entry.make({
+                        path: RelativePath.make("resources/js/components/NavigationSidebar.vue"),
+                        type: "file",
+                      }),
+                      line: 24,
+                      offset: 0,
+                      text: "navigation journals",
+                      submatches: [],
+                    }),
+                  ])
+                : Effect.fail(new Ripgrep.Error({ message: "Ripgrep JSON record exceeded 65536 bytes" })),
         }),
       ),
     ],
@@ -45,7 +149,7 @@ const repositoryLayer = AppNodeBuilder.build(
 const it = testEffect(repositoryLayer)
 
 describe("RepositoryMap", () => {
-  it.effect("registers the generated map as location-scoped model context", () =>
+  it.effect("registers a compact repository outline as location-scoped model context", () =>
     Effect.gen(function* () {
       const registry = yield* SystemContextRegistry.Service
       const map = yield* RepositoryMap.Service
@@ -55,7 +159,7 @@ describe("RepositoryMap", () => {
 
       expect(info.status).toBe("complete")
       expect(info.files).toBe(initialFiles)
-      expect(initialized.baseline).toContain('<repository_map status="complete">')
+      expect(initialized.baseline).toContain('<repository_outline status="complete">')
       expect(initialized.baseline).toContain("src/routes/session.ts")
       expect(initialized.baseline).toContain("not proof that omitted files or relationships do not exist")
 
@@ -176,6 +280,177 @@ describe("RepositoryMap", () => {
     expect(routed?.text).toContain("do not repeat equivalent grep/find/shell searches")
   })
 
+  it.effect("learns project vocabulary and routes an abstract request through a topology slice", () =>
+    Effect.gen(function* () {
+      const router = yield* RepositoryContextRouter.Service
+      yield* router.configureDiagnostics({ enabled: true, clear: true })
+      const result = yield* router.route({
+        query: "Додай новий журнал у меню з усіма солдатами та їх статусом",
+      })
+
+      expect(result?.concepts.map((concept) => concept.name)).toEqual(["журнал", "меню", "солдатами", "статусом"])
+      expect(result?.concepts.find((concept) => concept.name === "журнал")?.terms).toContain("getNavigationItems")
+      expect(result?.concepts.find((concept) => concept.name === "меню")?.terms).toContain("navigationItems")
+      expect(result?.concepts.find((concept) => concept.name === "солдатами")?.terms).toContain("People")
+      expect(result?.slice.map((item) => item.area)).toEqual(
+        expect.arrayContaining([
+          "app/Http/Controllers/Api",
+          "routes",
+          "app/Http/Controllers/Journals",
+          "app/Models",
+          "resources/js/pages/journals",
+        ]),
+      )
+      expect(result?.files).toEqual(
+        expect.arrayContaining([
+          "app/Http/Controllers/Api/UserController.php",
+          "routes/web.php",
+          "app/Http/Controllers/Journals/SoldierStatusJournalController.php",
+          "app/Models/Soldier.php",
+          "resources/js/pages/journals/SoldierStatusJournal.vue",
+        ]),
+      )
+      expect(result?.text).toContain("Concept expansion already applied")
+      expect(result?.text).toContain("Analogous feature candidates")
+      expect(result?.text).toContain("Observed implementation path")
+      expect(result?.text).toContain("project's own topology")
+      expect(result?.text).toContain("Do not repeat broad grep/glob discovery")
+      expect((yield* router.diagnostics()).entries.map((entry) => entry.stage)).toEqual([
+        "prompt",
+        "map",
+        "concept",
+        "concept",
+        "concept",
+        "context",
+      ])
+    }),
+  )
+
+  it.effect("keeps short navigation lookups on the lightweight route", () =>
+    Effect.gen(function* () {
+      const router = yield* RepositoryContextRouter.Service
+      yield* router.configureDiagnostics({ enabled: true, clear: true })
+      const result = yield* router.route({ query: "знайди навігаційне меню" })
+
+      expect(result?.concepts).toEqual([])
+      expect((yield* router.diagnostics()).entries.map((entry) => entry.stage)).toEqual([
+        "prompt",
+        "map",
+        "context",
+      ])
+    }),
+  )
+
+  test("derives implementation areas from a non-web repository topology", () => {
+    const map = RepositoryMap.analyze({
+      files: ["cmd/agent/main.go", "internal/tasks/handler.go", "internal/store/sqlite.go", "pkg/protocol/message.go"],
+      edges: [
+        { from: "cmd/agent/main.go", to: "internal/tasks/handler.go", kind: "call", references: 1 },
+        { from: "internal/tasks/handler.go", to: "internal/store/sqlite.go", kind: "call", references: 2 },
+        { from: "internal/tasks/handler.go", to: "pkg/protocol/message.go", kind: "import", references: 1 },
+      ],
+    })
+    const result = RepositoryContextRouter.select(map, { query: "додай обробку черги задач" }, [], {
+      concepts: [{ name: "черги", aliases: ["черги"], terms: ["TaskQueue", "enqueue"] }],
+      hits: [
+        {
+          path: "internal/tasks/handler.go",
+          line: 12,
+          concepts: ["черги"],
+          terms: ["TaskQueue"],
+          source: "literal",
+          strength: 20,
+        },
+      ],
+    })
+
+    expect(result?.slice.map((item) => item.area)).toEqual(
+      expect.arrayContaining(["cmd/agent", "internal/tasks", "internal/store", "pkg/protocol"]),
+    )
+    expect(result?.text).not.toContain("controller:")
+    expect(result?.text).not.toContain("page:")
+  })
+
+  test("derives a feature path from Unity assets and C# code without framework roles", () => {
+    const map = RepositoryMap.analyze({
+      files: [
+        "Assets/Scenes/Barracks.unity",
+        "Assets/Prefabs/SoldierRoster.prefab",
+        "Assets/Scripts/UI/SoldierRosterPanel.cs",
+        "Assets/Scripts/Runtime/SoldierRegistry.cs",
+        "Assets/Scripts/Data/SoldierState.cs",
+      ],
+      edges: [
+        {
+          from: "Assets/Scripts/UI/SoldierRosterPanel.cs",
+          to: "Assets/Scripts/Runtime/SoldierRegistry.cs",
+          kind: "call",
+          references: 2,
+        },
+        {
+          from: "Assets/Scripts/Runtime/SoldierRegistry.cs",
+          to: "Assets/Scripts/Data/SoldierState.cs",
+          kind: "reference",
+          references: 3,
+        },
+      ],
+    })
+    const result = RepositoryContextRouter.select(map, { query: "додай екран зі списком бійців та їх станом" }, [], {
+      concepts: [
+        { name: "списком", aliases: ["списком"], terms: ["SoldierRoster"] },
+        { name: "станом", aliases: ["станом"], terms: ["SoldierState"] },
+      ],
+      hits: [
+        {
+          path: "Assets/Scenes/Barracks.unity",
+          line: 40,
+          concepts: ["списком"],
+          terms: ["SoldierRosterPanel"],
+          source: "literal",
+          strength: 20,
+        },
+        {
+          path: "Assets/Prefabs/SoldierRoster.prefab",
+          line: 18,
+          concepts: ["списком", "станом"],
+          terms: ["SoldierRosterPanel", "SoldierState"],
+          source: "vocabulary",
+          strength: 10,
+        },
+        {
+          path: "Assets/Scripts/UI/SoldierRosterPanel.cs",
+          line: 9,
+          concepts: ["списком"],
+          terms: ["SoldierRoster"],
+          source: "vocabulary",
+          strength: 10,
+        },
+      ],
+    })
+
+    expect(result?.files).toEqual(
+      expect.arrayContaining([
+        "Assets/Scenes/Barracks.unity",
+        "Assets/Prefabs/SoldierRoster.prefab",
+        "Assets/Scripts/UI/SoldierRosterPanel.cs",
+        "Assets/Scripts/Runtime/SoldierRegistry.cs",
+        "Assets/Scripts/Data/SoldierState.cs",
+      ]),
+    )
+    expect(result?.slice.map((item) => item.area)).toEqual(
+      expect.arrayContaining([
+        "Assets/Scenes",
+        "Assets/Prefabs",
+        "Assets/Scripts/UI",
+        "Assets/Scripts/Runtime",
+        "Assets/Scripts/Data",
+      ]),
+    )
+    expect(result?.text).not.toContain("controller:")
+    expect(result?.text).not.toContain("route:")
+    expect(result?.text).not.toContain("page:")
+  })
+
   test("prefers LSP symbols and routes through semantic references and calls", () => {
     const map = RepositoryMap.analyze({
       files: ["src/controller.ts", "src/service.ts", "src/model.ts"],
@@ -234,18 +509,24 @@ describe("RepositoryMap", () => {
       () =>
         Effect.gen(function* () {
           const router = yield* RepositoryContextRouter.Service
+          yield* router.configureDiagnostics({ enabled: true, clear: true })
           const result = yield* router.route({
             query: "Де визначений ensureSoldierScopeAccess і де він використовується?",
           })
 
-          expect(result?.files).toEqual(
-            expect.arrayContaining(["src/routes/session.ts", "src/components/sidebar.tsx"]),
-          )
+          expect(result?.files).toEqual(expect.arrayContaining(["src/routes/session.ts", "src/components/sidebar.tsx"]))
           expect(result?.text).toContain("On-demand LSP lookup already performed")
           expect(result?.text).toContain(
             "reference: src/components/sidebar.tsx -> src/routes/session.ts (2 location(s))",
           )
           expect(result?.text).toContain("Do not repeat the same LSP or grep search")
+          expect((yield* router.diagnostics()).entries.map((entry) => entry.stage)).toEqual([
+            "prompt",
+            "map",
+            "lsp",
+            "lsp",
+            "context",
+          ])
         }),
       (unregister) => Effect.sync(unregister),
     ),
