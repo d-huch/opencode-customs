@@ -133,6 +133,10 @@ export async function create(input: {
     new StreamMessageReader(input.server.process.stdout as any),
     new StreamMessageWriter(input.server.process.stdin as any),
   )
+  const state = { closed: false }
+  connection.onClose(() => {
+    state.closed = true
+  })
   input.server.process.stderr?.resume()
   // --- Connection state ---
 
@@ -550,6 +554,9 @@ export async function create(input: {
     get connection() {
       return connection
     },
+    get closed() {
+      return state.closed
+    },
     notify: {
       async open(request: { path: string }) {
         request.path = Filesystem.normalizePath(
@@ -638,6 +645,7 @@ export async function create(input: {
       await waitForFullDiagnostics({ path: normalizedPath, version: request.version, after: request.after })
     },
     async shutdown() {
+      state.closed = true
       connection.end()
       connection.dispose()
       await Process.stop(input.server.process)

@@ -6147,6 +6147,63 @@ export type ProjectCopyCopy = {
   directory: string
 }
 
+export type RepositoryMapLanguage = {
+  name: string
+  files: number
+}
+
+export type RepositoryMapModule = {
+  path: string
+  name?: string
+  files: number
+  manifests: Array<string>
+  entrypoints: Array<string>
+}
+
+export type RepositoryMapRelationship = {
+  from: string
+  to: string
+  references: number
+}
+
+export type RepositoryMapLandmark = {
+  kind: "routes" | "controllers" | "components" | "config" | "schema" | "migrations"
+  path: string
+}
+
+export type RepositoryMapSymbolNode = {
+  name: string
+  kind: "class" | "function" | "interface" | "type" | "enum" | "variable" | "export"
+  path: string
+  line: number
+  source: "syntax" | "lsp"
+}
+
+export type RepositoryMapFileEdge = {
+  from: string
+  to: string
+  kind: "import" | "reference" | "call"
+  references: number
+}
+
+export type RepositoryMapSemantic = {
+  status: "indexing" | "ready" | "unavailable"
+  files: number
+  servers: Array<string>
+}
+
+export type RepositoryMapInfo = {
+  status: "complete" | "truncated" | "unavailable"
+  files: number
+  languages: Array<RepositoryMapLanguage>
+  modules: Array<RepositoryMapModule>
+  relationships: Array<RepositoryMapRelationship>
+  landmarks: Array<RepositoryMapLandmark>
+  symbols: Array<RepositoryMapSymbolNode>
+  edges: Array<RepositoryMapFileEdge>
+  semantic: RepositoryMapSemantic
+}
+
 export type EventModelsDevRefreshed = {
   id: string
   type: "models-dev.refreshed"
@@ -13580,6 +13637,80 @@ export type V2ProjectCopyRefreshResponses = {
 }
 
 export type V2ProjectCopyRefreshResponse = V2ProjectCopyRefreshResponses[keyof V2ProjectCopyRefreshResponses]
+
+export type V2RepositoryMapGetData = {
+  body?: never
+  path?: never
+  query?: {
+    location?: {
+      directory?: string
+      workspace?: string
+    }
+  }
+  url: "/api/repository-map"
+}
+
+export type V2RepositoryMapGetErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2RepositoryMapGetError = V2RepositoryMapGetErrors[keyof V2RepositoryMapGetErrors]
+
+export type V2RepositoryMapGetResponses = {
+  /**
+   * Success
+   */
+  200: {
+    location: LocationInfo
+    data: RepositoryMapInfo
+  }
+}
+
+export type V2RepositoryMapGetResponse = V2RepositoryMapGetResponses[keyof V2RepositoryMapGetResponses]
+
+export type V2RepositoryMapRefreshData = {
+  body?: never
+  path?: never
+  query?: {
+    location?: {
+      directory?: string
+      workspace?: string
+    }
+  }
+  url: "/api/repository-map/refresh"
+}
+
+export type V2RepositoryMapRefreshErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2RepositoryMapRefreshError = V2RepositoryMapRefreshErrors[keyof V2RepositoryMapRefreshErrors]
+
+export type V2RepositoryMapRefreshResponses = {
+  /**
+   * Success
+   */
+  200: {
+    location: LocationInfo
+    data: RepositoryMapInfo
+  }
+}
+
+export type V2RepositoryMapRefreshResponse = V2RepositoryMapRefreshResponses[keyof V2RepositoryMapRefreshResponses]
 
 export type PtyConnectData = {
   body?: never

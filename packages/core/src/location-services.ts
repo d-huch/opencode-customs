@@ -24,6 +24,8 @@ import { Pty } from "./pty"
 import { QuestionV2 } from "./question"
 import { Reference } from "./reference"
 import { ReferenceGuidance } from "./reference/guidance"
+import { RepositoryContextRouter } from "./repository-context-router"
+import { RepositoryMap } from "./repository-map"
 import * as SessionRunnerLLM from "./session/runner/llm"
 import { SessionRunnerModel } from "./session/runner/model"
 import { SessionTodo } from "./session/todo"
@@ -60,6 +62,8 @@ export const locationServices = LayerNode.group([
   SkillV2.node,
   SystemContextRegistry.node,
   SystemContextBuiltIns.node,
+  RepositoryMap.node,
+  RepositoryContextRouter.node,
   LocationMutation.node,
   FileMutation.node,
   PermissionV2.node,

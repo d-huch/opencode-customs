@@ -2805,3 +2805,101 @@ export type ProjectCopiesRefreshInput = {
 }
 
 export type ProjectCopiesRefreshOutput = void
+
+export type RepositoryMapGetInput = {
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+  }["location"]
+}
+
+export type RepositoryMapGetOutput = {
+  readonly location: {
+    readonly directory: string
+    readonly workspaceID?: string
+    readonly project: { readonly id: string; readonly directory: string }
+  }
+  readonly data: {
+    readonly status: "complete" | "truncated" | "unavailable"
+    readonly files: number
+    readonly languages: ReadonlyArray<{ readonly name: string; readonly files: number }>
+    readonly modules: ReadonlyArray<{
+      readonly path: string
+      readonly name?: string
+      readonly files: number
+      readonly manifests: ReadonlyArray<string>
+      readonly entrypoints: ReadonlyArray<string>
+    }>
+    readonly relationships: ReadonlyArray<{ readonly from: string; readonly to: string; readonly references: number }>
+    readonly landmarks: ReadonlyArray<{
+      readonly kind: "routes" | "controllers" | "components" | "config" | "schema" | "migrations"
+      readonly path: string
+    }>
+    readonly symbols: ReadonlyArray<{
+      readonly name: string
+      readonly kind: "class" | "function" | "interface" | "type" | "enum" | "variable" | "export"
+      readonly path: string
+      readonly line: number
+      readonly source: "syntax" | "lsp"
+    }>
+    readonly edges: ReadonlyArray<{
+      readonly from: string
+      readonly to: string
+      readonly kind: "import" | "reference" | "call"
+      readonly references: number
+    }>
+    readonly semantic: {
+      readonly status: "indexing" | "ready" | "unavailable"
+      readonly files: number
+      readonly servers: ReadonlyArray<string>
+    }
+  }
+}
+
+export type RepositoryMapRefreshInput = {
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+  }["location"]
+}
+
+export type RepositoryMapRefreshOutput = {
+  readonly location: {
+    readonly directory: string
+    readonly workspaceID?: string
+    readonly project: { readonly id: string; readonly directory: string }
+  }
+  readonly data: {
+    readonly status: "complete" | "truncated" | "unavailable"
+    readonly files: number
+    readonly languages: ReadonlyArray<{ readonly name: string; readonly files: number }>
+    readonly modules: ReadonlyArray<{
+      readonly path: string
+      readonly name?: string
+      readonly files: number
+      readonly manifests: ReadonlyArray<string>
+      readonly entrypoints: ReadonlyArray<string>
+    }>
+    readonly relationships: ReadonlyArray<{ readonly from: string; readonly to: string; readonly references: number }>
+    readonly landmarks: ReadonlyArray<{
+      readonly kind: "routes" | "controllers" | "components" | "config" | "schema" | "migrations"
+      readonly path: string
+    }>
+    readonly symbols: ReadonlyArray<{
+      readonly name: string
+      readonly kind: "class" | "function" | "interface" | "type" | "enum" | "variable" | "export"
+      readonly path: string
+      readonly line: number
+      readonly source: "syntax" | "lsp"
+    }>
+    readonly edges: ReadonlyArray<{
+      readonly from: string
+      readonly to: string
+      readonly kind: "import" | "reference" | "call"
+      readonly references: number
+    }>
+    readonly semantic: {
+      readonly status: "indexing" | "ready" | "unavailable"
+      readonly files: number
+      readonly servers: ReadonlyArray<string>
+    }
+  }
+}

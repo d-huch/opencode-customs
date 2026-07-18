@@ -57,6 +57,7 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { LocationServiceMap, locationServiceMapLayer } from "@opencode-ai/core/location-services"
+import { RepositorySemantic } from "@opencode-ai/core/repository-semantic"
 
 const summary = Layer.succeed(
   SessionSummary.Service,
@@ -719,6 +720,8 @@ it.instance("static loop returns assistant text through local provider", () =>
     const { llm } = yield* useServerConfig(providerCfg)
     const prompt = yield* SessionPrompt.Service
     const sessions = yield* Session.Service
+    const instance = yield* TestInstance
+    yield* Effect.promise(() => Bun.write(path.join(instance.directory, "example.ts"), "export const hello = true\n"))
     const session = yield* sessions.create({
       title: "Prompt provider",
       permission: [{ permission: "*", pattern: "*", action: "allow" }],
@@ -731,6 +734,40 @@ it.instance("static loop returns assistant text through local provider", () =>
       parts: [{ type: "text", text: "hello" }],
     })
 
+    yield* llm.text("world")
+
+    const result = yield* prompt.loop({ sessionID: session.id })
+    expect(result.info.role).toBe("assistant")
+    expect(result.parts.some((part) => part.type === "text" && part.text === "world")).toBe(true)
+    expect(yield* llm.hits).toHaveLength(1)
+    expect(JSON.stringify((yield* llm.inputs)[0])).toContain("repository_context source")
+    expect(yield* llm.pending).toBe(0)
+  }),
+)
+
+it.instance("static loop reaches local provider when repository lookup defects", () =>
+  Effect.gen(function* () {
+    const unregister = RepositorySemantic.register({
+      enrich: () => Effect.succeed({ files: [], servers: [], symbols: [], edges: [] }),
+      search: () => Effect.die(new Error("Connection is closed")),
+    })
+    yield* Effect.addFinalizer(() => Effect.sync(unregister))
+    const { llm } = yield* useServerConfig(providerCfg)
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const instance = yield* TestInstance
+    yield* Effect.promise(() => Bun.write(path.join(instance.directory, "example.ts"), "export const hello = true\n"))
+    const session = yield* sessions.create({
+      title: "Prompt provider fallback",
+      permission: [{ permission: "*", pattern: "*", action: "allow" }],
+    })
+
+    yield* prompt.prompt({
+      sessionID: session.id,
+      agent: "build",
+      noReply: true,
+      parts: [{ type: "text", text: "Де визначений ensureSoldierScopeAccess?" }],
+    })
     yield* llm.text("world")
 
     const result = yield* prompt.loop({ sessionID: session.id })

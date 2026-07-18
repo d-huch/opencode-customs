@@ -112,6 +112,10 @@ import type {
   ProjectCopiesRemoveOutput,
   ProjectCopiesRefreshInput,
   ProjectCopiesRefreshOutput,
+  RepositoryMapGetInput,
+  RepositoryMapGetOutput,
+  RepositoryMapRefreshInput,
+  RepositoryMapRefreshOutput,
 } from "./types"
 import { ClientError } from "./client-error"
 
@@ -983,6 +987,32 @@ export function make(options: ClientOptions) {
             successStatus: 204,
             declaredStatuses: [400, 401],
             empty: true,
+          },
+          requestOptions,
+        ),
+    },
+    repositoryMap: {
+      get: (input?: RepositoryMapGetInput, requestOptions?: RequestOptions) =>
+        request<RepositoryMapGetOutput>(
+          {
+            method: "GET",
+            path: `/api/repository-map`,
+            query: { location: input?.["location"] },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      refresh: (input?: RepositoryMapRefreshInput, requestOptions?: RequestOptions) =>
+        request<RepositoryMapRefreshOutput>(
+          {
+            method: "POST",
+            path: `/api/repository-map/refresh`,
+            query: { location: input?.["location"] },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
           },
           requestOptions,
         ),

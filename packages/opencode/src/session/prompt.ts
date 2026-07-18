@@ -1261,11 +1261,18 @@ const layer = Layer.effect(
               sys.mcp(agent, session.permission),
               MessageV2.toModelMessagesEffect(msgs, model),
             ])
+            const repositoryContext = yield* sys.repository({
+              query: (lastUserMsg?.parts ?? [])
+                .flatMap((part) => (part.type === "text" && part.synthetic !== true ? [part.text] : []))
+                .join("\n"),
+              files: (lastUserMsg?.parts ?? []).filter((part) => part.type === "file").map((part) => part.url),
+            })
             const system = [
               ...env,
               ...instructions,
               ...(mcpInstructions ? [mcpInstructions] : []),
               ...(skills ? [skills] : []),
+              ...(repositoryContext ? [repositoryContext.text] : []),
             ]
             const format = lastUser.format ?? { type: "text" as const }
             if (format.type === "json_schema") system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)

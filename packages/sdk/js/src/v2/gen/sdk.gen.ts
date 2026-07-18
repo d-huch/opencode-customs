@@ -333,6 +333,10 @@ import type {
   V2QuestionRequestListResponses,
   V2ReferenceListErrors,
   V2ReferenceListResponses,
+  V2RepositoryMapGetErrors,
+  V2RepositoryMapGetResponses,
+  V2RepositoryMapRefreshErrors,
+  V2RepositoryMapRefreshResponses,
   V2SessionActiveErrors,
   V2SessionActiveResponses,
   V2SessionCompactErrors,
@@ -6987,6 +6991,56 @@ export class ProjectCopy2 extends HeyApiClient {
   }
 }
 
+export class RepositoryMap extends HeyApiClient {
+  /**
+   * Get repository map
+   *
+   * Get the current incremental structural index for the requested location.
+   */
+  public get<ThrowOnError extends boolean = false>(
+    parameters?: {
+      location?: {
+        directory?: string
+        workspace?: string
+      }
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "query", key: "location" }] }])
+    return (options?.client ?? this.client).get<V2RepositoryMapGetResponses, V2RepositoryMapGetErrors, ThrowOnError>({
+      url: "/api/repository-map",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Refresh repository map
+   *
+   * Rebuild the structural index for the requested location.
+   */
+  public refresh<ThrowOnError extends boolean = false>(
+    parameters?: {
+      location?: {
+        directory?: string
+        workspace?: string
+      }
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "query", key: "location" }] }])
+    return (options?.client ?? this.client).post<
+      V2RepositoryMapRefreshResponses,
+      V2RepositoryMapRefreshErrors,
+      ThrowOnError
+    >({
+      url: "/api/repository-map/refresh",
+      ...options,
+      ...params,
+    })
+  }
+}
+
 export class V2 extends HeyApiClient {
   private _health?: Health
   get health(): Health {
@@ -7071,6 +7125,11 @@ export class V2 extends HeyApiClient {
   private _projectCopy?: ProjectCopy2
   get projectCopy(): ProjectCopy2 {
     return (this._projectCopy ??= new ProjectCopy2({ client: this.client }))
+  }
+
+  private _repositoryMap?: RepositoryMap
+  get repositoryMap(): RepositoryMap {
+    return (this._repositoryMap ??= new RepositoryMap({ client: this.client }))
   }
 }
 

@@ -5,7 +5,16 @@ import { Switch } from "@opencode-ai/ui/switch"
 import { Tabs } from "@opencode-ai/ui/tabs"
 import { showToast } from "@/utils/toast"
 import { useNavigate } from "@solidjs/router"
-import { type Accessor, createEffect, createMemo, For, type JSXElement, onCleanup, Show } from "solid-js"
+import {
+  type Accessor,
+  createEffect,
+  createMemo,
+  createResource,
+  For,
+  type JSXElement,
+  onCleanup,
+  Show,
+} from "solid-js"
 import { createStore } from "solid-js/store"
 import { ServerHealthIndicator, ServerRow } from "@/components/server/server-row"
 import { useLanguage } from "@/context/language"
@@ -16,6 +25,7 @@ import { type ServerHealth } from "@/utils/server-health"
 import { useGlobal } from "@/context/global"
 import { useSettings } from "@/context/settings"
 import { useMcpToggle } from "@/context/mcp"
+import { useSDK } from "@/context/sdk"
 
 const pluginEmptyMessage = (value: string, file: string): JSXElement => {
   const parts = value.split(file)
@@ -130,7 +140,7 @@ export function StatusPopoverServerBody() {
   })
 
   const sortedServers = createMemo(() => listServersByHealth(global.servers.list(), server.key, global.servers.health))
-  const defaultServer = useDefaultServerKey(platform.getDefaultServer)
+  const defaultServer = useDefaultServerKey(platform.getDefaultServer ? () => platform.getDefaultServer?.() : undefined)
   const serverItems = createMemo(() =>
     sortedServers().map((conn) => {
       const key = ServerConnection.key(conn)
@@ -161,7 +171,7 @@ export function StatusPopoverServerBody() {
           const run = ++dialogRun
           void import("./dialog-select-server").then((x) => {
             if (dialogDead || dialogRun !== run) return
-            dialog.show(() => <x.DialogSelectServer />, defaultServer.refresh)
+            void dialog.show(() => <x.DialogSelectServer />, defaultServer.refresh)
           })
         },
       }}
@@ -257,6 +267,24 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
   const language = useLanguage()
   const navigate = useNavigate()
   const settings = useSettings()
+  const sdk = useSDK()
+  const desktop = createMemo(() => platform.platform === "desktop")
+  const [repositoryMap, { mutate: setRepositoryMap, refetch: refetchRepositoryMap }] = createResource(
+    () => (props.shown() && desktop() ? sdk() : undefined),
+    (context) => context.client.v2.repositoryMap.get().then((result) => result.data?.data),
+  )
+  const [repositoryMapState, setRepositoryMapState] = createStore({ refreshing: false })
+  const repositoryMapStatus = createMemo(() => {
+    if (repositoryMap()?.status === "complete") return language.t("status.popover.repositoryMap.status.complete")
+    if (repositoryMap()?.status === "truncated") return language.t("status.popover.repositoryMap.status.truncated")
+    return language.t("status.popover.repositoryMap.status.unavailable")
+  })
+  const repositorySemanticStatus = createMemo(() => {
+    if (repositoryMap()?.semantic.status === "indexing") return language.t("common.loading")
+    if (repositoryMap()?.semantic.status === "ready")
+      return language.t("status.popover.repositoryMap.status.complete")
+    return language.t("status.popover.repositoryMap.status.unavailable")
+  })
 
   const fail = (err: unknown) => {
     showToast({
@@ -267,7 +295,9 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
   }
 
   createEffect(() => {
-    if (!props.shown()) return
+    if (!props.shown() || repositoryMap.error || repositoryMap()?.semantic.status !== "indexing") return
+    const timer = window.setTimeout(() => void refetchRepositoryMap(), 1_500)
+    onCleanup(() => window.clearTimeout(timer))
   })
 
   let dialogRun = 0
@@ -278,17 +308,33 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
   })
   const sortedServers = createMemo(() => listServersByHealth(global.servers.list(), server.key, global.servers.health))
   const toggleMcp = useMcpToggle()
-  const defaultServer = useDefaultServerKey(platform.getDefaultServer)
+  const defaultServer = useDefaultServerKey(platform.getDefaultServer ? () => platform.getDefaultServer?.() : undefined)
   const mcpNames = createMemo(() => Object.keys(sync().data.mcp ?? {}).sort((a, b) => a.localeCompare(b)))
   const mcpStatus = (name: string) => sync().data.mcp?.[name]?.status
   const mcpConnected = createMemo(() => mcpNames().filter((name) => mcpStatus(name) === "connected").length)
   const lspItems = createMemo(() => sync().data.lsp ?? [])
   const lspCount = createMemo(() => lspItems().length)
+  const lspNameCounts = createMemo(() =>
+    lspItems().reduce((result, item) => {
+      const name = item.name || item.id
+      result.set(name, (result.get(name) ?? 0) + 1)
+      return result
+    }, new Map<string, number>()),
+  )
   const plugins = createMemo(() =>
     (sync().data.config.plugin ?? []).map((item) => (typeof item === "string" ? item : item[0])),
   )
   const pluginCount = createMemo(() => plugins().length)
   const pluginEmpty = createMemo(() => pluginEmptyMessage(language.t("dialog.plugins.empty"), "opencode.json"))
+  const refreshRepositoryMap = async () => {
+    if (repositoryMapState.refreshing) return
+    setRepositoryMapState("refreshing", true)
+    await sdk()
+      .client.v2.repositoryMap.refresh()
+      .then((result) => setRepositoryMap(result.data?.data))
+      .catch(fail)
+      .finally(() => setRepositoryMapState("refreshing", false))
+  }
 
   return (
     <div class="flex items-center gap-1 w-[360px] rounded-xl shadow-[var(--shadow-lg-border-base)]">
@@ -319,6 +365,11 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
             {pluginCount() > 0 ? `${pluginCount()} ` : ""}
             {language.t("status.popover.tab.plugins")}
           </Tabs.Trigger>
+          <Show when={desktop()}>
+            <Tabs.Trigger value="repository-map" data-slot="tab" class="text-12-regular">
+              {language.t("status.popover.tab.repositoryMap")}
+            </Tabs.Trigger>
+          </Show>
         </Tabs.List>
 
         {!settings.general.newLayoutDesigns() && (
@@ -377,7 +428,7 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
                     const run = ++dialogRun
                     void import("./dialog-select-server").then((x) => {
                       if (dialogDead || dialogRun !== run) return
-                      dialog.show(() => <x.DialogSelectServer />, defaultServer.refresh)
+                      void dialog.show(() => <x.DialogSelectServer />, defaultServer.refresh)
                     })
                   }}
                 >
@@ -469,7 +520,10 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
                           "bg-icon-critical-base": item.status === "error",
                         }}
                       />
-                      <span class="text-14-regular text-text-base truncate">{item.name || item.id}</span>
+                      <span class="text-14-regular text-text-base truncate">
+                        {item.name || item.id}
+                        {(lspNameCounts().get(item.name || item.id) ?? 0) > 1 ? ` · ${item.root || "."}` : ""}
+                      </span>
                     </div>
                   )}
                 </For>
@@ -497,7 +551,104 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
             </div>
           </div>
         </Tabs.Content>
+
+        <Show when={desktop()}>
+          <Tabs.Content value="repository-map">
+            <div class="flex flex-col px-2 pb-2">
+              <div class="flex flex-col gap-3 p-3 bg-background-base rounded-sm min-h-32">
+                <Show
+                  when={!repositoryMap.loading}
+                  fallback={
+                    <div class="text-14-regular text-text-base text-center my-auto">{language.t("common.loading")}</div>
+                  }
+                >
+                  <div class="flex items-center gap-2 px-1">
+                    <div
+                      classList={{
+                        "size-1.5 rounded-full shrink-0": true,
+                        "bg-icon-success-base": repositoryMap()?.status === "complete",
+                        "bg-icon-warning-base": repositoryMap()?.status === "truncated",
+                        "bg-icon-critical-base":
+                          !repositoryMap() || repositoryMap()?.status === "unavailable" || !!repositoryMap.error,
+                      }}
+                    />
+                    <span class="text-14-medium text-text-base">{repositoryMapStatus()}</span>
+                  </div>
+
+                  <Show when={repositoryMap()} keyed>
+                    {(map) => (
+                      <>
+                        <div class="flex items-center gap-2 px-1 min-w-0">
+                          <span class="text-12-regular text-text-weaker shrink-0">
+                            {language.t("status.popover.tab.lsp")}: {repositorySemanticStatus()}
+                          </span>
+                          <Show when={map.semantic.servers.length > 0}>
+                            <span class="text-12-regular text-text-base truncate">
+                              {map.semantic.servers.join(", ")}
+                            </span>
+                          </Show>
+                          <span class="ml-auto text-11-regular text-text-weaker shrink-0">
+                            {map.semantic.files} {language.t("status.popover.repositoryMap.files")}
+                          </span>
+                        </div>
+
+                        <div class="grid grid-cols-4 gap-2">
+                          <RepositoryMapMetric
+                            label={language.t("status.popover.repositoryMap.files")}
+                            value={map.files}
+                          />
+                          <RepositoryMapMetric
+                            label={language.t("status.popover.repositoryMap.areas")}
+                            value={map.modules.length}
+                          />
+                          <RepositoryMapMetric
+                            label={language.t("status.popover.repositoryMap.symbols")}
+                            value={map.symbols.length}
+                          />
+                          <RepositoryMapMetric
+                            label={language.t("status.popover.repositoryMap.links")}
+                            value={map.edges.length}
+                          />
+                        </div>
+
+                        <For each={map.modules.slice(0, 4)}>
+                          {(module) => (
+                            <div class="flex items-center gap-2 px-1 min-w-0">
+                              <span class="text-12-regular text-text-base truncate">{module.name ?? module.path}</span>
+                              <span class="flex-1 border-t border-border-weak-base" />
+                              <span class="text-11-regular text-text-weaker shrink-0">{module.files}</span>
+                            </div>
+                          )}
+                        </For>
+                      </>
+                    )}
+                  </Show>
+                </Show>
+
+                <Button
+                  variant="secondary"
+                  class="self-start h-8 px-3 py-1.5"
+                  disabled={repositoryMapState.refreshing}
+                  onClick={() => void refreshRepositoryMap()}
+                >
+                  {repositoryMapState.refreshing
+                    ? language.t("common.loading")
+                    : language.t("status.popover.repositoryMap.reindex")}
+                </Button>
+              </div>
+            </div>
+          </Tabs.Content>
+        </Show>
       </Tabs>
+    </div>
+  )
+}
+
+function RepositoryMapMetric(props: { label: string; value: number }) {
+  return (
+    <div class="flex flex-col gap-0.5 p-2 rounded-md bg-surface-raised-base">
+      <span class="text-16-medium text-text-base tabular-nums">{props.value}</span>
+      <span class="text-11-regular text-text-weaker truncate">{props.label}</span>
     </div>
   )
 }

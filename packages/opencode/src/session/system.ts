@@ -1,5 +1,5 @@
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
-import { Context, Effect, Layer } from "effect"
+import { Cause, Context, Effect, Layer } from "effect"
 
 import { InstanceState } from "@/effect/instance-state"
 
@@ -23,6 +23,7 @@ import { LocationServiceMap, locationServiceMapLayer } from "@opencode-ai/core/l
 import { Reference } from "@opencode-ai/core/reference"
 import { MCP } from "@/mcp"
 import { PermissionV1 } from "@opencode-ai/core/v1/permission"
+import { RepositoryContextRouter } from "@opencode-ai/core/repository-context-router"
 
 export function provider(model: Provider.Model) {
   if (model.api.id.includes("muse-spark")) return [PROMPT_META]
@@ -45,6 +46,7 @@ export interface Interface {
   readonly environment: (model: Provider.Model) => Effect.Effect<string[]>
   readonly skills: (agent: Agent.Info) => Effect.Effect<string | undefined>
   readonly mcp: (agent: Agent.Info, permission?: PermissionV1.Ruleset) => Effect.Effect<string | undefined>
+  readonly repository: (input: RepositoryContextRouter.Input) => Effect.Effect<RepositoryContextRouter.Selection | undefined>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SystemPrompt") {}
@@ -125,6 +127,18 @@ const layer = Layer.effect(
           ]),
           "</mcp_instructions>",
         ].join("\n")
+      }),
+
+      repository: Effect.fn("SystemPrompt.repository")(function* (input: RepositoryContextRouter.Input) {
+        const ctx = yield* InstanceState.context
+        return yield* RepositoryContextRouter.Service.use((router) => router.route(input)).pipe(
+          Effect.provide(locations.get(Location.Ref.make({ directory: AbsolutePath.make(ctx.directory) }))),
+          Effect.catchCause((cause) =>
+            Effect.logWarning("repository context unavailable", { cause: Cause.pretty(cause) }).pipe(
+              Effect.as(undefined),
+            ),
+          ),
+        )
       }),
     })
   }),

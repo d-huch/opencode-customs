@@ -57,6 +57,33 @@ function locationData(validate: (value: any) => void) {
   }
 }
 
+function repositoryMap(value: unknown) {
+  object(value)
+  check(
+    value.status === "complete" || value.status === "truncated" || value.status === "unavailable",
+    "repository map should report its index status",
+  )
+  check(typeof value.files === "number" && value.files >= 0, "repository map should report its file count")
+  array(value.languages)
+  array(value.modules)
+  array(value.relationships)
+  array(value.landmarks)
+  array(value.symbols)
+  array(value.edges)
+  object(value.semantic)
+  check(
+    value.semantic.status === "indexing" ||
+      value.semantic.status === "ready" ||
+      value.semantic.status === "unavailable",
+    "repository map should report its semantic index status",
+  )
+  check(
+    typeof value.semantic.files === "number" && value.semantic.files >= 0,
+    "repository map should report its semantic file count",
+  )
+  array(value.semantic.servers)
+}
+
 const scenarios: Scenario[] = [
   http.protected
     .get("/global/health", "global.health")
@@ -663,6 +690,8 @@ const scenarios: Scenario[] = [
     check(body.healthy === true, "v2 server should report healthy")
   }),
   http.protected.get("/api/location", "v2.location.get").json(200, object),
+  http.protected.get("/api/repository-map", "v2.repositoryMap.get").json(200, locationData(repositoryMap)),
+  http.protected.post("/api/repository-map/refresh", "v2.repositoryMap.refresh").json(200, locationData(repositoryMap)),
   http.protected.get("/api/agent", "v2.agent.list").json(200, locationData(array)),
   http.protected.get("/api/model", "v2.model.list").json(200, locationData(array)),
   http.protected.get("/api/provider", "v2.provider.list").json(200, locationData(array)),
