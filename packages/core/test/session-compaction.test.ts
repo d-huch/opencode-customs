@@ -4,7 +4,6 @@ import { SessionCompaction } from "@opencode-ai/core/session/compaction"
 test("compaction prompt preserves detailed work state and relevant files", () => {
   const prompt = SessionCompaction.buildPrompt({
     context: ["conversation history"],
-    languageSample: "Знайди журнал правопорушень",
   })
 
   expect(prompt).toContain("## Work State\n### Completed")
@@ -12,7 +11,7 @@ test("compaction prompt preserves detailed work state and relevant files", () =>
   expect(prompt).toContain("### Blocked")
   expect(prompt).toContain("## Relevant Files")
   expect(prompt).toContain("successful tool result confirmed it")
-  expect(prompt).toContain("Знайди журнал правопорушень")
+  expect(prompt).not.toContain("Знайди журнал правопорушень")
 })
 
 test("compaction normalizes repeated output and removes paths without evidence", () => {

@@ -1,19 +1,33 @@
-import { describe, expect } from "bun:test"
+import { afterAll, describe, expect } from "bun:test"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { Global } from "@opencode-ai/core/global"
 import { Cause, Effect, Exit } from "effect"
 import { Image } from "@/image/image"
 import { Config } from "@/config/config"
 import { MessageID, PartID, SessionID } from "@/session/schema"
 import path from "node:path"
+import os from "node:os"
+import fs from "node:fs/promises"
+import { fileURLToPath } from "node:url"
 import { TestConfig } from "../fixture/config"
 import { testEffect } from "../lib/effect"
 
-const it = testEffect(LayerNode.compile(Image.node, [[Config.node, TestConfig.layer()]]))
+const data = path.join(os.tmpdir(), `opencode-image-test-${process.pid}`)
+const global = Global.layerWith({ data })
+const it = testEffect(
+  LayerNode.compile(Image.node, [
+    [Config.node, TestConfig.layer()],
+    [Global.node, global],
+  ]),
+)
 const tiny = testEffect(
   LayerNode.compile(Image.node, [
     [Config.node, TestConfig.layer({ get: () => Effect.succeed({ attachment: { image: { max_base64_bytes: 1 } } }) })],
+    [Global.node, global],
   ]),
 )
+
+afterAll(() => fs.rm(data, { recursive: true, force: true }))
 
 function part(mime: string, data: string) {
   return {
@@ -42,8 +56,9 @@ describe("Image", () => {
       ])
 
       source.free()
-      expect(results.map((result) => result.url.startsWith(`data:${result.mime};base64,`))).toEqual([true, true])
+      expect(results.map((result) => result.url.startsWith("file:"))).toEqual([true, true])
       expect(results.every((result) => result.mime === "image/png" || result.mime === "image/jpeg")).toBe(true)
+      expect(results.every((result) => !result.url.includes("base64"))).toBe(true)
     }),
   )
 
@@ -52,7 +67,9 @@ describe("Image", () => {
       const image = yield* Image.Service
       const input = part("image/webp", "UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AAAAAA")
 
-      expect(yield* image.normalize(input)).toEqual(input)
+      const result = yield* image.normalize(input)
+      expect(result.url.startsWith("file:")).toBe(true)
+      expect(result.mime).toBe(input.mime)
     }),
   )
 
@@ -63,7 +80,7 @@ describe("Image", () => {
       const image = yield* Image.Service
       const result = yield* image.normalize(part("image/png", Buffer.from(source.get_bytes()).toString("base64")))
       const resized = photon.PhotonImage.new_from_byteslice(
-        Buffer.from(result.url.slice(result.url.indexOf(";base64,") + ";base64,".length), "base64"),
+        Buffer.from(yield* Effect.promise(() => Bun.file(fileURLToPath(result.url)).arrayBuffer())),
       )
 
       source.free()
@@ -84,12 +101,12 @@ describe("Image", () => {
       const input = part("image/png", data.toString("base64"))
       const image = yield* Image.Service
       const result = yield* image.normalize(input)
-      const base64 = result.url.slice(result.url.indexOf(";base64,") + ";base64,".length)
-      const resized = photon.PhotonImage.new_from_byteslice(Buffer.from(base64, "base64"))
+      const prepared = Buffer.from(yield* Effect.promise(() => Bun.file(fileURLToPath(result.url)).arrayBuffer()))
+      const resized = photon.PhotonImage.new_from_byteslice(prepared)
 
       expect(input.url.slice(input.url.indexOf(";base64,") + ";base64,".length).length).toBe(5 * 1024 * 1024)
       expect(result.url).not.toBe(input.url)
-      expect(base64.length).toBeLessThan(5 * 1024 * 1024)
+      expect(Math.ceil(prepared.byteLength / 3) * 4).toBeLessThan(5 * 1024 * 1024)
       expect(resized.get_width()).toBeLessThanOrEqual(2_000)
       expect(resized.get_height()).toBeLessThanOrEqual(2_000)
       resized.free()

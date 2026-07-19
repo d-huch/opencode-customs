@@ -714,11 +714,48 @@ const Endpoint18_3 = (raw: RawClient["server.repositoryMap"]) => (input: Endpoin
     payload: { enabled: input["enabled"], clear: input["clear"] },
   }).pipe(Effect.mapError(mapClientError))
 
+type Endpoint18_4Request = Parameters<RawClient["server.repositoryMap"]["repositoryMap.knowledge"]>[0]
+type Endpoint18_4Input = {
+  readonly location?: Endpoint18_4Request["query"]["location"]
+  readonly search?: Endpoint18_4Request["query"]["search"]
+  readonly limit?: Endpoint18_4Request["query"]["limit"]
+}
+const Endpoint18_4 = (raw: RawClient["server.repositoryMap"]) => (input?: Endpoint18_4Input) =>
+  raw["repositoryMap.knowledge"]({
+    query: { location: input?.["location"], search: input?.["search"], limit: input?.["limit"] },
+  }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint18_5Request = Parameters<RawClient["server.repositoryMap"]["repositoryMap.removeKnowledge"]>[0]
+type Endpoint18_5Input = {
+  readonly scope: Endpoint18_5Request["params"]["scope"]
+  readonly id: Endpoint18_5Request["params"]["id"]
+  readonly location?: Endpoint18_5Request["query"]["location"]
+}
+const Endpoint18_5 = (raw: RawClient["server.repositoryMap"]) => (input: Endpoint18_5Input) =>
+  raw["repositoryMap.removeKnowledge"]({
+    params: { scope: input["scope"], id: input["id"] },
+    query: { location: input["location"] },
+  }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint18_6Request = Parameters<RawClient["server.repositoryMap"]["repositoryMap.clearKnowledge"]>[0]
+type Endpoint18_6Input = {
+  readonly scope: Endpoint18_6Request["params"]["scope"]
+  readonly location?: Endpoint18_6Request["query"]["location"]
+}
+const Endpoint18_6 = (raw: RawClient["server.repositoryMap"]) => (input: Endpoint18_6Input) =>
+  raw["repositoryMap.clearKnowledge"]({
+    params: { scope: input["scope"] },
+    query: { location: input["location"] },
+  }).pipe(Effect.mapError(mapClientError))
+
 const adaptGroup18 = (raw: RawClient["server.repositoryMap"]) => ({
   get: Endpoint18_0(raw),
   refresh: Endpoint18_1(raw),
   diagnostics: Endpoint18_2(raw),
   configureDiagnostics: Endpoint18_3(raw),
+  knowledge: Endpoint18_4(raw),
+  removeKnowledge: Endpoint18_5(raw),
+  clearKnowledge: Endpoint18_6(raw),
 })
 
 const adaptClient = (raw: RawClient) => ({

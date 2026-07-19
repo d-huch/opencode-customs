@@ -5,6 +5,7 @@ import { ModelV2 } from "../../model"
 import { SessionEvent } from "../event"
 import { SessionMessage } from "../message"
 import { SessionSchema } from "../schema"
+import { ResponseRepetition } from "../../response-repetition"
 
 type Input = {
   readonly sessionID: SessionSchema.ID
@@ -125,7 +126,7 @@ export const createLLMEventPublisher = (events: EventV2.Interface, input: Input)
         assistantMessageID: yield* currentAssistantMessageID(),
         timestamp: yield* timestamp,
         textID,
-        text: value,
+        text: ResponseRepetition.normalize(value),
       })
     }),
   )

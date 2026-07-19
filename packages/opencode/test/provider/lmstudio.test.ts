@@ -21,10 +21,7 @@ describe("discoverLmStudioContextLimits", () => {
       },
     })
 
-    expect(requests).toEqual([
-      "http://127.0.0.1:1234/api/v1/models",
-      "http://127.0.0.1:1234/v1/models",
-    ])
+    expect(requests).toEqual(["http://127.0.0.1:1234/api/v1/models", "http://127.0.0.1:1234/v1/models"])
     expect(result).toEqual({
       "qwen/qwen3-coder": 65_536,
       "qwen-local": 65_536,
@@ -112,6 +109,39 @@ describe("discoverLmStudioContextLimits", () => {
       capabilities: { tools: true, vision: true, reasoning: true, embeddings: false },
     })
     expect(findLmStudioModel(result, "nomic-embed")?.capabilities.embeddings).toBe(true)
+  })
+
+  test("detects vision from native VLM and structured image-input metadata", async () => {
+    const result = await probeLmStudio({
+      baseURL: "http://127.0.0.1:1234/v1",
+      apiKey: undefined,
+      request: async (input) => {
+        if (String(input).endsWith("/v1/models") && !String(input).includes("/api/")) return Response.json({ data: [] })
+        return Response.json({
+          models: [
+            { key: "visual", type: "vlm", loaded_instances: [] },
+            {
+              key: "structured",
+              type: "llm",
+              loaded_instances: [],
+              capabilities: { input: { image: { supported: true } } },
+            },
+            { key: "text", type: "llm", loaded_instances: [], capabilities: { vision: false } },
+          ],
+        })
+      },
+    })
+
+    expect(findLmStudioModel(result, "visual")).toMatchObject({
+      type: "llm",
+      visionCapabilitySource: "native_type",
+      capabilities: { vision: true },
+    })
+    expect(findLmStudioModel(result, "structured")).toMatchObject({
+      visionCapabilitySource: "native_input",
+      capabilities: { vision: true },
+    })
+    expect(findLmStudioModel(result, "text")?.capabilities.vision).toBe(false)
   })
 
   test("reports an unauthorized bridge without throwing", async () => {

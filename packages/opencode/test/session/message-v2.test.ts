@@ -165,6 +165,31 @@ describe("session.message-v2.toModelMessage", () => {
     ])
   })
 
+  test("removes repeated prose from historical assistant context", async () => {
+    const messageID = "m-repeated"
+    const first =
+      "Ви запитали, як вас звати. Я не знаю вашого імені, тому що ви його ще не повідомляли. Скажіть своє ім’я, і я зможу звертатися до вас правильно."
+    const repeated =
+      "Я не знаю вашого імені, тому що ви його ще не повідомляли. Ви можете сказати своє ім’я, і тоді я зможу звертатися до вас правильно."
+    const messages = await MessageV2.toModelMessages(
+      [
+        {
+          info: assistantInfo(messageID, "m-user"),
+          parts: [
+            {
+              ...basePart(messageID, "p1"),
+              type: "text",
+              text: `${first}\n\n${repeated}`,
+            },
+          ] as SessionV1.Part[],
+        },
+      ],
+      model,
+    )
+
+    expect(messages).toStrictEqual([{ role: "assistant", content: [{ type: "text", text: first }] }])
+  })
+
   test("filters out messages with only ignored parts", async () => {
     const messageID = "m-user"
 
@@ -1699,5 +1724,75 @@ describe("session.message-v2.latest", () => {
     expect(state.user?.id).toBe(NEW_COMPACTION_USER)
     expect(state.tasks).toHaveLength(1)
     expect(state.tasks[0]).toMatchObject({ type: "compaction", auto: true })
+  })
+
+  test("uses a trusted continuation as the active request after the genuine message leaves the projection", () => {
+    const filtered = [summaryAssistant, continueUser]
+
+    expect(MessageV2.latestUserRequest(filtered)).toBeUndefined()
+    expect(MessageV2.activeUserRequest(filtered)?.info.id).toBe(CONTINUE_USER)
+    expect(MessageV2.userRequestText(MessageV2.activeUserRequest(filtered))).toBe("Continue if you have next steps...")
+  })
+
+  test("does not promote arbitrary synthetic text to an active request", () => {
+    const synthetic: SessionV1.WithParts = {
+      info: userInfo(CONTINUE_USER),
+      parts: [
+        {
+          ...basePart(CONTINUE_USER, "p2"),
+          type: "text",
+          text: "Historical Objective",
+          synthetic: true,
+        },
+      ] as SessionV1.Part[],
+    }
+
+    expect(MessageV2.activeUserRequest([summaryAssistant, synthetic])).toBeUndefined()
+  })
+
+  test("keeps the previous request as repository context for a terse follow-up", () => {
+    const request = (id: string, text: string): SessionV1.WithParts => ({
+      info: userInfo(id),
+      parts: [{ ...basePart(id, `prt_${id}`), type: "text", text }] as SessionV1.Part[],
+    })
+
+    expect(
+      MessageV2.repositoryQuery([
+        request("msg_30", "Знайди журнал лікарняних"),
+        request("msg_31", "В проекті"),
+      ]),
+    ).toBe("Знайди журнал лікарняних\nВ проекті")
+    expect(
+      MessageV2.repositoryQuery([
+        request("msg_30", "Знайди журнал лікарняних"),
+        request("msg_31", "Як мене звати?"),
+      ]),
+    ).toBe("Як мене звати?")
+  })
+
+  test("keeps evidence and verification checkpoints separate from the active request", () => {
+    const checkpoint = (id: string, key: "evidence_continue" | "verification_continue") =>
+      ({
+        info: userInfo(id),
+        parts: [
+          {
+            ...basePart(id, `prt_${id}`),
+            type: "text",
+            text: "Internal checkpoint instruction",
+            synthetic: true,
+            metadata: { [key]: true },
+          },
+        ] as SessionV1.Part[],
+      }) satisfies SessionV1.WithParts
+
+    const active = MessageV2.activeUserRequest([
+      summaryAssistant,
+      continueUser,
+      checkpoint("msg_20", "evidence_continue"),
+      checkpoint("msg_21", "verification_continue"),
+    ])
+
+    expect(active?.info.id).toBe(CONTINUE_USER)
+    expect(MessageV2.userRequestText(active)).toBe("Continue if you have next steps...")
   })
 })

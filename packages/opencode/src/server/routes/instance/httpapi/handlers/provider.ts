@@ -12,6 +12,7 @@ import { ProviderAuthApiError } from "../groups/provider"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { probeLmStudio } from "@/local-agent-runtime/lmstudio"
 import { snapshot } from "@/local-agent-runtime/resource-governor"
+import { CapabilityRouter } from "@/local-agent-runtime/capability-router"
 
 function mapProviderAuthError<A, R>(self: Effect.Effect<A, ProviderAuth.Error, R>) {
   return self.pipe(
@@ -80,6 +81,19 @@ export const providerHandlers = HttpApiBuilder.group(InstanceHttpApi, "provider"
       return snapshot()
     })
 
+    const capabilityRouter = Effect.fn("ProviderHttpApi.capabilityRouter")(function* () {
+      const config = yield* cfg.get()
+      const latest = CapabilityRouter.latest(config)
+      if (latest) return latest
+      return yield* Effect.promise(() =>
+        CapabilityRouter.route({
+          config,
+          requestShape: { textCharacters: 0, files: 0, images: 0, tools: 0 },
+          refresh: true,
+        }),
+      )
+    })
+
     const authorize = Effect.fn("ProviderHttpApi.authorize")(function* (ctx: {
       params: { providerID: ProviderV2.ID }
       payload: ProviderAuth.AuthorizeInput
@@ -126,6 +140,7 @@ export const providerHandlers = HttpApiBuilder.group(InstanceHttpApi, "provider"
       .handle("list", list)
       .handle("lmStudioProbe", lmStudioProbe)
       .handle("resourceGovernor", resourceGovernor)
+      .handle("capabilityRouter", capabilityRouter)
       .handle("auth", auth)
       .handleRaw("authorize", authorizeRaw)
       .handle("callback", callback)

@@ -49,6 +49,7 @@ import type {
   AssistantMessage,
   Message as MessageType,
   Part as PartType,
+  SessionStatus,
   ToolPart,
   UserMessage,
 } from "@opencode-ai/sdk/v2"
@@ -69,6 +70,7 @@ import { useTabs } from "@/context/tabs"
 import { legacySessionHref, requireServerKey, sessionHref } from "@/utils/session-route"
 import { useSDK } from "@/context/sdk"
 import { useSync } from "@/context/sync"
+import { useProviders } from "@/hooks/use-providers"
 import { notifySessionTabsRemoved } from "@/components/titlebar-session-events"
 import { sessionTitle } from "@/utils/session-title"
 import { scheduleConnectedMeasure } from "./measure"
@@ -128,12 +130,32 @@ const markBoundaryGesture = (input: {
   }
 }
 
-function TimelineThinkingRow(props: { reasoningHeading?: string; showReasoningSummaries: boolean }) {
+function TimelineThinkingRow(props: {
+  reasoningHeading?: string
+  showReasoningSummaries: boolean
+  status: SessionStatus["type"]
+  model?: string
+}) {
   const language = useLanguage()
+  const label = () => {
+    if (props.status === "verifying") return language.t("ui.sessionTurn.status.verifying")
+    if (props.status === "repairing") return language.t("ui.sessionTurn.status.repairing")
+    if (props.status === "verified") return language.t("ui.sessionTurn.status.verified")
+    return language.t("ui.sessionTurn.status.thinking")
+  }
 
   return (
     <div data-slot="session-turn-thinking">
-      <TextShimmer text={language.t("ui.sessionTurn.status.thinking")} />
+      <div class="flex min-w-0 items-center gap-2">
+        <TextShimmer text={label()} />
+        <Show when={props.model}>
+          {(model) => (
+            <span class="min-w-0 truncate text-12-regular text-text-weak">
+              {language.t("ui.sessionTurn.status.model", { model: model() })}
+            </span>
+          )}
+        </Show>
+      </div>
       <Show when={!props.showReasoningSummaries}>
         <TextReveal text={props.reasoningHeading} class="session-turn-thinking-heading" travel={25} duration={700} />
       </Show>
@@ -263,6 +285,7 @@ export function MessageTimeline(props: {
   const navigate = useNavigate()
   const serverSDK = useServerSDK()
   const sdk = useSDK()
+  const providers = useProviders(() => sdk().directory)
   const sync = useSync()
   const settings = useSettings()
   const tabs = useTabs()
@@ -1195,12 +1218,21 @@ export function MessageTimeline(props: {
       }
       case "Thinking": {
         const thinkingRow = row as Accessor<TimelineRowByTag<"Thinking">>
+        const model = createMemo(() => {
+          const messages = assistantMessagesByParent().get(thinkingRow().userMessageID) ?? emptyAssistantMessages
+          const message = messages.at(-1)
+          if (!message) return
+          const provider = providers.all().get(message.providerID)
+          return provider?.models[message.modelID]?.name ?? message.modelID
+        })
         return (
           <TimelineRowFrame row={thinkingRow}>
             <div data-slot="session-turn-message-container" class="w-full px-4 md:px-5">
               <TimelineThinkingRow
                 reasoningHeading={thinkingRow().reasoningHeading}
                 showReasoningSummaries={settings.general.showReasoningSummaries()}
+                status={thinkingRow().status}
+                model={model()}
               />
             </div>
           </TimelineRowFrame>

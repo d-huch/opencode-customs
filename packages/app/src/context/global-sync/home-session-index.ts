@@ -1,5 +1,6 @@
 import type { Event, Session, SessionV2Info, V2SessionListResponse } from "@opencode-ai/sdk/v2/client"
 import type { QueryClient } from "@tanstack/solid-query"
+import { createSignal } from "solid-js"
 import { trimSessions } from "./session-trim"
 import { pathKey } from "@/utils/path-key"
 
@@ -66,11 +67,15 @@ export function trimHomeSessionEvents(current: HomeSessionEvents | undefined, se
   }
 }
 
-export function homeSessionIndexSessions(index: HomeSessionIndex | undefined, events: HomeSessionEvents | undefined) {
+export function homeSessionIndexSessions(
+  index: HomeSessionIndex | undefined,
+  events: HomeSessionEvents | undefined,
+  deleted = new Set<string>(),
+) {
   if (!index) return []
   return (events?.entries ?? [])
     .filter((entry) => entry.sequence > index.eventSequence)
-    .reduce((sessions, entry) => applyHomeSessionEvent(sessions, entry.event), index.sessions)
+    .reduce((sessions, entry) => applyHomeSessionEvent(sessions, entry.event, deleted), index.sessions)
 }
 
 export function homeSessionIndexRefresh(event: Event["type"], connected: boolean) {
@@ -84,6 +89,8 @@ export function homeSessionIndexRefresh(event: Event["type"], connected: boolean
 export function createHomeSessionIndexCache(queryClient: QueryClient, server: string) {
   const indexKey = homeSessionIndexKey(server)
   const eventsKey = homeSessionEventsKey(server)
+  const deleted = new Set<string>()
+  const [deletionRevision, setDeletionRevision] = createSignal(0)
   let connected = false
 
   return {
@@ -97,20 +104,32 @@ export function createHomeSessionIndexCache(queryClient: QueryClient, server: st
       queryClient.setQueryData<HomeSessionEvents>(eventsKey, (current) => trimHomeSessionEvents(current, sequence))
     },
     sessions(index: HomeSessionIndex | undefined, events: HomeSessionEvents | undefined) {
-      return homeSessionIndexSessions(index, events)
+      deletionRevision()
+      return homeSessionIndexSessions(index, events, deleted).filter((session) => !deleted.has(session.id))
     },
     apply(event: HomeSessionEvent) {
+      if (!updateDeletionTombstone(event, deleted)) return
+      setDeletionRevision((revision) => revision + 1)
       if (!queryClient.getQueryState(indexKey)) return
-      const next = appendHomeSessionEvent(queryClient.getQueryData<HomeSessionEvents>(eventsKey), event)
+      const index = queryClient.getQueryData<HomeSessionIndex>(indexKey)
+      const current = queryClient.getQueryData<HomeSessionEvents>(eventsKey)
+      // The event query may be recreated with sequence 0 while the index remains cached
+      // with a later baseline. Keep local events ahead of that baseline or the UI will
+      // ignore them until the next index refetch.
+      const next = appendHomeSessionEvent(
+        (current?.sequence ?? 0) >= (index?.eventSequence ?? 0)
+          ? current
+          : { sequence: index?.eventSequence ?? 0, entries: [] },
+        event,
+      )
       if (queryClient.isFetching({ queryKey: indexKey, exact: true }) > 0) {
         queryClient.setQueryData(eventsKey, next)
         return
       }
 
-      const index = queryClient.getQueryData<HomeSessionIndex>(indexKey)
       if (index) {
         queryClient.setQueryData<HomeSessionIndex>(indexKey, {
-          sessions: homeSessionIndexSessions(index, next),
+          sessions: homeSessionIndexSessions(index, next, deleted),
           eventSequence: next.sequence,
         })
       }
@@ -142,7 +161,8 @@ export function retainHomeSessions(sessions: Session[], limit: number, now: numb
   return [...grouped.values()].flatMap((items) => trimSessions(items, { limit, permission: {}, now }))
 }
 
-export function applyHomeSessionEvent(sessions: Session[], event: HomeSessionEvent) {
+export function applyHomeSessionEvent(sessions: Session[], event: HomeSessionEvent, deleted = new Set<string>()) {
+  if (!updateDeletionTombstone(event, deleted)) return sessions
   const info = event.properties.info
   const index = sessions.findIndex((session) => session.id === info.id)
   if (event.type === "session.deleted" || info.parentID || typeof info.time.archived === "number") {
@@ -152,6 +172,19 @@ export function applyHomeSessionEvent(sessions: Session[], event: HomeSessionEve
   if (event.type !== "session.created" && event.type !== "session.updated") return sessions
   if (index === -1) return [...sessions, info]
   return sessions.with(index, info)
+}
+
+function updateDeletionTombstone(event: HomeSessionEvent, deleted: Set<string>) {
+  const sessionID = event.properties.info.id
+  if (event.type === "session.deleted") {
+    deleted.add(sessionID)
+    return true
+  }
+  if (event.type === "session.created") {
+    deleted.delete(sessionID)
+    return true
+  }
+  return !deleted.has(sessionID)
 }
 
 function toLegacySummary(session: SessionV2Info): Session {

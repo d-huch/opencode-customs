@@ -95,9 +95,10 @@ describe("buildRequestParts", () => {
       sessionDirectory: "C:\\Repos\\sst\\opencode",
     })
 
-    expect(result.requestParts.find((part) => part.type === "file")?.filename).toBe(
-      "C:\\Users\\Luke\\AppData\\Roaming\\ai.opencode.desktop.beta\\opencode.global.dat",
-    )
+    const attachment = result.requestParts.find((part) => part.type === "file")
+    expect(attachment?.filename).toBe("opencode.global.dat")
+    expect(attachment?.url).toBe("file:///C:/Users/Luke/AppData/Roaming/ai.opencode.desktop.beta/opencode.global.dat")
+    expect(attachment?.url.startsWith("data:")).toBe(false)
   })
 
   test("preserves reference aliases as directory file parts", () => {

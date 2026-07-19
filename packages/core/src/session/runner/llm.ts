@@ -24,6 +24,7 @@ import { SkillGuidance } from "../../skill/guidance"
 import { ReferenceGuidance } from "../../reference/guidance"
 import { RepositoryContextRouter } from "../../repository-context-router"
 import { ResponseLanguage } from "../../response-language"
+import { ResponseRepetition } from "../../response-repetition"
 import { ToolRegistry } from "../../tool/registry"
 import { ToolOutputStore } from "../../tool-output-store"
 import { SessionContextEpoch } from "../context-epoch"
@@ -222,6 +223,13 @@ const layer = Layer.effect(
         latestUser?.type === "user" && ResponseLanguage.needsExplicitInstruction(latestUser.text)
           ? ResponseLanguage.instruction(latestUser.text)
           : undefined
+      const responseControl = [
+        responseLanguageInstruction,
+        ResponseRepetition.instruction,
+        RepositoryContextRouter.searchScopeInstruction,
+      ]
+        .filter((part): part is string => part !== undefined)
+        .join("\n")
       const routed =
         latestUser?.type === "user"
           ? yield* repositoryContextRouter
@@ -248,7 +256,7 @@ const layer = Layer.effect(
       const request = LLM.request({
         model,
         providerOptions: { openai: { promptCacheKey } },
-        system: [responseLanguageInstruction, agent.info?.system, system.baseline, routed?.text]
+        system: [responseControl, agent.info?.system, system.baseline, routed?.text]
           .filter((part): part is string => part !== undefined && part.length > 0)
           .map(SystemPart.make),
         messages: [...toLLMMessages(context, model), ...(isLastStep ? [Message.assistant(MAX_STEPS_PROMPT)] : [])],

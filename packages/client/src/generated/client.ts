@@ -122,6 +122,12 @@ import type {
   RepositoryMapDiagnosticsOutput,
   RepositoryMapConfigureDiagnosticsInput,
   RepositoryMapConfigureDiagnosticsOutput,
+  RepositoryMapKnowledgeInput,
+  RepositoryMapKnowledgeOutput,
+  RepositoryMapRemoveKnowledgeInput,
+  RepositoryMapRemoveKnowledgeOutput,
+  RepositoryMapClearKnowledgeInput,
+  RepositoryMapClearKnowledgeOutput,
 } from "./types"
 import { ClientError } from "./client-error"
 
@@ -1052,6 +1058,42 @@ export function make(options: ClientOptions) {
             path: `/api/repository-map/diagnostics`,
             query: { location: input["location"] },
             body: { enabled: input["enabled"], clear: input["clear"] },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      knowledge: (input?: RepositoryMapKnowledgeInput, requestOptions?: RequestOptions) =>
+        request<RepositoryMapKnowledgeOutput>(
+          {
+            method: "GET",
+            path: `/api/repository-map/knowledge`,
+            query: { location: input?.["location"], search: input?.["search"], limit: input?.["limit"] },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      removeKnowledge: (input: RepositoryMapRemoveKnowledgeInput, requestOptions?: RequestOptions) =>
+        request<RepositoryMapRemoveKnowledgeOutput>(
+          {
+            method: "DELETE",
+            path: `/api/repository-map/knowledge/${encodeURIComponent(input.scope)}/${encodeURIComponent(input.id)}`,
+            query: { location: input["location"] },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      clearKnowledge: (input: RepositoryMapClearKnowledgeInput, requestOptions?: RequestOptions) =>
+        request<RepositoryMapClearKnowledgeOutput>(
+          {
+            method: "DELETE",
+            path: `/api/repository-map/knowledge/${encodeURIComponent(input.scope)}`,
+            query: { location: input["location"] },
             successStatus: 200,
             declaredStatuses: [401, 400],
             empty: false,

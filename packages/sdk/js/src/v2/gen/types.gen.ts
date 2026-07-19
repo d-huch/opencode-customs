@@ -691,6 +691,20 @@ export type SessionStatus =
   | {
       type: "busy"
     }
+  | {
+      type: "verifying"
+      attempt: number
+      checks: number
+    }
+  | {
+      type: "repairing"
+      attempt: number
+      max: number
+    }
+  | {
+      type: "verified"
+      checks: number
+    }
 
 export type QuestionOption = {
   /**
@@ -2014,6 +2028,8 @@ export type Config = {
     preserve_recent_tokens?: number
     reserved?: number
   }
+  verification?: ConfigVerification
+  rag?: ConfigRag
   experimental?: {
     disable_paste_summary?: boolean
     batch_tool?: boolean
@@ -2531,12 +2547,14 @@ export type LmStudioProbe = {
       active?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
       supported?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
     }
+    sizeBytes?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
     capabilities: {
       tools: boolean
       vision: boolean
       reasoning: boolean
       embeddings: boolean
     }
+    visionCapabilitySource?: "native_capability" | "native_input" | "native_type"
   }>
   error?: string
 }
@@ -2577,6 +2595,83 @@ export type ResourceGovernorSnapshot = {
     safeInputTokens: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
     reason: string
   }
+}
+
+export type ModelCapabilityRouterSelection = {
+  role: "embedding" | "utility" | "coding" | "vision" | "fallback"
+  providerID: string
+  modelID: string
+  instanceID?: string
+  name: string
+  score: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  context?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  sizeBytes?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  capabilities: {
+    tools: boolean
+    vision: boolean
+    reasoning: boolean
+    embeddings: boolean
+  }
+  reason: Array<string>
+}
+
+export type ModelCapabilityRouterActivation = {
+  status: "ready" | "switched" | "failed" | "rolled_back" | "degraded"
+  checkedAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  role: "embedding" | "utility" | "coding" | "vision" | "fallback"
+  requestedModelID: string
+  activeModelID: string
+  activeInstanceID?: string
+  previousModelID?: string
+  previousInstanceID?: string
+  attempts: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  failover: boolean
+  rollback: boolean
+  reason: Array<string>
+}
+
+export type ModelCapabilityRouterVisionArtifact = {
+  fileURL: string
+  filename: string
+  mime: string
+  originalWidth: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  originalHeight: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  originalBytes: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  preparedWidth: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  preparedHeight: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  preparedBytes: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  compressed: boolean
+  estimatedTokens: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  reason: Array<string>
+}
+
+export type ModelCapabilityRouterVision = {
+  status: "prepared" | "completed" | "failed"
+  checkedAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  modelID?: string
+  instanceID?: string
+  imageCount: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  originalBytes: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  preparedBytes: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  estimatedTokens: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  requestTokens?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  assistantMessageID?: string
+  failover: boolean
+  reason: Array<string>
+  artifacts: Array<ModelCapabilityRouterVisionArtifact>
+}
+
+export type ModelCapabilityRouterPlan = {
+  status: "ready" | "degraded" | "unavailable"
+  checkedAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  providerID: string
+  complexity: "low" | "medium" | "high"
+  pressure: "healthy" | "pressured" | "critical"
+  candidateCount: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  selections: Array<ModelCapabilityRouterSelection>
+  reason: Array<string>
+  activation?: ModelCapabilityRouterActivation
+  vision?: ModelCapabilityRouterVision
 }
 
 export type ProviderAuthMethod = {
@@ -3927,6 +4022,36 @@ export type ConfigV2ReferenceLocal = {
   path: string
   description?: string
   hidden?: boolean
+}
+
+export type ConfigVerificationCheck = {
+  /**
+   * Short stable name for the verification check
+   */
+  name: string
+  /**
+   * Repository-native command to execute
+   */
+  command: string
+  when?: string
+  timeout?: number
+}
+
+export type ConfigVerification = {
+  auto?: boolean
+  evidence?: boolean
+  repair_attempts?: number
+  evidence_attempts?: number
+  checks?: Array<ConfigVerificationCheck>
+}
+
+export type ConfigRag = {
+  embeddings?: boolean
+  memory?: boolean
+  model?: string
+  max_files?: number
+  max_chunks?: number
+  top_k?: number
 }
 
 export type PolicyEffect = "allow" | "deny"
@@ -6317,6 +6442,48 @@ export type RepositoryMapDiagnostics = {
 export type RepositoryMapDiagnosticsConfig = {
   enabled: boolean
   clear?: boolean
+}
+
+export type RepositoryMapMemoryEntry = {
+  id: string
+  kind: "route" | "summary"
+  text: string
+  terms: Array<string>
+  files: Array<string>
+  updatedAt: number
+  embeddingModel?: string
+  dimensions: number
+}
+
+export type RepositoryMapRagEntry = {
+  id: string
+  path: string
+  start: number
+  end: number
+  fileHash: string
+  updatedAt: number
+  dimensions: number
+}
+
+export type RepositoryMapKnowledge = {
+  memory: {
+    total: number
+    matched: number
+    entries: Array<RepositoryMapMemoryEntry>
+  }
+  rag: {
+    model?: string
+    total: number
+    matched: number
+    files: number
+    entries: Array<RepositoryMapRagEntry>
+  }
+}
+
+export type RepositoryMapKnowledgeScope = "memory" | "rag"
+
+export type RepositoryMapKnowledgeMutation = {
+  removed: number
 }
 
 export type EventModelsDevRefreshed = {
@@ -9585,6 +9752,34 @@ export type ProviderRuntimeResourcesResponses = {
 export type ProviderRuntimeResourcesResponse =
   ProviderRuntimeResourcesResponses[keyof ProviderRuntimeResourcesResponses]
 
+export type ProviderRuntimeRouterData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/provider/runtime/router"
+}
+
+export type ProviderRuntimeRouterErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type ProviderRuntimeRouterError = ProviderRuntimeRouterErrors[keyof ProviderRuntimeRouterErrors]
+
+export type ProviderRuntimeRouterResponses = {
+  /**
+   * Local Agent Runtime model capability route
+   */
+  200: ModelCapabilityRouterPlan
+}
+
+export type ProviderRuntimeRouterResponse = ProviderRuntimeRouterResponses[keyof ProviderRuntimeRouterResponses]
+
 export type ProviderAuthData = {
   body?: never
   path?: never
@@ -9905,6 +10100,43 @@ export type SessionUpdateResponses = {
 }
 
 export type SessionUpdateResponse = SessionUpdateResponses[keyof SessionUpdateResponses]
+
+export type SessionLogData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/log"
+}
+
+export type SessionLogErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+}
+
+export type SessionLogError = SessionLogErrors[keyof SessionLogErrors]
+
+export type SessionLogResponses = {
+  /**
+   * Get session log location
+   */
+  200: {
+    path: string
+    exists: boolean
+  }
+}
+
+export type SessionLogResponse = SessionLogResponses[keyof SessionLogResponses]
 
 export type SessionChildrenData = {
   body?: never
@@ -14023,6 +14255,129 @@ export type V2RepositoryMapConfigureDiagnosticsResponses = {
 
 export type V2RepositoryMapConfigureDiagnosticsResponse =
   V2RepositoryMapConfigureDiagnosticsResponses[keyof V2RepositoryMapConfigureDiagnosticsResponses]
+
+export type V2RepositoryMapKnowledgeData = {
+  body?: never
+  path?: never
+  query?: {
+    location?: {
+      directory?: string
+      workspace?: string
+    }
+    search?: string
+    limit?: string
+  }
+  url: "/api/repository-map/knowledge"
+}
+
+export type V2RepositoryMapKnowledgeErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2RepositoryMapKnowledgeError = V2RepositoryMapKnowledgeErrors[keyof V2RepositoryMapKnowledgeErrors]
+
+export type V2RepositoryMapKnowledgeResponses = {
+  /**
+   * Success
+   */
+  200: {
+    location: LocationInfo
+    data: RepositoryMapKnowledge
+  }
+}
+
+export type V2RepositoryMapKnowledgeResponse =
+  V2RepositoryMapKnowledgeResponses[keyof V2RepositoryMapKnowledgeResponses]
+
+export type V2RepositoryMapRemoveKnowledgeData = {
+  body?: never
+  path: {
+    scope: RepositoryMapKnowledgeScope
+    id: string
+  }
+  query?: {
+    location?: {
+      directory?: string
+      workspace?: string
+    }
+  }
+  url: "/api/repository-map/knowledge/{scope}/{id}"
+}
+
+export type V2RepositoryMapRemoveKnowledgeErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2RepositoryMapRemoveKnowledgeError =
+  V2RepositoryMapRemoveKnowledgeErrors[keyof V2RepositoryMapRemoveKnowledgeErrors]
+
+export type V2RepositoryMapRemoveKnowledgeResponses = {
+  /**
+   * Success
+   */
+  200: {
+    location: LocationInfo
+    data: RepositoryMapKnowledgeMutation
+  }
+}
+
+export type V2RepositoryMapRemoveKnowledgeResponse =
+  V2RepositoryMapRemoveKnowledgeResponses[keyof V2RepositoryMapRemoveKnowledgeResponses]
+
+export type V2RepositoryMapClearKnowledgeData = {
+  body?: never
+  path: {
+    scope: RepositoryMapKnowledgeScope
+  }
+  query?: {
+    location?: {
+      directory?: string
+      workspace?: string
+    }
+  }
+  url: "/api/repository-map/knowledge/{scope}"
+}
+
+export type V2RepositoryMapClearKnowledgeErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2RepositoryMapClearKnowledgeError =
+  V2RepositoryMapClearKnowledgeErrors[keyof V2RepositoryMapClearKnowledgeErrors]
+
+export type V2RepositoryMapClearKnowledgeResponses = {
+  /**
+   * Success
+   */
+  200: {
+    location: LocationInfo
+    data: RepositoryMapKnowledgeMutation
+  }
+}
+
+export type V2RepositoryMapClearKnowledgeResponse =
+  V2RepositoryMapClearKnowledgeResponses[keyof V2RepositoryMapClearKnowledgeResponses]
 
 export type PtyConnectData = {
   body?: never

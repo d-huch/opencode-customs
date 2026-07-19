@@ -244,6 +244,7 @@ declare global {
     api?: {
       setTitlebar?: (theme: { mode: "light" | "dark"; scheme?: "system" | "light" | "dark" }) => Promise<void>
       exportDebugLogs?: () => Promise<string>
+      clearDebugLogs?: () => Promise<{ files: number; bytes: number }>
     }
   }
 }

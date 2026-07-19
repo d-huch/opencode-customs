@@ -1,5 +1,6 @@
 import { NodeHttpServer, NodeHttpServerRequest } from "@effect/platform-node"
 import * as Http from "node:http"
+import net from "node:net"
 import { Deferred, Effect, Layer, Context, Stream } from "effect"
 import * as HttpServer from "effect/unstable/http/HttpServer"
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
@@ -701,6 +702,33 @@ export class TestLLMServer extends Context.Service<TestLLMServer, TestLLMServer.
 
       yield* router.add("POST", "/v1/chat/completions", handle("chat"))
       yield* router.add("POST", "/v1/responses", handle("responses"))
+      yield* router.add("GET", "/v1/models", () =>
+        Effect.succeed(
+          HttpServerResponse.jsonUnsafe({
+            data: [{ id: "vision-instance", object: "model", owned_by: "test" }],
+          }),
+        ),
+      )
+      yield* router.add("GET", "/api/v1/models", () =>
+        Effect.succeed(
+          HttpServerResponse.jsonUnsafe({
+            models: [
+              {
+                key: "vision-model",
+                display_name: "Test Vision Model",
+                type: "vlm",
+                max_context_length: 32_768,
+                loaded_instances: [{ id: "vision-instance", config: { context_length: 16_384 } }],
+                capabilities: {
+                  trained_for_tool_use: true,
+                  vision: true,
+                  input: { image: true },
+                },
+              },
+            ],
+          }),
+        ),
+      )
 
       yield* server.serve(router.asHttpEffect())
 
@@ -775,5 +803,32 @@ export class TestLLMServer extends Context.Service<TestLLMServer, TestLLMServer.
         misses: Effect.sync(() => [...misses]),
       })
     }),
-  ).pipe(Layer.provide(HttpRouter.layer), Layer.provide(NodeHttpServer.layer(() => Http.createServer(), { port: 0 })))
+  ).pipe(Layer.provide(HttpRouter.layer), Layer.provide(isolatedHttpServer()))
+}
+
+function isolatedHttpServer() {
+  return Layer.unwrap(
+    Effect.promise(
+      () =>
+        new Promise<number>((resolve, reject) => {
+          const server = net.createServer()
+          server.once("error", reject)
+          server.listen(0, "127.0.0.1", () => {
+            const address = server.address()
+            if (!address || typeof address === "string") {
+              server.close()
+              reject(new Error("Failed to reserve an HTTP test port"))
+              return
+            }
+            server.close((error) => {
+              if (error) {
+                reject(error)
+                return
+              }
+              resolve(address.port)
+            })
+          })
+        }),
+    ).pipe(Effect.map((port) => NodeHttpServer.layer(() => Http.createServer(), { host: "127.0.0.1", port }))),
+  )
 }

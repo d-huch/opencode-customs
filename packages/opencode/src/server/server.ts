@@ -6,6 +6,7 @@ import { ConfigProvider, Context, Effect, Exit, Layer, Scope } from "effect"
 import { HttpRouter, HttpServer } from "effect/unstable/http"
 import { OpenApi } from "effect/unstable/httpapi"
 import { createServer } from "node:http"
+import net from "node:net"
 import { MDNS } from "./mdns"
 import { HttpApiApp } from "./routes/instance/httpapi/server"
 import { disposeMiddleware } from "./routes/instance/httpapi/lifecycle"
@@ -32,6 +33,7 @@ type ServerApp = {
 type ListenOptions = CorsOptions & {
   port: number
   hostname: string
+  portSelection?: "preferred" | "ephemeral"
   mdns?: boolean
   mdnsDomain?: string
 }
@@ -115,10 +117,37 @@ function listenerLayer(opts: ListenOptions, port: number) {
 }
 
 function startWithPortFallback(opts: ListenOptions) {
+  if (opts.portSelection === "ephemeral") return startEphemeralListener(opts)
   if (opts.port !== 0) return startListener(opts, opts.port)
   // Match the legacy listener port-resolution behavior: explicit `0` prefers
   // 4096 first, then any free port.
   return startListener(opts, 4096).pipe(Effect.catch(() => startListener(opts, 0)))
+}
+
+function startEphemeralListener(opts: ListenOptions) {
+  return Effect.promise(() => availablePort(opts.hostname)).pipe(Effect.flatMap((port) => startListener(opts, port)))
+}
+
+function availablePort(hostname: string) {
+  return new Promise<number>((resolve, reject) => {
+    const probe = net.createServer()
+    probe.once("error", reject)
+    probe.listen(0, hostname, () => {
+      const address = probe.address()
+      if (!address || typeof address === "string") {
+        probe.close()
+        reject(new Error("Unable to reserve an ephemeral HTTP port"))
+        return
+      }
+      probe.close((error) => {
+        if (error) {
+          reject(error)
+          return
+        }
+        resolve(address.port)
+      })
+    })
+  })
 }
 
 function startListener(opts: ListenOptions, port: number) {

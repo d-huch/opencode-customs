@@ -76,6 +76,55 @@ export const DiagnosticsConfig = Schema.Struct({
 }).annotate({ identifier: "RepositoryMap.DiagnosticsConfig" })
 export interface DiagnosticsConfig extends Schema.Schema.Type<typeof DiagnosticsConfig> {}
 
+export const KnowledgeScope = Schema.Literals(["memory", "rag"]).annotate({
+  identifier: "RepositoryMap.KnowledgeScope",
+})
+export type KnowledgeScope = typeof KnowledgeScope.Type
+
+export const MemoryEntry = Schema.Struct({
+  id: Schema.String,
+  kind: Schema.Literals(["route", "summary"]),
+  text: Schema.String,
+  terms: Schema.Array(Schema.String),
+  files: Schema.Array(Schema.String),
+  updatedAt: NonNegativeInt,
+  embeddingModel: optional(Schema.String),
+  dimensions: NonNegativeInt,
+}).annotate({ identifier: "RepositoryMap.MemoryEntry" })
+export interface MemoryEntry extends Schema.Schema.Type<typeof MemoryEntry> {}
+
+export const RagEntry = Schema.Struct({
+  id: Schema.String,
+  path: Schema.String,
+  start: NonNegativeInt,
+  end: NonNegativeInt,
+  fileHash: Schema.String,
+  updatedAt: NonNegativeInt,
+  dimensions: NonNegativeInt,
+}).annotate({ identifier: "RepositoryMap.RagEntry" })
+export interface RagEntry extends Schema.Schema.Type<typeof RagEntry> {}
+
+export const Knowledge = Schema.Struct({
+  memory: Schema.Struct({
+    total: NonNegativeInt,
+    matched: NonNegativeInt,
+    entries: Schema.Array(MemoryEntry),
+  }),
+  rag: Schema.Struct({
+    model: optional(Schema.String),
+    total: NonNegativeInt,
+    matched: NonNegativeInt,
+    files: NonNegativeInt,
+    entries: Schema.Array(RagEntry),
+  }),
+}).annotate({ identifier: "RepositoryMap.Knowledge" })
+export interface Knowledge extends Schema.Schema.Type<typeof Knowledge> {}
+
+export const KnowledgeMutation = Schema.Struct({
+  removed: NonNegativeInt,
+}).annotate({ identifier: "RepositoryMap.KnowledgeMutation" })
+export interface KnowledgeMutation extends Schema.Schema.Type<typeof KnowledgeMutation> {}
+
 export const Info = Schema.Struct({
   status: Schema.Literals(["complete", "truncated", "unavailable"]),
   files: NonNegativeInt,

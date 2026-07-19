@@ -305,6 +305,35 @@ function providerCfg(url: string) {
   }
 }
 
+function visionProviderCfg(url: string) {
+  return {
+    provider: {
+      lmstudio: {
+        name: "LM Studio",
+        id: "lmstudio",
+        env: [],
+        npm: "@ai-sdk/openai-compatible",
+        models: {
+          "vision-model": {
+            id: "vision-model",
+            name: "Test Vision Model",
+            attachment: true,
+            reasoning: false,
+            temperature: false,
+            tool_call: true,
+            release_date: "2026-01-01",
+            limit: { context: 32_768, output: 4_096 },
+            cost: { input: 0, output: 0 },
+            options: {},
+          },
+        },
+        options: { apiKey: "lm-studio", baseURL: url },
+      },
+    },
+    verification: { evidence: false },
+  }
+}
+
 const writeText = Effect.fn("test.writeText")(function* (file: string, text: string) {
   const fs = yield* FSUtil.Service
   yield* fs.writeWithDirs(file, text)
@@ -546,6 +575,83 @@ it.instance("loop calls LLM and returns assistant message", () =>
     const parts = result.parts.filter((p) => p.type === "text")
     expect(parts.some((p) => p.type === "text" && p.text === "world")).toBe(true)
     expect(yield* llm.hits).toHaveLength(1)
+  }),
+)
+
+it.instance("routes a screenshot through vision, repository context, and a grounded recommendation", () =>
+  Effect.gen(function* () {
+    const { dir, llm } = yield* useServerConfig(visionProviderCfg)
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const db = (yield* Database.Service).db
+    yield* writeText(
+      path.join(dir, "resources/js/components/MedicalJournal.vue"),
+      "<template><MedicalJournalTable /></template>\n<script setup>const emptyState = 'No records'</script>",
+    )
+    yield* writeText(
+      path.join(dir, "app/Http/Controllers/MedicalJournalController.php"),
+      "<?php final class MedicalJournalController { public function index() {} }",
+    )
+
+    const photon = yield* Effect.promise(() => import("@silvia-odwyer/photon-node"))
+    const screenshot = new photon.PhotonImage(
+      new Uint8Array(Array.from({ length: 64 * 48 * 4 }, (_, index) => (index % 4 === 3 ? 255 : index % 251))),
+      64,
+      48,
+    )
+    const image = `data:image/png;base64,${Buffer.from(screenshot.get_bytes()).toString("base64")}`
+    screenshot.free()
+
+    const session = yield* sessions.create({ title: "Vision pipeline" })
+    yield* llm.text(
+      "The screenshot maps to resources/js/components/MedicalJournal.vue. I recommend fixing its empty-state layout there.",
+      { usage: { input: 321, output: 19 } },
+    )
+    const result = yield* prompt.prompt({
+      sessionID: session.id,
+      agent: "build",
+      model: { providerID: ProviderV2.ID.make("lmstudio"), modelID: ModelV2.ID.make("vision-model") },
+      parts: [
+        {
+          type: "text",
+          text: "Analyze this MedicalJournal screenshot, find the related local code, and recommend a UI change.",
+        },
+        { type: "file", mime: "image/png", filename: "medical-journal.png", url: image },
+      ],
+    })
+
+    expect(result.info.role).toBe("assistant")
+    expect(
+      result.parts.some(
+        (part) => part.type === "text" && part.text.includes("resources/js/components/MedicalJournal.vue"),
+      ),
+    ).toBe(true)
+    const history = yield* sessions.messages({ sessionID: session.id })
+    const storedImage = history
+      .flatMap((message) => message.parts)
+      .find((part): part is SessionV1.FilePart => part.type === "file" && part.mime === "image/png")
+    expect(storedImage?.url.startsWith("file:")).toBe(true)
+    expect(storedImage?.url.includes("base64")).toBe(false)
+
+    const request = JSON.stringify((yield* llm.inputs)[0])
+    expect(request).toContain("data:image/png;base64,")
+    expect(request).toContain("resources/js/components/MedicalJournal.vue")
+    expect(request).toContain("find the related local code")
+
+    const checkpoint = yield* SessionExecutionCheckpoint.load(db, session.id)
+    expect(checkpoint?.model_route?.activation).toMatchObject({
+      role: "vision",
+      activeModelID: "vision-model",
+      activeInstanceID: "vision-instance",
+    })
+    expect(checkpoint?.model_route?.vision).toMatchObject({
+      status: "completed",
+      modelID: "vision-model",
+      instanceID: "vision-instance",
+      imageCount: 1,
+      requestTokens: 321,
+      failover: false,
+    })
   }),
 )
 

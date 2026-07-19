@@ -6,10 +6,18 @@ import type { Database } from "../database/database"
 import { SessionMessage } from "./message"
 import { SessionSchema } from "./schema"
 import { SessionExecutionCheckpointTable } from "./sql"
+import { ModelCapabilityRouter } from "../model-capability-router"
 
 type DatabaseService = Database.Interface["db"]
 
-export type ActiveState = "preparing" | "streaming" | "settling_tools" | "continuing"
+export type ActiveState =
+  | "preparing"
+  | "streaming"
+  | "settling_tools"
+  | "verifying"
+  | "repairing"
+  | "verified"
+  | "continuing"
 export type TerminalState = "completed" | "interrupted" | "failed"
 export type State = ActiveState | TerminalState
 
@@ -21,7 +29,15 @@ export type Token = {
   readonly recovered: boolean
 }
 
-const activeStates: readonly ActiveState[] = ["preparing", "streaming", "settling_tools", "continuing"]
+const activeStates: readonly ActiveState[] = [
+  "preparing",
+  "streaming",
+  "settling_tools",
+  "verifying",
+  "repairing",
+  "verified",
+  "continuing",
+]
 
 export const isActive = (state: State): state is ActiveState => activeStates.includes(state as ActiveState)
 
@@ -74,63 +90,66 @@ export const begin = Effect.fn("SessionExecutionCheckpoint.begin")(function* (
   sessionID: SessionSchema.ID,
   runtime: "v1" | "v2",
 ) {
-  return yield* db.transaction((tx) =>
-    Effect.gen(function* () {
-      const previous = yield* tx
-        .select()
-        .from(SessionExecutionCheckpointTable)
-        .where(eq(SessionExecutionCheckpointTable.session_id, sessionID))
-        .get()
-      if (
-        previous !== undefined &&
-        isActive(previous.state) &&
-        previous.owner_pid !== process.pid &&
-        processAlive(previous.owner_pid)
-      )
-        return yield* Effect.die(`Session execution is owned by live process ${previous.owner_pid}`)
-      const recovered =
-        previous !== undefined &&
-        previous.runtime === runtime &&
-        isActive(previous.state) &&
-        !processAlive(previous.owner_pid)
-      const generation = (previous?.generation ?? 0) + 1
-      const now = Date.now()
-      const executionID = crypto.randomUUID()
-      yield* tx
-        .insert(SessionExecutionCheckpointTable)
-        .values({
-          session_id: sessionID,
-          runtime,
-          execution_id: executionID,
-          generation,
-          state: "preparing",
-          step: 1,
-          owner_pid: process.pid,
-          recoveries: (previous?.recoveries ?? 0) + Number(recovered),
-          time_started: now,
-          time_updated: now,
-        })
-        .onConflictDoUpdate({
-          target: SessionExecutionCheckpointTable.session_id,
-          set: {
-            execution_id: executionID,
+  return yield* db
+    .transaction((tx) =>
+      Effect.gen(function* () {
+        const previous = yield* tx
+          .select()
+          .from(SessionExecutionCheckpointTable)
+          .where(eq(SessionExecutionCheckpointTable.session_id, sessionID))
+          .get()
+        if (
+          previous !== undefined &&
+          isActive(previous.state) &&
+          previous.owner_pid !== process.pid &&
+          processAlive(previous.owner_pid)
+        )
+          return yield* Effect.die(`Session execution is owned by live process ${previous.owner_pid}`)
+        const recovered =
+          previous !== undefined &&
+          previous.runtime === runtime &&
+          isActive(previous.state) &&
+          !processAlive(previous.owner_pid)
+        const generation = (previous?.generation ?? 0) + 1
+        const now = Date.now()
+        const executionID = crypto.randomUUID()
+        yield* tx
+          .insert(SessionExecutionCheckpointTable)
+          .values({
+            session_id: sessionID,
             runtime,
+            execution_id: executionID,
             generation,
             state: "preparing",
             step: 1,
-            assistant_message_id: null,
             owner_pid: process.pid,
             recoveries: (previous?.recoveries ?? 0) + Number(recovered),
-            error: null,
             time_started: now,
             time_updated: now,
-            time_completed: null,
-          },
-        })
-        .run()
-      return { sessionID, runtime, executionID, generation, recovered } satisfies Token
-    }),
-  ).pipe(Effect.orDie)
+          })
+          .onConflictDoUpdate({
+            target: SessionExecutionCheckpointTable.session_id,
+            set: {
+              execution_id: executionID,
+              runtime,
+              generation,
+              state: "preparing",
+              step: 1,
+              assistant_message_id: null,
+              model_route: null,
+              owner_pid: process.pid,
+              recoveries: (previous?.recoveries ?? 0) + Number(recovered),
+              error: null,
+              time_started: now,
+              time_updated: now,
+              time_completed: null,
+            },
+          })
+          .run()
+        return { sessionID, runtime, executionID, generation, recovered } satisfies Token
+      }),
+    )
+    .pipe(Effect.orDie)
 })
 
 export const advance = Effect.fn("SessionExecutionCheckpoint.advance")(function* (
@@ -147,6 +166,28 @@ export const advance = Effect.fn("SessionExecutionCheckpoint.advance")(function*
         assistant_message_id: input.assistantMessageID,
         time_updated: Date.now(),
       })
+      .where(
+        and(
+          eq(SessionExecutionCheckpointTable.session_id, token.sessionID),
+          eq(SessionExecutionCheckpointTable.execution_id, token.executionID),
+          eq(SessionExecutionCheckpointTable.generation, token.generation),
+        ),
+      )
+      .returning({ sessionID: SessionExecutionCheckpointTable.session_id })
+      .get()
+      .pipe(Effect.orDie)) !== undefined
+  )
+})
+
+export const setModelRoute = Effect.fn("SessionExecutionCheckpoint.setModelRoute")(function* (
+  db: DatabaseService,
+  token: Token,
+  plan: ModelCapabilityRouter.Plan,
+) {
+  return (
+    (yield* db
+      .update(SessionExecutionCheckpointTable)
+      .set({ model_route: plan, time_updated: Date.now() })
       .where(
         and(
           eq(SessionExecutionCheckpointTable.session_id, token.sessionID),

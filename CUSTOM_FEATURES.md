@@ -83,15 +83,18 @@ For a sufficiently descriptive task, the router:
 
 1. Extracts Unicode-aware concept seeds from the prompt.
 2. Grounds those seeds in source-code evidence while excluding generated output, dependencies, caches, tests, lockfiles,
-   and other noisy paths.
+   and other noisy paths. A language-independent adaptive prefix lets inflected forms and likely spelling mistakes match
+   repository text, but a concept is accepted only when the surrounding source provides enough structural evidence.
 3. Reads nearby source context and discovers repository-specific identifiers and compound terms.
 4. Expands that learned vocabulary through several evidence hops.
 5. Ranks files that cover multiple requested concepts and selects existing implementations as analogues.
 6. Expands the best evidence through observed import, reference, and call edges.
 7. Produces a topology slice grouped by the directories and project areas that actually exist in the repository.
 
-Short requests with only a few broad terms skip multi-hop concept expansion and use the structural route. Concept search,
-rendered vocabulary, selected files, symbols, evidence hops, and LSP lookups all have explicit time and size budgets.
+Short abstract requests with two meaningful terms, or one sufficiently distinctive term, can use concept expansion. The
+router shows the observed repository spelling beside the original prompt form when they differ. It never rewrites the
+user's request from a dictionary and never treats a fuzzy lexical match as proof by itself. Concept search, rendered
+vocabulary, selected files, symbols, evidence hops, and LSP lookups all have explicit time and size budgets.
 
 For example, a request for a new domain screen may lead to an existing feature's navigation definition, data source,
 backend handler, and UI component—but only when those relationships are evidenced by the current project. In a different
@@ -109,9 +112,20 @@ defaults to 1,200 tokens when model capacity is unknown and otherwise uses 8% of
 between 512 and 1,600 tokens. Final request fitting and compaction still apply after retrieval, so RAG cannot bypass the
 provider's configured context limit.
 
-This is a local hybrid retrieval path, not a remote embedding service. It combines the incremental map, learned project
-vocabulary, literal evidence, LSP symbols, and observed graph edges. Retrieved source is treated as untrusted project data
-and remains a navigation aid; the agent must inspect current files before editing.
+This is a local hybrid retrieval path. It always combines the incremental map, learned project vocabulary, literal
+evidence, LSP symbols, and observed graph edges. When the configured LM Studio server already has an embedding model
+loaded, it also maintains a location-scoped vector index under the OpenCode cache directory. The index accepts arbitrary
+text source rather than a fixed language or framework list, rejects binary and oversized files, and updates changed or
+removed paths from the existing file watcher.
+
+The embedding layer is deliberately bounded. By default it retains at most 256 files and 1,024 chunks, embeds no more
+than 12 chunks from one file, returns at most six unique file matches, and gives repository lookup three seconds before
+falling back to graph and lexical ranking. Background indexing does not hold the search lock while LM Studio computes a
+batch, so a partially built index remains queryable. OpenCode Customs never auto-loads an embedding model: if none is
+already loaded, the entire vector path stays inactive and consumes no LM Studio model memory.
+
+Retrieved source is treated as untrusted project data and remains a navigation aid; the agent must inspect current files
+before editing. Embedding line anchors improve the bounded source windows but do not bypass the Research Evidence Loop.
 
 ## Durable project memory
 
@@ -121,10 +135,29 @@ Each project has a small local memory file under the OpenCode cache directory. I
 - Stable bullets from normalized compaction summaries: objective, important details, completed work, and verified relevant
   files. Transient **Active**, **Blocked**, and **Next Move** sections are not persisted as durable memory.
 
-Recall is lexical and query-specific. At most eight matching memory records contribute file ranking, while at most four
-distinct notes and 1,200 note characters can be rendered. The store keeps no more than 96 entries per project and expires
-entries after 90 days. Memory never replaces source verification and does not copy the full conversation back into the
-model request.
+Recall is query-specific. Exact lexical and path matches remain authoritative; when the current embedding model matches
+vectors stored with memory entries, semantic matches are merged without displacing lexical results. At most eight
+matching memory records contribute file ranking, while at most four distinct notes and 1,200 note characters can be
+rendered. The store keeps no more than 96 entries per project and expires entries after 90 days. Memory never replaces
+source verification and does not copy the full conversation back into the model request.
+
+Embedding RAG and semantic memory can be tuned in `opencode.json` or `opencode.jsonc`:
+
+```jsonc
+{
+  "rag": {
+    "embeddings": true,
+    "memory": true,
+    // Optional. Otherwise the first already-loaded LM Studio embedding model is used.
+    "model": "your-embedding-model-id",
+    "max_files": 256,
+    "max_chunks": 1024,
+    "top_k": 6,
+  },
+}
+```
+
+Set `embeddings` to `false` to keep only graph/LSP/lexical RAG, or `memory` to `false` to keep durable memory lexical.
 
 ## Desktop Map panel
 
@@ -145,16 +178,17 @@ or when validating index behavior.
 Diagnostics are disabled by default and can be enabled from the **Map** panel. After enabling them, send a prompt to see
 the location-scoped timeline. Entries may include these stages:
 
-| Stage     | Meaning                                                                   |
-| --------- | ------------------------------------------------------------------------- |
-| `prompt`  | The router received the user request.                                     |
-| `map`     | Structural map state and availability.                                    |
-| `concept` | Concept grounding, learned vocabulary, evidence hops, and search timing.  |
-| `lsp`     | Semantic lookup start, cache use, completion, timeout, or failure.        |
-| `context` | Number of selected files and topology areas.                              |
-| `rag`     | Bounded snippet count, retrieved characters, and matching memory records. |
-| `model`   | Provider request start, finish, or failure.                               |
-| `router`  | An unexpected routing failure handled by the fallback path.               |
+| Stage       | Meaning                                                                   |
+| ----------- | ------------------------------------------------------------------------- |
+| `prompt`    | The router received the user request.                                     |
+| `map`       | Structural map state and availability.                                    |
+| `concept`   | Concept grounding, learned vocabulary, evidence hops, and search timing.  |
+| `lsp`       | Semantic lookup start, cache use, completion, timeout, or failure.        |
+| `embedding` | Loaded model, indexed file/chunk counts, and bounded vector matches.      |
+| `context`   | Number of selected files and topology areas.                              |
+| `rag`       | Bounded snippet count, retrieved characters, and matching memory records. |
+| `model`     | Provider request start, finish, or failure.                               |
+| `router`    | An unexpected routing failure handled by the fallback path.               |
 
 The timeline keeps only a bounded set of recent entries in memory. Use **Clear** to remove the current entries. Disabling
 diagnostics stops new entries from being recorded; it does not change routing behavior.
@@ -203,9 +237,20 @@ model receives a conservative startup budget instead of an unbounded request. Un
 reduced further so normal session compaction happens before inference allocation.
 
 Local model streams are serialized by default. A second request waits in a bounded process-global admission queue rather
-than starting another Metal/MLX allocation in parallel. When available RAM or OpenCode RSS reaches the critical policy,
-new local inference is rejected with a recoverable resource-pressure error; cloud providers are not throttled by this
-local-model queue.
+than starting another Metal/MLX allocation in parallel. Interactive chat remains available at critical pressure with
+the minimum safe context budget because macOS raw free-memory counters do not include all reclaimable memory. Background
+embedding and indexing requests are pressure-gated instead, so they cannot compete with the user's provider turn.
+Local-model crash cooldowns still reject new inference briefly, and cloud providers are not throttled by this queue.
+
+Failures that happen after an asynchronous prompt has been accepted are persisted on the corresponding assistant turn
+and return the session to `idle`. The desktop therefore shows the error in the timeline instead of leaving a blank
+assistant record that looks like an ignored message.
+
+The latest active user request is also bound directly to the provider turn after compaction. When the original message
+has left the fitted projection, only runtime-authored continuation records for compaction, research evidence, or
+verification may supply that binding; arbitrary synthetic text is ignored. The exact active request is reused for RAG,
+model routing, progress narration, and the final answer, preventing English summaries, memories, or tool output from
+changing the response language or restarting an older objective.
 
 The desktop **Runtime** panel shows available RAM, OpenCode server RSS, active and waiting local requests, and the latest
 safe-context decision. The same snapshot is available through the JavaScript SDK as
@@ -220,8 +265,8 @@ The defaults can be tuned for development with `OPENCODE_LOCAL_AGENT_MAX_MODEL_C
 
 Agent execution now persists a session-scoped checkpoint in SQLite instead of relying only on an in-memory loop. Each
 generation records its runtime (`v1` or `v2`), execution identity, owner process, provider step, assistant message, and
-the current phase: `preparing`, `streaming`, `settling_tools`, or `continuing`. Completion, interruption, and failure are
-terminal states with timestamps and an optional error.
+the current phase: `preparing`, `streaming`, `settling_tools`, `verifying`, `repairing`, `verified`, or `continuing`.
+Completion, interruption, and failure are terminal states with timestamps and an optional error.
 
 After the OpenCode server process exits unexpectedly, a new process claims only checkpoints whose previous owner is no
 longer alive. The V2 runtime discovers these abandoned generations during startup. The legacy desktop runtime discovers
@@ -239,6 +284,193 @@ an automatic restart loop that repeatedly allocates memory.
 
 The checkpoint is an execution boundary, not a distributed lease. Current ownership is process-local; clustered or
 multi-host execution will require a durable lease and fencing design in a later runtime layer.
+
+### Local Agent Runtime: capability-based multi-model routing
+
+The Capability Router evaluates models available in LM Studio and assigns them to four independent roles:
+`embedding`, `utility`, `coding`, and `vision`. It does not inspect model names, business vocabulary,
+programming languages, frameworks, or project layouts. Inputs are limited to discovered model type and capabilities,
+active or supported context, reported model size, the structured request shape, the preferred session model, and the
+Resource Governor pressure state.
+
+Request complexity is derived from bounded structural signals: text size, attachment count, image count, and available
+tool count. Under memory pressure, utility scoring favors smaller loaded candidates. Coding scoring favors
+tool capability, reasoning controls, sufficient context, and the model already selected for the session. Vision is a
+required role only when the current request includes image input. An unavailable required role is reported explicitly
+instead of silently selecting an incompatible model.
+
+The composer selection is authoritative for the primary coding role when LM Studio reports that candidate as compatible
+and eligible under the current resource state. The switcher resolves both the OpenCode catalog identifier and the native
+LM Studio instance identifier before routing, so an alias mismatch cannot discard the preference. Context capacity still
+ranks utility and embedding roles, but a small utility model with a larger context window cannot silently take
+over an ordinary tool-bearing coding turn. The request shape also reflects the tools actually exposed to the agent rather
+than only per-message tool overrides.
+
+Every provider-turn route is stored in the durable execution checkpoint with its generation. The recorded plan contains
+the selected model for each role, score, context, size, capability snapshot, resource pressure, and stable reason codes.
+Checkpoint fencing prevents an obsolete process from replacing a newer generation's decision. The desktop **Runtime**
+panel localizes those reason codes and displays the selected roles, model names, scores, context limits, reported model
+sizes, candidate count, and current Resource Governor state. The latest route is also available through the JavaScript
+SDK as `provider.runtime.router()` at `GET /provider/runtime/router`.
+
+The embedding role is used immediately by the bounded RAG index when a compatible model is already loaded. Embedding
+indexing remains background-only and never auto-loads a model. Coding and vision provider turns can also consider
+downloaded but unloaded candidates while host pressure is healthy or pressured; critical pressure limits the route to
+models that are already loaded.
+
+The utility role is applied only to explicit background turns such as automatic history compaction. The selected coding
+model remains authoritative for interactive analysis and tool execution even when a smaller utility model reports a
+larger context window. A utility handoff preserves the active coding instance, preventing compaction and coding turns
+from repeatedly unloading and reloading each other.
+
+Before a provider turn, the Local Agent Runtime serializes model handoffs per LM Studio server. A handoff first loads the
+selected model with the governor's conservative context budget and probes the native model list again. The session is
+given the new instance identifier only after LM Studio reports that exact instance as loaded. Interactive provider turns
+are fail-closed: when the selected coding or vision model is incompatible, cannot fit in memory, fails to load, or fails
+its readiness probe, the request stops with a visible error. It is never handed to another model automatically. A
+previous instance may remain loaded as rollback state, but it does not receive the failed request.
+
+OpenCode tracks model-request ownership in the Resource Governor. It never unloads an instance that another local
+request is using, and it never automatically unloads an instance that was loaded outside OpenCode. Once a replacement
+passes its readiness check, an idle previous instance created by this runtime may be unloaded through LM Studio's native
+API. Cleanup failure is diagnostic and does not invalidate the already-ready replacement.
+
+The activation result is added to the generation-fenced model-route checkpoint: active and previous model identifiers,
+instance identifiers, role, attempt count, rollback state, status, and stable reason codes. Legacy failover fields remain
+decodable for old checkpoints but are always `false` for new executions. The desktop
+**Runtime** panel refreshes this state while open and shows the latest handoff beside the role recommendations. A model
+process crash during inference remains a failed provider turn; it is not silently retried forever.
+
+### Local Agent Runtime: screenshot vision pipeline
+
+Screenshot input is normalized before model execution. Images chosen from disk remain file references, while clipboard
+images are decoded once and written as durable artifacts under the standard OpenCode data directory. The persisted
+session history, execution checkpoint, and JSONL diagnostics contain only the local `file://` reference and bounded
+metadata—not an expanding base64 copy. A base64 data URL is materialized transiently only at the provider boundary when
+an OpenAI-compatible LM Studio endpoint requires it.
+
+The image pipeline reads the configured attachment limits and current Resource Governor state. Photon decodes each
+image, preserves it when it already fits, and otherwise reduces dimensions and encoding size with bounded quality and
+scale steps. Pressured and critical hosts receive progressively smaller pixel and byte budgets. A sidecar records the
+original and prepared dimensions, byte counts, compression decision, estimated image tokens, MIME type, and stable
+reason codes. Unsupported or undecodable input fails before a text-only provider turn can silently ignore it.
+
+LM Studio capability probing recognizes native VLM model types, explicit vision flags, and structured image-input
+metadata. A screenshot makes `vision` a required route. The Capability Router selects only a compatible candidate and
+the model switcher performs the normal readiness check. If that model cannot be activated, the turn reports the failure
+without sending the image to the coding, utility, or another vision model. Successful, failed, and rollback states are
+generation-fenced in the execution checkpoint.
+
+The repository router and bounded RAG run in the same provider turn as screenshot analysis. This allows the model to
+connect visible UI evidence to observed project files and return a source-grounded recommendation without placing whole
+files or duplicate image payloads in history. The desktop **Runtime** panel shows the selected vision model, preparation
+status, image count, dimensions, original and prepared size, estimated and actual request tokens, selection reasons, and
+rollback state.
+
+HTTP integration tests use isolated loopback listeners with reserved concrete ports. This avoids the platform-specific
+`EADDRINUSE` behavior previously seen when several test layers independently interpreted port `0`, while dedicated
+server tests still cover OpenCode's preferred-port and explicit ephemeral-port semantics.
+
+Tool-loop protection spans recent assistant messages rather than only one provider response. Calls are compared with a
+stable argument fingerprint, and repaired invalid calls are grouped by their intended tool even when validation error
+text changes. A second malformed call for the same intended tool is settled as an error and stops the provider turn,
+preventing schema failures from growing context until a local model or the host runs out of memory. Deterministic repair
+accepts only complete object arguments and lossless syntax fixes such as fenced JSON, trailing commas, or literal control
+characters; it deliberately refuses to guess the missing end of a truncated search pattern or path.
+
+### Verification loop and bounded repair
+
+The desktop agent now treats verification as an execution phase instead of relying only on a sentence in the system
+prompt. When a turn changes project files, completion is gated until the agent calls the `verification` tool or the
+bounded attempt budget is exhausted. Ordinary questions without repository routing or repository tool activity are not
+gated; read-only repository investigations use the separate evidence loop described below.
+
+The verifier is stack-independent. The model selects the smallest checks from repository instructions, existing focused
+test patterns, or an optional project registry. Commands run through the existing Shell tool, so normal permissions,
+timeouts, cancellation, output truncation, and external-directory protection still apply. The verifier also requests
+diagnostics from active language servers for at most 20 supplied changed files. It does not contain Laravel, Node,
+Unity, C#, or business-domain keyword tables.
+
+A failed check moves the durable checkpoint to `repairing` and returns compact evidence to the model. The agent repairs
+the relevant cause and reruns verification. The default budget is one initial verification plus two repair attempts;
+after that, the agent must report the failed or unavailable checks instead of claiming success. A successful result is
+accepted only when it covers every file changed in the current real user turn and no later assistant turn edited files.
+This prevents a stale successful test result from validating a subsequent repair.
+
+The UI exposes **Verifying changes**, **Repairing failed checks**, and **Verification passed** session states. Completed
+verification tool output remains in session history as the evidence report, including command, exit status, changed
+files, LSP coverage, and whether no executable check was available.
+
+Project-specific checks are optional and declarative:
+
+```jsonc
+{
+  "verification": {
+    "auto": true,
+    "evidence": true,
+    "repair_attempts": 2,
+    "evidence_attempts": 2,
+    "checks": [
+      {
+        "name": "focused project check",
+        "command": "your repository-native command",
+        "when": "Describe which changed files or subsystem make this check relevant",
+        "timeout": 120000,
+      },
+    ],
+  },
+}
+```
+
+The configured list is guidance, not a hard-coded command matrix. The agent selects only relevant entries and may use a
+narrower repository-native command when the project already documents one.
+
+### Research evidence loop
+
+Read-only repository analysis now has its own bounded completion gate. It activates when the repository router provides
+query-grounded project context or when the current real user turn uses repository discovery and read tools. Generic
+fallback landmarks do not activate the gate. Activation depends on
+structural runtime evidence, not on business words, programming languages, frameworks, or translated keyword tables.
+
+Before the final answer, the agent submits an `evidence` report. A completed finding is accepted only when every cited
+path was successfully read during the current user turn. A search that cannot establish the requested relationship can
+submit a blocked report with concrete unresolved points. This allows honest negative results without converting a guess
+into a verified fact. Evidence becomes stale when additional repository research runs after submission, so the agent
+must submit it again before completion.
+
+Repository guidance requires the agent to inspect bounded router evidence before launching another search, forbids
+inventing paths or relationships from framework conventions, and allows at most one targeted lookup for a specifically
+missing relationship. This keeps abstract investigations on the strongest observed implementation path instead of
+restarting equivalent grep, glob, and shell discovery loops.
+
+The default budget is the initial investigation plus two bounded follow-ups. Continuations repeat the exact latest
+active user text instead of an English control message. This keeps local models anchored to both the current objective
+and the user's language after automatic compaction. Historical `Objective` and `Next Move` sections remain background
+context and cannot replace the current request.
+
+The evidence loop complements change verification rather than replacing it. Turns that modify files are checked by the
+`verification` tool; read-only investigations are grounded by the `evidence` tool. Simple conversation without routed
+repository context remains ungated.
+
+### Freshness and external fact verification
+
+General conversation is allowed, but concrete external facts are no longer trusted solely because the selected model
+can produce a fluent answer. When no project context grounds the request, the same interactive model selected in the
+composer performs a short epistemic classification. The classifier distinguishes requests answerable from supplied
+context, calculation, transformation, or creative work from requests whose exact answer depends on current or
+potentially post-training external information. The policy is domain-, language-, framework-, and product-neutral; it
+does not use a dictionary of brand names or translated trigger words.
+
+The decision is persisted on the genuine user message so tool continuation, compaction, and crash recovery do not
+classify the same request repeatedly. A turn that requires fresh evidence is temporarily restricted to the `websearch`
+tool with required tool choice. After a successful search, the normal tool set is restored and the answer must prefer
+primary or authoritative sources, link them directly, and disclose unverified claims. If search is unavailable, denied,
+or fails, the gate permits no automatic retry and instructs the model to report that verification is unavailable rather
+than fill exact facts from memory. The classifier never switches to a utility model or an automatic fallback model.
+
+The per-session JSONL log records `freshness.routed` with the selected interactive model, decision, reason, and whether
+the conservative failure policy was used. The visible web-search tool call provides the corresponding source evidence
+inside the session timeline.
 
 Custom providers do not always publish model limits. OpenCode Customs treats missing capacity as unknown rather than
 unlimited. A custom model without catalog or user-supplied limits receives a conservative 4,096-token context budget and
@@ -292,17 +524,53 @@ Format references: [Build plugins](https://learn.chatgpt.com/docs/build-plugins)
 
 ## Repository-map API
 
+### RAG and memory viewer
+
+The desktop **Map** panel opens a dedicated **RAG & Memory** viewer for the current project location. The viewer queries
+the real embedding index and durable repository-memory stores rather than maintaining a second UI-only database. Search
+is performed server-side and each request returns at most 200 matching records. Embedding vectors are never serialized
+to the desktop UI; RAG rows expose source paths, line anchors, hashes, timestamps, model metadata, and vector dimensions,
+while memory rows expose their verified text, terms, source files, kind, timestamp, and embedding metadata.
+
+Individual records can be deleted after confirmation. Each store can also be cleared independently after a second
+confirmation that includes the current record count. Every operation remains location-scoped, so it affects only the
+project currently selected in the desktop client. Clearing the RAG store does not silently start new background work;
+use **Reindex** in the Map panel when a fresh semantic index is wanted.
+
 The desktop UI uses the location-aware V2 server API:
 
-| Method | Path                              | Purpose                                             |
-| ------ | --------------------------------- | --------------------------------------------------- |
-| `GET`  | `/api/repository-map`             | Return the current map, building it when necessary. |
-| `POST` | `/api/repository-map/refresh`     | Rebuild the structural map.                         |
-| `GET`  | `/api/repository-map/diagnostics` | Read live diagnostic state and recent entries.      |
-| `POST` | `/api/repository-map/diagnostics` | Enable, disable, or clear diagnostics.              |
+| Method   | Path                                         | Purpose                                             |
+| -------- | -------------------------------------------- | --------------------------------------------------- |
+| `GET`    | `/api/repository-map`                        | Return the current map, building it when necessary. |
+| `POST`   | `/api/repository-map/refresh`                | Rebuild the structural map.                         |
+| `GET`    | `/api/repository-map/diagnostics`            | Read live diagnostic state and recent entries.      |
+| `POST`   | `/api/repository-map/diagnostics`            | Enable, disable, or clear diagnostics.              |
+| `GET`    | `/api/repository-map/knowledge`              | Search bounded RAG and memory metadata.             |
+| `DELETE` | `/api/repository-map/knowledge/{scope}/{id}` | Delete one `rag` or `memory` record.                |
+| `DELETE` | `/api/repository-map/knowledge/{scope}`      | Clear one location-scoped knowledge store.          |
 
 All endpoints accept the standard location query used by the V2 API. Generated Promise, Effect, and JavaScript SDK
 clients expose the same operations through `repositoryMap`.
+
+## Per-session diagnostic logs
+
+OpenCode Customs writes one append-only JSONL diagnostic file per active session under
+`~/.local/share/opencode/log/sessions/<session-id>.jsonl` by default. Each line is an independently parseable event with
+an ISO timestamp, session ID, event type, optional message and execution IDs, and bounded structured data. Events cover
+the original user prompt, selected and requested models, provider requests, tool calls and results, compaction,
+execution completion or failure, and checkpoint recovery. Tool output and other large strings are capped so diagnostics
+cannot reproduce the unbounded-memory problem they are intended to investigate. Provider credentials and request
+headers are never recorded.
+
+The desktop **Runtime** menu includes **Export logs** and **Clear all logs** actions. Export uses the existing debug ZIP
+and includes per-session JSONL files alongside desktop, server, network, and crash diagnostics. Clear requires explicit
+confirmation, truncates every collected log file, and lets active processes continue writing fresh events without a
+restart. New events can therefore appear immediately after clearing when a session is still running.
+
+For a local desktop session, the **Context** tab shows the resolved JSONL path and a **Show session log** button. The
+button refreshes the file state before revealing it in Finder or the platform file manager, so a cleared or not-yet-created
+log produces an explicit message instead of a silent failure. Remote server sessions do not expose a host filesystem
+link in the desktop UI.
 
 ## Custom desktop branding
 
@@ -326,10 +594,10 @@ are packaged separately so Finder and the running application use the same brand
 - Semantic depth depends on installed and healthy language servers.
 - Concept routing requires enough prompt evidence to ground terms in the project. Short or highly generic prompts fall
   back to structural ranking.
-- Learned vocabulary is lexical and graph-assisted, not an embedding database. It can miss relationships that are only
-  implied at runtime or stored outside the repository.
-- Durable memory uses query-term similarity rather than vector embeddings. It intentionally favors small, explainable
-  recall and may omit a semantically related note that shares no project terminology with the new request.
+- Vector recall requires an embedding model that is already loaded in the configured LM Studio server. Without one,
+  routing remains lexical, graph-assisted, and LSP-aware. OpenCode Customs will not load an additional model automatically.
+- Embedding coverage is intentionally bounded and incremental. A file outside the retained index can still be found by
+  the structural, concept, literal, or LSP paths, but it will not contribute a vector match until indexed.
 - If the process dies after an external tool performs a side effect but before its result is committed, recovery marks
   that call interrupted instead of replaying it. The runtime cannot prove whether an arbitrary external system applied
   the operation; the user should inspect that system before retrying the call.
@@ -342,8 +610,10 @@ are packaged separately so Finder and the running application use the same brand
 2. Enable **Live diagnostics**.
 3. Ask an exact identifier question and confirm that `lsp` or structural fallback entries appear before `model`.
 4. Ask an abstract, multi-concept feature question without naming files.
-5. Confirm that `concept` entries show vocabulary learned from that repository and that `context` is ready before the
+5. With an LM Studio embedding model already loaded, confirm that an `embedding` entry reports bounded matches and index
+   counts. Unload that model and confirm the same request still completes through the graph/lexical fallback.
+6. Confirm that `concept` entries show vocabulary learned from that repository and that `context` is ready before the
    model request starts. A `rag` entry appears when source snippets or matching memory were available.
-6. Edit, add, and delete a source file, then verify the Map metrics update without manually reindexing.
-7. Reopen a long local-model task and confirm that an oversized request produces a `model` compaction warning before the
+7. Edit, add, and delete a source file, then verify the Map metrics update without manually reindexing.
+8. Reopen a long local-model task and confirm that an oversized request produces a `model` compaction warning before the
    provider starts processing it.

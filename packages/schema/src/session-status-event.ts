@@ -29,6 +29,20 @@ export const Info = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("busy"),
   }),
+  Schema.Struct({
+    type: Schema.Literal("verifying"),
+    attempt: NonNegativeInt,
+    checks: NonNegativeInt,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("repairing"),
+    attempt: NonNegativeInt,
+    max: NonNegativeInt,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("verified"),
+    checks: NonNegativeInt,
+  }),
 ]).annotate({ identifier: "SessionStatus" })
 export type Info = Schema.Schema.Type<typeof Info>
 

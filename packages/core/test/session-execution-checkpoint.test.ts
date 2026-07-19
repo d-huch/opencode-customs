@@ -11,6 +11,7 @@ import { SessionExecutionCheckpointTable, SessionTable } from "@opencode-ai/core
 import { Effect } from "effect"
 import { eq } from "drizzle-orm"
 import { testEffect } from "./lib/effect"
+import { ModelCapabilityRouter } from "@opencode-ai/core/model-capability-router"
 
 const it = testEffect(AppNodeBuilder.build(LayerNode.group([Database.node])))
 
@@ -44,16 +45,83 @@ describe("SessionExecutionCheckpoint", () => {
       const sessionID = SessionV2.ID.make("ses_checkpoint_phases")
       const db = yield* setup(sessionID)
       const checkpoint = yield* SessionExecutionCheckpoint.begin(db, sessionID, "v2")
+      const route = ModelCapabilityRouter.plan({
+        providerID: "lmstudio",
+        pressure: "healthy",
+        complexity: "medium",
+        preferredModelID: "coding",
+        candidates: [
+          {
+            providerID: "lmstudio",
+            modelID: "coding",
+            name: "Coding",
+            loaded: true,
+            type: "llm",
+            context: 16_384,
+            capabilities: { tools: true, vision: false, reasoning: true, embeddings: false },
+          },
+        ],
+      })
+      const activated = {
+        ...route,
+        activation: {
+          status: "switched" as const,
+          checkedAt: Date.now(),
+          role: "coding" as const,
+          requestedModelID: "coding",
+          activeModelID: "coding",
+          activeInstanceID: "coding-instance",
+          attempts: 1,
+          failover: false,
+          rollback: false,
+          reason: ["switch.ready"],
+        },
+        vision: {
+          status: "completed" as const,
+          checkedAt: Date.now(),
+          modelID: "coding",
+          instanceID: "coding-instance",
+          imageCount: 1,
+          originalBytes: 4_096,
+          preparedBytes: 2_048,
+          estimatedTokens: 170,
+          requestTokens: 2_400,
+          assistantMessageID: "msg_vision_result",
+          failover: false,
+          reason: ["vision.file_reference", "vision.compressed", "vision.completed"],
+          artifacts: [
+            {
+              fileURL: "file:///runtime/vision/screenshot.jpg",
+              filename: "screenshot.jpg",
+              mime: "image/jpeg",
+              originalWidth: 1_440,
+              originalHeight: 900,
+              originalBytes: 4_096,
+              preparedWidth: 1_024,
+              preparedHeight: 640,
+              preparedBytes: 2_048,
+              compressed: true,
+              estimatedTokens: 170,
+              reason: ["vision.file_reference", "vision.compressed"],
+            },
+          ],
+        },
+      }
 
       expect(checkpoint.recovered).toBe(false)
+      expect(yield* SessionExecutionCheckpoint.setModelRoute(db, checkpoint, activated)).toBe(true)
       expect(yield* SessionExecutionCheckpoint.advance(db, checkpoint, { state: "streaming", step: 2 })).toBe(true)
+      expect(yield* SessionExecutionCheckpoint.advance(db, checkpoint, { state: "verifying", step: 3 })).toBe(true)
+      expect(yield* SessionExecutionCheckpoint.advance(db, checkpoint, { state: "repairing", step: 4 })).toBe(true)
+      expect(yield* SessionExecutionCheckpoint.advance(db, checkpoint, { state: "verified", step: 5 })).toBe(true)
       expect(yield* SessionExecutionCheckpoint.load(db, sessionID)).toMatchObject({
         execution_id: checkpoint.executionID,
         runtime: "v2",
         generation: 1,
-        state: "streaming",
-        step: 2,
+        state: "verified",
+        step: 5,
         owner_pid: process.pid,
+        model_route: activated,
       })
 
       expect(yield* SessionExecutionCheckpoint.finish(db, checkpoint, { state: "completed" })).toBe(true)
@@ -82,6 +150,18 @@ describe("SessionExecutionCheckpoint", () => {
 
       expect(recovered.recovered).toBe(true)
       expect(recovered.generation).toBe(2)
+      expect(
+        yield* SessionExecutionCheckpoint.setModelRoute(
+          db,
+          abandoned,
+          ModelCapabilityRouter.plan({
+            providerID: "lmstudio",
+            pressure: "critical",
+            complexity: "high",
+            candidates: [],
+          }),
+        ),
+      ).toBe(false)
       expect(yield* SessionExecutionCheckpoint.advance(db, abandoned, { state: "streaming", step: 3 })).toBe(false)
       expect(yield* SessionExecutionCheckpoint.load(db, sessionID)).toMatchObject({
         execution_id: recovered.executionID,

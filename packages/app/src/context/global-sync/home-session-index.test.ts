@@ -1,9 +1,14 @@
 import { describe, expect, test } from "bun:test"
 import type { SessionV2Info } from "@opencode-ai/sdk/v2/client"
+import { QueryClient } from "@tanstack/solid-query"
+import { createMemo, createRoot } from "solid-js"
 import {
   applyHomeSessionEvent,
   appendHomeSessionEvent,
+  createHomeSessionIndexCache,
   HOME_V2_SESSION_PAGE_LIMIT,
+  type HomeSessionEvents,
+  type HomeSessionIndex,
   loadHomeSessionIndex,
   homeSessionIndexSessions,
   homeSessionIndexRefresh,
@@ -129,6 +134,39 @@ describe("Home V2 session index", () => {
     ).toEqual([created])
   })
 
+  test("does not resurrect a deleted session from a late update", () => {
+    const initial = parseHomeSessionIndex([session({ id: "deleted" })])
+    const deleted = new Set<string>()
+    const afterDelete = applyHomeSessionEvent(
+      initial,
+      {
+        type: "session.deleted",
+        properties: { sessionID: initial[0]!.id, info: initial[0]! },
+      },
+      deleted,
+    )
+    const afterLateUpdate = applyHomeSessionEvent(
+      afterDelete,
+      {
+        type: "session.updated",
+        properties: { sessionID: initial[0]!.id, info: { ...initial[0]!, title: "late" } },
+      },
+      deleted,
+    )
+
+    expect(afterLateUpdate).toEqual([])
+    expect(
+      applyHomeSessionEvent(
+        afterLateUpdate,
+        {
+          type: "session.created",
+          properties: { sessionID: initial[0]!.id, info: { ...initial[0]!, title: "recreated" } },
+        },
+        deleted,
+      ),
+    ).toEqual([expect.objectContaining({ id: "deleted", title: "recreated" })])
+  })
+
   test("applies only events newer than the index baseline", () => {
     const initial = parseHomeSessionIndex([session({ id: "old" })])
     const stale = { ...initial[0], title: "stale" }
@@ -143,6 +181,38 @@ describe("Home V2 session index", () => {
     })
 
     expect(homeSessionIndexSessions({ sessions: initial, eventSequence: 1 }, events)[0]?.title).toBe("current")
+  })
+
+  test("applies a local deletion when the cached index is ahead of the event query", () => {
+    const queryClient = new QueryClient()
+    const cache = createHomeSessionIndexCache(queryClient, "local")
+    const initial = parseHomeSessionIndex([session({ id: "deleted" })])
+    queryClient.setQueryData(cache.indexKey, { sessions: initial, eventSequence: 12 })
+    queryClient.setQueryData(cache.eventsKey, { sequence: 0, entries: [] })
+
+    cache.apply({
+      type: "session.deleted",
+      properties: { sessionID: initial[0]!.id, info: initial[0]! },
+    })
+
+    expect(queryClient.getQueryData<HomeSessionIndex>(cache.indexKey)).toEqual({ sessions: [], eventSequence: 13 })
+    expect(queryClient.getQueryData<HomeSessionEvents>(cache.eventsKey)).toEqual({ sequence: 13, entries: [] })
+  })
+
+  test("reactively hides a deleted session before the index query cache changes", () => {
+    createRoot((dispose) => {
+      const cache = createHomeSessionIndexCache(new QueryClient(), "local-reactive")
+      const initial = parseHomeSessionIndex([session({ id: "deleted" })])
+      const visible = createMemo(() => cache.sessions({ sessions: initial, eventSequence: 0 }, undefined))
+
+      expect(visible()).toHaveLength(1)
+      cache.apply({
+        type: "session.deleted",
+        properties: { sessionID: initial[0]!.id, info: initial[0]! },
+      })
+      expect(visible()).toEqual([])
+      dispose()
+    })
   })
 
   test("refetches after reconnect, disposal, and session moves", () => {

@@ -157,6 +157,8 @@ import type {
   ProviderOauthCallbackResponses,
   ProviderRuntimeResourcesErrors,
   ProviderRuntimeResourcesResponses,
+  ProviderRuntimeRouterErrors,
+  ProviderRuntimeRouterResponses,
   PtyConnectErrors,
   PtyConnectResponses,
   PtyConnectTokenErrors,
@@ -182,6 +184,7 @@ import type {
   QuestionReplyResponses,
   QuestionV2Reply,
   RepositoryMapDiagnosticsConfig,
+  RepositoryMapKnowledgeScope,
   SessionAbortErrors,
   SessionAbortResponses,
   SessionChildrenErrors,
@@ -204,6 +207,8 @@ import type {
   SessionInitResponses,
   SessionListErrors,
   SessionListResponses,
+  SessionLogErrors,
+  SessionLogResponses,
   SessionMessageErrors,
   SessionMessageResponses,
   SessionMessagesErrors,
@@ -340,14 +345,20 @@ import type {
   V2QuestionRequestListResponses,
   V2ReferenceListErrors,
   V2ReferenceListResponses,
+  V2RepositoryMapClearKnowledgeErrors,
+  V2RepositoryMapClearKnowledgeResponses,
   V2RepositoryMapConfigureDiagnosticsErrors,
   V2RepositoryMapConfigureDiagnosticsResponses,
   V2RepositoryMapDiagnosticsErrors,
   V2RepositoryMapDiagnosticsResponses,
   V2RepositoryMapGetErrors,
   V2RepositoryMapGetResponses,
+  V2RepositoryMapKnowledgeErrors,
+  V2RepositoryMapKnowledgeResponses,
   V2RepositoryMapRefreshErrors,
   V2RepositoryMapRefreshResponses,
+  V2RepositoryMapRemoveKnowledgeErrors,
+  V2RepositoryMapRemoveKnowledgeResponses,
   V2SessionActiveErrors,
   V2SessionActiveResponses,
   V2SessionCompactErrors,
@@ -3315,6 +3326,40 @@ export class Runtime extends HeyApiClient {
       ...params,
     })
   }
+
+  /**
+   * Inspect model capability routing
+   *
+   * Report capability-based model role selections, scoring reasons, context limits, resource pressure, and the latest guarded LM Studio model handoff.
+   */
+  public router<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      ProviderRuntimeRouterResponses,
+      ProviderRuntimeRouterErrors,
+      ThrowOnError
+    >({
+      url: "/provider/runtime/router",
+      ...options,
+      ...params,
+    })
+  }
 }
 
 export class Oauth extends HeyApiClient {
@@ -3726,6 +3771,38 @@ export class Session2 extends HeyApiClient {
         ...options?.headers,
         ...params.headers,
       },
+    })
+  }
+
+  /**
+   * Get session log location
+   *
+   * Retrieve the local diagnostic log path and whether the file currently exists.
+   */
+  public log<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<SessionLogResponses, SessionLogErrors, ThrowOnError>({
+      url: "/session/{sessionID}/log",
+      ...options,
+      ...params,
     })
   }
 
@@ -7249,6 +7326,121 @@ export class RepositoryMap extends HeyApiClient {
         ...options?.headers,
         ...params.headers,
       },
+    })
+  }
+
+  /**
+   * Inspect repository RAG and memory
+   *
+   * Inspect location-scoped repository memory and embedding index metadata without returning vector payloads.
+   */
+  public knowledge<ThrowOnError extends boolean = false>(
+    parameters?: {
+      location?: {
+        directory?: string
+        workspace?: string
+      }
+      search?: string
+      limit?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "location" },
+            { in: "query", key: "search" },
+            { in: "query", key: "limit" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      V2RepositoryMapKnowledgeResponses,
+      V2RepositoryMapKnowledgeErrors,
+      ThrowOnError
+    >({
+      url: "/api/repository-map/knowledge",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Remove a repository knowledge entry
+   *
+   * Remove one location-scoped memory item or RAG chunk by ID.
+   */
+  public removeKnowledge<ThrowOnError extends boolean = false>(
+    parameters: {
+      scope: RepositoryMapKnowledgeScope
+      id: string
+      location?: {
+        directory?: string
+        workspace?: string
+      }
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "scope" },
+            { in: "path", key: "id" },
+            { in: "query", key: "location" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).delete<
+      V2RepositoryMapRemoveKnowledgeResponses,
+      V2RepositoryMapRemoveKnowledgeErrors,
+      ThrowOnError
+    >({
+      url: "/api/repository-map/knowledge/{scope}/{id}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Clear repository knowledge
+   *
+   * Clear all location-scoped memory items or RAG chunks for the selected store.
+   */
+  public clearKnowledge<ThrowOnError extends boolean = false>(
+    parameters: {
+      scope: RepositoryMapKnowledgeScope
+      location?: {
+        directory?: string
+        workspace?: string
+      }
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "scope" },
+            { in: "query", key: "location" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).delete<
+      V2RepositoryMapClearKnowledgeResponses,
+      V2RepositoryMapClearKnowledgeErrors,
+      ThrowOnError
+    >({
+      url: "/api/repository-map/knowledge/{scope}",
+      ...options,
+      ...params,
     })
   }
 }

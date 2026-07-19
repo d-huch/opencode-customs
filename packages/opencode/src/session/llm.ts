@@ -30,6 +30,8 @@ import * as OtelTracer from "@effect/opentelemetry/Tracer"
 import { LLMAISDK } from "./llm/ai-sdk"
 import { LLMNativeRuntime } from "./llm/native-runtime"
 import { LLMRequestPrep } from "./llm/request"
+import { ToolCallRepair } from "./tool-call-repair"
+import { SessionLog } from "@/local-agent-runtime/session-log"
 
 export const OUTPUT_TOKEN_MAX = ProviderTransform.OUTPUT_TOKEN_MAX
 
@@ -92,6 +94,23 @@ const live: Layer.Layer<
         agent: input.agent.name,
         mode: input.agent.mode,
       })
+      yield* Effect.promise(() =>
+        SessionLog.write({
+          sessionID: input.sessionID,
+          type: "model.request",
+          data: {
+            providerID: input.model.providerID,
+            modelID: input.model.id,
+            instanceID: input.model.api.id,
+            context: input.model.limit.context,
+            small: input.small ?? false,
+            agent: input.agent.name,
+            mode: input.agent.mode,
+            messages: input.messages.length,
+            tools: Object.keys(input.tools),
+          },
+        }),
+      )
 
       const [language, cfg, item, info] = yield* Effect.all(
         [
@@ -107,6 +126,7 @@ const live: Layer.Layer<
           acquireModel({
             providerID: input.model.providerID,
             apiURL: typeof item.options.baseURL === "string" ? item.options.baseURL : input.model.api.url,
+            modelID: input.model.api.id,
             signal: input.abort,
           }),
         ),
@@ -290,6 +310,16 @@ const live: Layer.Layer<
         type: "ai-sdk" as const,
         result: streamText({
           onError(error) {
+            void SessionLog.write({
+              sessionID: input.sessionID,
+              type: "model.error",
+              data: {
+                providerID: input.model.providerID,
+                modelID: input.model.id,
+                instanceID: input.model.api.id,
+                error,
+              },
+            })
             bridge.fork(
               Effect.logError("stream error", {
                 providerID: input.model.providerID,
@@ -306,10 +336,27 @@ const live: Layer.Layer<
           includeRawChunks: input.model.providerID.includes("github-copilot"),
           async experimental_repairToolCall(failed) {
             const lower = failed.toolCall.toolName.toLowerCase()
-            if (lower !== failed.toolCall.toolName && prepared.tools[lower]) {
+            const toolName = prepared.tools[failed.toolCall.toolName]
+              ? failed.toolCall.toolName
+              : prepared.tools[lower]
+                ? lower
+                : undefined
+            const repaired = toolName ? ToolCallRepair.input(failed.toolCall.input) : undefined
+            if (toolName && repaired) {
               return {
                 ...failed.toolCall,
-                toolName: lower,
+                input: repaired,
+                toolName,
+              }
+            }
+            if (
+              toolName &&
+              toolName !== failed.toolCall.toolName &&
+              !failed.error.message.includes("JSON parsing failed")
+            ) {
+              return {
+                ...failed.toolCall,
+                toolName,
               }
             }
             return {
@@ -325,7 +372,10 @@ const live: Layer.Layer<
           topP: prepared.params.topP,
           topK: prepared.params.topK,
           providerOptions: ProviderTransform.providerOptions(input.model, prepared.params.options),
-          activeTools: Object.keys(prepared.tools).filter((x) => x !== "invalid"),
+          // Unknown provider tool names are repaired to `invalid` above. Keep
+          // the guard active so the repaired call can produce a useful tool
+          // error instead of failing schema validation as an unavailable tool.
+          activeTools: Object.keys(prepared.tools),
           tools: prepared.tools,
           toolChoice: input.toolChoice,
           maxOutputTokens: prepared.params.maxOutputTokens,

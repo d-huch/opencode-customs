@@ -1,9 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "0e8ad3a4-a6d4-4783-8bc3-13f7cb1b317b",
+  "id": "a11d57d8-dfc6-4731-967d-53fa55fb48ee",
   "prevIds": [
-    "a1283589-1a47-4a41-9aca-551a911a6565"
+    "0e8ad3a4-a6d4-4783-8bc3-13f7cb1b317b"
   ],
   "ddl": [
     {
@@ -993,6 +993,16 @@
       "default": null,
       "generated": null,
       "name": "assistant_message_id",
+      "entityType": "columns",
+      "table": "session_execution_checkpoint"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "model_route",
       "entityType": "columns",
       "table": "session_execution_checkpoint"
     },

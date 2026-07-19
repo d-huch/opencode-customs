@@ -21,21 +21,52 @@ model:
 - An incremental, location-scoped repository map with files, languages, project areas, landmarks, symbols, and links.
 - File-watcher updates for added, changed, and removed files without a full reindex after every edit.
 - Optional LSP enrichment for definitions, references, calls, and workspace symbols.
-- A project-learned concept router for abstract tasks. It derives vocabulary from the current codebase instead of using
-  a fixed business-term dictionary or assuming a particular framework.
+- A project-learned concept router for abstract tasks. It derives vocabulary from the current codebase, tolerates
+  inflection and likely spelling mistakes through evidence-backed prefix grounding, and does not use a fixed business
+  dictionary or assume a particular framework.
 - Context ranking that combines prompt evidence, analogous implementations, attached files, symbols, and graph
   neighborhoods before selecting a compact set of files for the model.
-- Bounded RAG that retrieves small source windows around ranked symbols and concept evidence instead of injecting whole
-  files into the prompt.
-- Durable, project-scoped memory for verified compaction facts and successful file routes. Recall is query-specific and
-  contributes only a few matching notes and paths to each request.
+- Bounded hybrid RAG that combines graph, lexical, LSP, and optional local embeddings, then retrieves small source
+  windows instead of injecting whole files into the prompt. The embedding index updates incrementally through the file
+  watcher and never auto-loads a model into LM Studio.
+- Durable, project-scoped memory for verified compaction facts and successful file routes. Recall remains query-specific,
+  uses optional semantic ranking with lexical fallback, and contributes only a few matching notes and paths.
 - Resource-aware prompt admission for custom models, including conservative fallback limits, full-request preflight,
   budgeted tool/system context, bounded history compaction, a live context-usage indicator, and protection from duplicate
-  title-generation requests on the active model.
+  title-generation requests on the active model. Interactive turns degrade to a smaller context under critical macOS
+  memory pressure while background embedding work pauses, and asynchronous failures remain visible in the timeline.
 - Local Agent Runtime layers for LM Studio: a read-only capability bridge, an adaptive Resource Governor, and durable
   execution checkpoints that recover abandoned sessions after an OpenCode process restart without replaying completed
   local tools.
-- A desktop **Map** panel with index metrics, manual reindexing, LSP status, and opt-in live routing diagnostics.
+- A capability-based multi-model router that assigns embedding, utility, coding, and vision roles from
+  metadata, task shape, context capacity, model size, and live resource pressure without model-name or project-specific
+  keyword tables. A compatible model explicitly selected in the composer remains the primary coding model; larger
+  context windows on utility models do not silently take over an agent turn. Utility models are used only for explicit
+  background work such as history compaction, without unloading the active coding model. Coding and vision handoffs use
+  LM Studio's native model-management API with readiness checks, checkpointed failure state, and guarded cleanup of idle
+  runtime-managed instances. Interactive execution fails closed if the selected model cannot be activated; it is never
+  handed silently to a smaller fallback model.
+- A screenshot vision pipeline that keeps durable history file-based, resizes large images against model and live-memory
+  limits, selects only a probed vision-capable model, and records preparation, token, activation, and failure metrics in
+  checkpoints and the Runtime panel. Base64 is created only transiently for provider APIs that require it, while RAG can
+  ground the visual analysis in related project code during the same turn.
+- A bounded verification loop that asks the agent for the smallest repository-native checks, reuses normal shell
+  permissions, adds changed-file LSP diagnostics, and repairs failed checks without assuming a language or framework.
+- A bounded evidence loop for read-only repository research. Findings must cite files actually read in the current turn,
+  while unresolved searches finish as explicitly blocked instead of becoming guessed conclusions.
+- A semantic freshness gate for general factual questions. The selected interactive model classifies whether external
+  evidence is required; risky turns must complete a live web search before answering, prefer primary sources, and fail
+  closed without automatic retries or a hidden utility-model fallback when verification is unavailable.
+- Response-language binding that keeps the latest active request authoritative after compaction and bounded continuation
+  turns, even when summaries, memories, and tool output are written in another language. Repeated invalid tool repairs
+  are detected across provider turns and stopped before they can create an unbounded local-model loop. Conservative
+  tool-call repair fixes only syntax that preserves every emitted value and never invents truncated paths or patterns.
+- A desktop **Map** panel with index metrics, manual reindexing, LSP status, opt-in live routing diagnostics, and a
+  bounded RAG/memory viewer for inspecting, searching, deleting, and clearing project-scoped retrieval data.
+- Per-session JSONL diagnostics under the standard OpenCode log directory. Each file records prompts, model routing,
+  provider requests, compaction, tool calls and bounded results, failures, and checkpoint recovery. The Runtime menu can
+  export the complete diagnostic bundle or clear all desktop, server, network, crash, and session logs. The session
+  Context tab shows the exact log path and can reveal the file directly in the desktop file manager.
 - A separate **Extensions** menu that discovers installed ChatGPT/Codex plugin bundles, exposes their skills to the
   agent, and starts enabled bundled MCP servers alongside native OpenCode plugins.
 - Custom OpenCode Customs desktop branding and macOS application/Dock icons.

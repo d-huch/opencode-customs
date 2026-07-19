@@ -20,9 +20,11 @@ import { ConfigLSP } from "./config/lsp"
 import { ConfigMCP } from "./config/mcp"
 import { ConfigPlugin } from "./config/plugin"
 import { ConfigProvider } from "./config/provider"
+import { ConfigRag } from "./config/rag"
 import { ConfigReference } from "./config/reference"
 import { ConfigToolOutput } from "./config/tool-output"
 import { ConfigWatcher } from "./config/watcher"
+import { ConfigVerification } from "./config/verification"
 import { ConfigV1 } from "./v1/config/config"
 import { ConfigMigrateV1 } from "./v1/config/migrate"
 
@@ -86,6 +88,12 @@ export class Info extends Schema.Class<Info>("Config.Info")({
   }),
   compaction: ConfigCompaction.Info.pipe(Schema.optional).annotate({
     description: "Conversation compaction behavior",
+  }),
+  verification: ConfigVerification.Info.pipe(Schema.optional).annotate({
+    description: "Bounded change verification, repair, and repository evidence behavior",
+  }),
+  rag: ConfigRag.Info.pipe(Schema.optional).annotate({
+    description: "Bounded local embedding retrieval and durable project memory behavior",
   }),
   skills: Schema.String.pipe(Schema.Array, Schema.optional).annotate({
     description: "Additional paths or URLs to discover skills from",

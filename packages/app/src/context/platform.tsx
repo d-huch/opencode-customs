@@ -115,6 +115,9 @@ type PlatformBase = {
   /** Export collected diagnostic logs (desktop only) */
   exportDebugLogs?(): Promise<string>
 
+  /** Clear collected diagnostic and per-session logs (desktop only) */
+  clearDebugLogs?(): Promise<{ files: number; bytes: number }>
+
   /** Force focus styles on interactive elements through desktop devtools (desktop only) */
   setForceFocus?(enabled: boolean): Promise<void>
 

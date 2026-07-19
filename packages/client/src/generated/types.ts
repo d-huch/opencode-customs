@@ -2957,3 +2957,93 @@ export type RepositoryMapConfigureDiagnosticsOutput = {
     }>
   }
 }
+
+export type RepositoryMapKnowledgeInput = {
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+    readonly search?: string | undefined
+    readonly limit?: number | undefined
+  }["location"]
+  readonly search?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+    readonly search?: string | undefined
+    readonly limit?: number | undefined
+  }["search"]
+  readonly limit?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+    readonly search?: string | undefined
+    readonly limit?: number | undefined
+  }["limit"]
+}
+
+export type RepositoryMapKnowledgeOutput = {
+  readonly location: {
+    readonly directory: string
+    readonly workspaceID?: string
+    readonly project: { readonly id: string; readonly directory: string }
+  }
+  readonly data: {
+    readonly memory: {
+      readonly total: number
+      readonly matched: number
+      readonly entries: ReadonlyArray<{
+        readonly id: string
+        readonly kind: "route" | "summary"
+        readonly text: string
+        readonly terms: ReadonlyArray<string>
+        readonly files: ReadonlyArray<string>
+        readonly updatedAt: number
+        readonly embeddingModel?: string
+        readonly dimensions: number
+      }>
+    }
+    readonly rag: {
+      readonly model?: string
+      readonly total: number
+      readonly matched: number
+      readonly files: number
+      readonly entries: ReadonlyArray<{
+        readonly id: string
+        readonly path: string
+        readonly start: number
+        readonly end: number
+        readonly fileHash: string
+        readonly updatedAt: number
+        readonly dimensions: number
+      }>
+    }
+  }
+}
+
+export type RepositoryMapRemoveKnowledgeInput = {
+  readonly scope: { readonly scope: "memory" | "rag"; readonly id: string }["scope"]
+  readonly id: { readonly scope: "memory" | "rag"; readonly id: string }["id"]
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+  }["location"]
+}
+
+export type RepositoryMapRemoveKnowledgeOutput = {
+  readonly location: {
+    readonly directory: string
+    readonly workspaceID?: string
+    readonly project: { readonly id: string; readonly directory: string }
+  }
+  readonly data: { readonly removed: number }
+}
+
+export type RepositoryMapClearKnowledgeInput = {
+  readonly scope: { readonly scope: "memory" | "rag" }["scope"]
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+  }["location"]
+}
+
+export type RepositoryMapClearKnowledgeOutput = {
+  readonly location: {
+    readonly directory: string
+    readonly workspaceID?: string
+    readonly project: { readonly id: string; readonly directory: string }
+  }
+  readonly data: { readonly removed: number }
+}

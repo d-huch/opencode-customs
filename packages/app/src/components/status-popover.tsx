@@ -11,6 +11,7 @@ import { useSync } from "@/context/sync"
 import { useGlobal } from "@/context/global"
 import { hasNonBlockingServiceIssue, serverStatusDotClass } from "./status-popover-indicator"
 import { StatusPopoverBody as Body, StatusPopoverServerBody as ServerBody } from "./status-popover-body"
+import "./status-popover.css"
 
 export function StatusPopover() {
   const language = useLanguage()
@@ -52,7 +53,7 @@ export function StatusPopover() {
           />
         </div>
       }
-      class="[&_[data-slot=popover-body]]:p-0 w-[360px] max-w-[calc(100vw-40px)] bg-transparent border-0 shadow-none rounded-xl"
+      class="status-popover [&_[data-slot=popover-body]]:p-0 w-[360px] max-w-[calc(100vw-40px)] bg-transparent border-0 shadow-none rounded-xl"
       gutter={4}
       placement="bottom-end"
       shift={-168}
@@ -140,7 +141,7 @@ function StatusPopoverBody(props: { shown: boolean; children: JSX.Element }) {
 function StatusPopoverView(props: { state: StatusPopoverState }) {
   const popoverProps = {
     class:
-      "[&_[data-slot=popover-body]]:p-0 w-[360px] max-w-[calc(100vw-40px)] bg-transparent border-0 shadow-none rounded-xl",
+      "status-popover [&_[data-slot=popover-body]]:p-0 w-[360px] max-w-[calc(100vw-40px)] bg-transparent border-0 shadow-none rounded-xl",
     gutter: 4,
     placement: "bottom-end" as const,
     shift: -168,

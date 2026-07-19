@@ -24,6 +24,7 @@ import { Pty } from "./pty"
 import { QuestionV2 } from "./question"
 import { Reference } from "./reference"
 import { ReferenceGuidance } from "./reference/guidance"
+import { RepositoryEmbeddings } from "./repository-embeddings"
 import { RepositoryContextRouter } from "./repository-context-router"
 import { RepositoryMemory } from "./repository-memory"
 import { RepositoryMap } from "./repository-map"
@@ -63,6 +64,7 @@ export const locationServices = LayerNode.group([
   SkillV2.node,
   SystemContextRegistry.node,
   SystemContextBuiltIns.node,
+  RepositoryEmbeddings.node,
   RepositoryMap.node,
   RepositoryMemory.node,
   RepositoryContextRouter.node,

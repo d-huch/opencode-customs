@@ -32,6 +32,8 @@ import { ModelStatus } from "./model-status"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderError } from "./error"
 import { findLmStudioModel, lmStudioContextLimits, probeLmStudio } from "./lmstudio"
+import { RepositoryEmbeddings } from "@opencode-ai/core/repository-embeddings"
+import { lmStudioEmbeddingProvider } from "@/local-agent-runtime/embeddings"
 
 const OPENAI_HEADER_TIMEOUT_DEFAULT = 10_000
 // A missing model limit is unknown capacity, not unlimited capacity. Conservative
@@ -1340,6 +1342,8 @@ const layer = Layer.effect(
     const plugin = yield* Plugin.Service
     const modelsDevSvc = yield* ModelsDev.Service
     const runtimeFlags = yield* RuntimeFlags.Service
+    const unregisterEmbeddings = RepositoryEmbeddings.register(lmStudioEmbeddingProvider(config.get))
+    yield* Effect.addFinalizer(() => Effect.sync(unregisterEmbeddings))
 
     const state = yield* InstanceState.make<State>(() =>
       Effect.gen(function* () {
@@ -1481,9 +1485,18 @@ const layer = Layer.effect(
               providerID: ProviderV2.ID.make(providerID),
               capabilities: {
                 temperature: model.temperature ?? existingModel?.capabilities.temperature ?? false,
-                reasoning: model.reasoning ?? localModel?.capabilities.reasoning ?? existingModel?.capabilities.reasoning ?? false,
-                attachment: model.attachment ?? localModel?.capabilities.vision ?? existingModel?.capabilities.attachment ?? false,
-                toolcall: model.tool_call ?? localModel?.capabilities.tools ?? existingModel?.capabilities.toolcall ?? true,
+                reasoning:
+                  model.reasoning ??
+                  localModel?.capabilities.reasoning ??
+                  existingModel?.capabilities.reasoning ??
+                  false,
+                attachment:
+                  model.attachment ??
+                  localModel?.capabilities.vision ??
+                  existingModel?.capabilities.attachment ??
+                  false,
+                toolcall:
+                  model.tool_call ?? localModel?.capabilities.tools ?? existingModel?.capabilities.toolcall ?? true,
                 input: {
                   text: model.modalities?.input?.includes("text") ?? existingModel?.capabilities.input.text ?? true,
                   audio: model.modalities?.input?.includes("audio") ?? existingModel?.capabilities.input.audio ?? false,
@@ -1861,7 +1874,9 @@ const layer = Layer.effect(
     const getLanguage = Effect.fn("Provider.getLanguage")(function* (model: Model) {
       const s = yield* InstanceState.get(state)
       const envs = yield* env.all()
-      const key = `${model.providerID}/${model.id}`
+      // Local runtimes can reload the same catalog model under a new instance id.
+      // Keep the provider client bound to the exact inference target.
+      const key = `${model.providerID}/${model.id}/${model.api.id}`
       if (s.models.has(key)) return s.models.get(key)!
 
       const provider = s.providers[model.providerID]

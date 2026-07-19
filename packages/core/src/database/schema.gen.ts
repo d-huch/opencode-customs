@@ -163,6 +163,7 @@ export default {
           \`state\` text NOT NULL,
           \`step\` integer NOT NULL,
           \`assistant_message_id\` text,
+          \`model_route\` text,
           \`owner_pid\` integer NOT NULL,
           \`recoveries\` integer DEFAULT 0 NOT NULL,
           \`error\` text,

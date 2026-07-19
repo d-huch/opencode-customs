@@ -1,10 +1,11 @@
-import { createMemo, createEffect, on, onCleanup, For, Show } from "solid-js"
+import { createMemo, createEffect, createResource, createSignal, on, onCleanup, For, Show } from "solid-js"
 import type { JSX } from "solid-js"
 import { useSync } from "@/context/sync"
 import { checksum } from "@opencode-ai/core/util/encode"
 import { findLast } from "@opencode-ai/core/util/array"
 import { same } from "@/utils/same"
 import { Icon } from "@opencode-ai/ui/icon"
+import { Button } from "@opencode-ai/ui/button"
 import { Accordion } from "@opencode-ai/ui/accordion"
 import { StickyAccordionHeader } from "@opencode-ai/ui/sticky-accordion-header"
 import { File } from "@opencode-ai/session-ui/file"
@@ -14,7 +15,10 @@ import type { Message, Part, UserMessage } from "@opencode-ai/sdk/v2/client"
 import { useLanguage } from "@/context/language"
 import { useProviders } from "@/hooks/use-providers"
 import { useSDK } from "@/context/sdk"
+import { usePlatform } from "@/context/platform"
+import { useServer } from "@/context/server"
 import { useSessionLayout } from "@/pages/session/session-layout"
+import { showToast } from "@/utils/toast"
 import { getSessionContext } from "./session-context-metrics"
 import { estimateSessionContextBreakdown, type SessionContextBreakdownKey } from "./session-context-breakdown"
 import { createSessionContextFormatter } from "./session-context-format"
@@ -95,8 +99,52 @@ export function SessionContextTab() {
   const sync = useSync()
   const language = useLanguage()
   const sdk = useSDK()
+  const platform = usePlatform()
+  const server = useServer()
   const providers = useProviders(() => sdk().directory)
   const { params, view } = useSessionLayout()
+  const canRevealSessionLog = createMemo(
+    () => platform.platform === "desktop" && !!platform.revealPath && server.isLocal(),
+  )
+  const [sessionLog, { refetch: refreshSessionLog }] = createResource(
+    () => (canRevealSessionLog() ? params.id : undefined),
+    async (sessionID) => {
+      const result = await sdk().client.session.log({ sessionID })
+      if (result.error) return
+      return result.data
+    },
+  )
+  const [openingSessionLog, setOpeningSessionLog] = createSignal(false)
+
+  const revealSessionLog = async () => {
+    if (!platform.revealPath || openingSessionLog()) return
+    setOpeningSessionLog(true)
+    try {
+      const current = await refreshSessionLog()
+      if (!current?.exists) {
+        showToast({
+          variant: "error",
+          title: language.t("context.sessionLog.unavailable"),
+          description: current?.path,
+        })
+        return
+      }
+      if (await platform.revealPath(current.path)) return
+      showToast({
+        variant: "error",
+        title: language.t("context.sessionLog.unavailable"),
+        description: current.path,
+      })
+    } catch (error) {
+      showToast({
+        variant: "error",
+        title: language.t("common.requestFailed"),
+        description: error instanceof Error ? error.message : String(error),
+      })
+    } finally {
+      setOpeningSessionLog(false)
+    }
+  }
 
   const info = createMemo(() => (params.id ? sync().session.get(params.id) : undefined))
 
@@ -284,6 +332,29 @@ export function SessionContextTab() {
             {(stat) => <Stat label={language.t(stat.label as Parameters<typeof language.t>[0])} value={stat.value()} />}
           </For>
         </div>
+
+        <Show when={canRevealSessionLog()}>
+          <div class="flex flex-col gap-2 min-w-0">
+            <Button
+              type="button"
+              variant="secondary"
+              size="normal"
+              icon="open-file"
+              class="self-start"
+              disabled={openingSessionLog() || sessionLog.loading}
+              onClick={() => void revealSessionLog()}
+            >
+              {language.t("context.sessionLog.open")}
+            </Button>
+            <Show when={sessionLog()?.path}>
+              {(value) => (
+                <div class="text-11-regular text-text-weaker truncate select-text" title={value()}>
+                  {value()}
+                </div>
+              )}
+            </Show>
+          </div>
+        </Show>
 
         <Show when={breakdown().length > 0}>
           <div class="flex flex-col gap-2">

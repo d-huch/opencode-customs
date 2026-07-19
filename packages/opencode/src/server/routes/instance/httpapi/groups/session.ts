@@ -74,11 +74,16 @@ export const RevertPayload = Schema.Struct(Struct.omit(SessionRevert.RevertInput
 export const PermissionResponsePayload = Schema.Struct({
   response: PermissionV1.Reply,
 })
+export const SessionLogLocation = Schema.Struct({
+  path: Schema.String,
+  exists: Schema.Boolean,
+})
 
 export const SessionPaths = {
   list: root,
   status: `${root}/status`,
   get: `${root}/:sessionID`,
+  log: `${root}/:sessionID/log`,
   children: `${root}/:sessionID/children`,
   todo: `${root}/:sessionID/todo`,
   diff: `${root}/:sessionID/diff`,
@@ -139,6 +144,18 @@ export const SessionApi = HttpApi.make("session")
             identifier: "session.get",
             summary: "Get session",
             description: "Retrieve detailed information about a specific OpenCode session.",
+          }),
+        ),
+        HttpApiEndpoint.get("log", SessionPaths.log, {
+          params: { sessionID: SessionID },
+          query: WorkspaceRoutingQuery,
+          success: described(SessionLogLocation, "Get session log location"),
+          error: [HttpApiError.BadRequest, ApiNotFoundError],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "session.log",
+            summary: "Get session log location",
+            description: "Retrieve the local diagnostic log path and whether the file currently exists.",
           }),
         ),
         HttpApiEndpoint.get("children", SessionPaths.children, {

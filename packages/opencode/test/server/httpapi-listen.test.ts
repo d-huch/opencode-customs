@@ -34,7 +34,7 @@ async function startListener() {
   Flag.OPENCODE_SERVER_USERNAME = auth.username
   process.env.OPENCODE_SERVER_PASSWORD = auth.password
   process.env.OPENCODE_SERVER_USERNAME = auth.username
-  return Server.listen({ hostname: "127.0.0.1", port: 0 })
+  return Server.listen({ hostname: "127.0.0.1", port: 0, portSelection: "ephemeral" })
 }
 
 async function startNoAuthListener() {
@@ -42,6 +42,10 @@ async function startNoAuthListener() {
   Flag.OPENCODE_SERVER_USERNAME = auth.username
   delete process.env.OPENCODE_SERVER_PASSWORD
   process.env.OPENCODE_SERVER_USERNAME = auth.username
+  return Server.listen({ hostname: "127.0.0.1", port: 0, portSelection: "ephemeral" })
+}
+
+function startPreferredListener() {
   return Server.listen({ hostname: "127.0.0.1", port: 0 })
 }
 
@@ -355,7 +359,7 @@ describe("HttpApi Server.listen", () => {
 
   test("port 0 prefers 4096 when free", async () => {
     if (!(await isPortFree(4096))) return
-    const listener = await startListener()
+    const listener = await startPreferredListener()
     try {
       expect(listener.port).toBe(4096)
     } finally {
@@ -367,7 +371,7 @@ describe("HttpApi Server.listen", () => {
     const blocker = await occupyPort(4096)
     if (!blocker) return
     try {
-      const listener = await startListener()
+      const listener = await startPreferredListener()
       try {
         expect(listener.port).not.toBe(4096)
         expect(listener.port).toBeGreaterThan(0)
@@ -376,6 +380,41 @@ describe("HttpApi Server.listen", () => {
       }
     } finally {
       await new Promise<void>((resolve) => blocker.close(() => resolve()))
+    }
+  })
+
+  test("ephemeral port 0 listeners are isolated", async () => {
+    const listeners = await Promise.all([startListener(), startListener()])
+    try {
+      expect(listeners[0].port).toBeGreaterThan(0)
+      expect(listeners[1].port).toBeGreaterThan(0)
+      expect(listeners[0].port).not.toBe(listeners[1].port)
+      expect(listeners[0].port).not.toBe(4096)
+      expect(listeners[1].port).not.toBe(4096)
+    } finally {
+      await Promise.all(listeners.map((listener) => listener.stop(true)))
+    }
+  })
+
+  test("serves the capability router through an isolated HTTP listener", async () => {
+    await using tmp = await tmpdir({ config: { formatter: false, lsp: false } })
+    const listener = await startListener()
+    try {
+      const response = await fetch(new URL("/provider/runtime/router", listener.url), {
+        headers: {
+          authorization: authorization(),
+          "x-opencode-directory": tmp.path,
+        },
+      })
+      expect(response.status).toBe(200)
+      expect(await response.json()).toMatchObject({
+        providerID: "lmstudio",
+        status: expect.stringMatching(/^(ready|degraded|unavailable)$/),
+        candidateCount: expect.any(Number),
+        selections: expect.any(Array),
+      })
+    } finally {
+      await stop(listener, "timed out cleaning up capability router listener")
     }
   })
 

@@ -36,6 +36,8 @@ import type { SystemError } from "bun"
 import type { Provider } from "@/provider/provider"
 import { Effect, Schema } from "effect"
 import { isContextOverflow } from "@opencode-ai/llm"
+import { ResponseRepetition } from "@opencode-ai/core/response-repetition"
+import { Image } from "@/image/image"
 
 /** Error shape thrown by Bun's fetch() when gzip/br decompression fails mid-stream */
 interface FetchDecompressionError extends Error {
@@ -219,7 +221,7 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
           } else {
             userMessage.parts.push({
               type: "file",
-              url: part.url,
+              url: part.url.startsWith("file:") ? yield* Effect.promise(() => Image.toDataURL(part)) : part.url,
               mediaType: part.mime,
               filename: part.filename,
             })
@@ -277,7 +279,7 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
       })
       for (const part of msg.parts) {
         if (part.type === "text") {
-          const text = part.text === "" && hasSignedReasoning ? " " : part.text
+          const text = part.text === "" && hasSignedReasoning ? " " : ResponseRepetition.normalize(part.text)
           assistantMessage.parts.push({
             type: "text",
             text,
@@ -294,7 +296,16 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
             const outputText = part.state.time.compacted
               ? "[Old tool result content cleared]"
               : truncateToolOutput(part.state.output, options?.toolOutputMaxChars)
-            const attachments = part.state.time.compacted || options?.stripMedia ? [] : (part.state.attachments ?? [])
+            const attachments =
+              part.state.time.compacted || options?.stripMedia
+                ? []
+                : yield* Effect.forEach(part.state.attachments ?? [], (attachment) =>
+                    isMedia(attachment.mime) && attachment.url.startsWith("file:")
+                      ? Effect.promise(() => Image.toDataURL(attachment)).pipe(
+                          Effect.map((url) => ({ ...attachment, url })),
+                        )
+                      : Effect.succeed(attachment),
+                  )
 
             // For providers that don't support media in tool results, extract media files
             // (images, PDFs) to be sent as a separate user message
@@ -572,7 +583,7 @@ export function filterCompacted(msgs: Iterable<WithParts>) {
   return result
 }
 
-export function latestUserRequest(messages: WithParts[]) {
+export function latestUserRequest(messages: readonly WithParts[]) {
   return messages
     .filter(
       (message): message is WithParts & { info: User } =>
@@ -583,10 +594,66 @@ export function latestUserRequest(messages: WithParts[]) {
             (part.type === "text" && part.synthetic !== true && part.text.trim().length > 0) || part.type === "file",
         ),
     )
-    .reduce<(WithParts & { info: User }) | undefined>(
-      (latest, message) => (!latest || message.info.id > latest.info.id ? message : latest),
-      undefined,
+    .reduce<
+      (WithParts & { info: User }) | undefined
+    >((latest, message) => (!latest || message.info.id > latest.info.id ? message : latest), undefined)
+}
+
+export function activeUserRequest(messages: readonly WithParts[]) {
+  return messages
+    .filter(
+      (message): message is WithParts & { info: User } =>
+        message.info.role === "user" &&
+        !message.parts.some((part) => part.type === "compaction") &&
+        message.parts.some(
+          (part) =>
+            (part.type === "text" &&
+              part.text.trim().length > 0 &&
+              (part.synthetic !== true || isCompactionContinuation(part))) ||
+            part.type === "file",
+        ),
     )
+    .reduce<
+      (WithParts & { info: User }) | undefined
+    >((latest, message) => (!latest || message.info.id > latest.info.id ? message : latest), undefined)
+}
+
+export function userRequestText(message: WithParts | undefined) {
+  return (message?.parts ?? [])
+    .flatMap((part) =>
+      part.type === "text" && part.text.trim() && (part.synthetic !== true || isCompactionContinuation(part))
+        ? [part.text.trim()]
+        : [],
+    )
+    .join("\n")
+}
+
+export function repositoryQuery(messages: readonly WithParts[]) {
+  const active = activeUserRequest(messages)
+  const current = userRequestText(active)
+  if (!current) return ""
+  if (active?.parts.some((part) => part.type === "text" && isCompactionContinuation(part))) return current
+  const words = current.match(/[\p{L}\p{N}_]+/gu) ?? []
+  if (words.length > 2) return current
+  const previous = messages
+    .filter(
+      (message): message is WithParts & { info: User } =>
+        message.info.role === "user" &&
+        message.info.id !== active?.info.id &&
+        !message.parts.some((part) => part.type === "compaction") &&
+        message.parts.some(
+          (part) =>
+            (part.type === "text" && part.synthetic !== true && part.text.trim().length > 0) || part.type === "file",
+        ),
+    )
+    .toSorted((left, right) => right.info.id.localeCompare(left.info.id))[0]
+  const context = userRequestText(previous)
+  if (!context) return current
+  return `${context}\n${current}`.slice(-1_200)
+}
+
+function isCompactionContinuation(part: Extract<Part, { type: "text" }>) {
+  return part.metadata?.compaction_continue === true
 }
 
 export const filterCompactedEffect = Effect.fnUntraced(function* (sessionID: SessionID) {

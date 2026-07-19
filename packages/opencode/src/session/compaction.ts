@@ -22,8 +22,11 @@ import { EventV2Bridge } from "@/event-v2-bridge"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { buildPrompt, normalizeSummary } from "@opencode-ai/core/session/compaction"
+import { ResponseLanguage } from "@opencode-ai/core/response-language"
 import { SessionCompactionEvent } from "@opencode-ai/schema/session-compaction-event"
 import type { ModelMessage, Tool } from "ai"
+import { ModelSwitcher } from "@/local-agent-runtime/model-switcher"
+import { SessionLog } from "@/local-agent-runtime/session-log"
 
 export const Event = SessionCompactionEvent
 
@@ -310,6 +313,7 @@ const layer = Layer.effect(
         ]),
       )
       const required = new Set(input.requiredTools ?? [])
+      if (compactTools.invalid) required.add("invalid")
       for (const message of input.messages) {
         if (!Array.isArray(message.content)) continue
         for (const part of message.content) {
@@ -517,6 +521,13 @@ const layer = Layer.effect(
       auto: boolean
       overflow?: boolean
     }) {
+      yield* Effect.promise(() =>
+        SessionLog.write({
+          sessionID: input.sessionID,
+          type: "compaction.started",
+          data: { parentID: input.parentID, auto: input.auto, overflow: input.overflow === true },
+        }),
+      )
       const parent = input.messages.findLast((m) => m.info.id === input.parentID)
       if (!parent || parent.info.role !== "user") {
         throw new Error(`Compaction parent must be a user message: ${input.parentID}`)
@@ -550,10 +561,22 @@ const layer = Layer.effect(
       }
 
       const agent = yield* agents.get("compaction")
-      const model = agent.model
+      const preferredModel = agent.model
         ? yield* provider.getModel(agent.model.providerID, agent.model.modelID).pipe(Effect.orDie)
         : yield* provider.getModel(userMessage.model.providerID, userMessage.model.modelID).pipe(Effect.orDie)
       const cfg = yield* config.get()
+      const activation =
+        preferredModel.providerID === "lmstudio"
+          ? yield* Effect.promise(() =>
+              ModelSwitcher.activate({
+                config: cfg,
+                preferredModel,
+                role: "utility",
+                requestShape: { textCharacters: 0, files: 0, images: 0, tools: 0 },
+              }),
+            )
+          : undefined
+      const model = activation?.model ?? preferredModel
       const history = compactionPart && messages.at(-1)?.info.id === input.parentID ? messages.slice(0, -1) : messages
       const prior = completedCompactions(history)
       const hidden = new Set(prior.flatMap((item) => [item.userIndex, item.assistantIndex]))
@@ -579,8 +602,7 @@ const layer = Layer.effect(
           part.type === "text" && part.synthetic !== true && part.text.trim() ? [part.text.trim()] : [],
         )
         .join("\n")
-      const nextPrompt =
-        compacting.prompt ?? buildPrompt({ previousSummary, context: compacting.context, languageSample })
+      const nextPrompt = compacting.prompt ?? buildPrompt({ previousSummary, context: compacting.context })
       const msgs = structuredClone(selected.head)
       yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
       const modelMessages = yield* fitCompactionHead({ messages: msgs, model, cfg, prompt: nextPrompt })
@@ -622,7 +644,9 @@ const layer = Layer.effect(
         agent,
         sessionID: input.sessionID,
         tools: {},
-        system: [],
+        system: [ResponseLanguage.instruction(languageSample ?? "")].filter(
+          (part): part is string => part !== undefined,
+        ),
         messages: [
           ...modelMessages,
           {
@@ -641,6 +665,14 @@ const layer = Layer.effect(
         }).toObject()
         processor.message.finish = "error"
         yield* session.updateMessage(processor.message)
+        yield* Effect.promise(() =>
+          SessionLog.write({
+            sessionID: input.sessionID,
+            type: "compaction.failed",
+            messageID: processor.message.id,
+            data: { reason: processor.message.error },
+          }),
+        )
         return "stop"
       }
 
@@ -742,12 +774,7 @@ const layer = Layer.effect(
               .join("\n")
             const text = input.overflow
               ? "The latest user request exceeded the provider's size limit because of large media attachments. Explain that the attachments were too large to process and suggest retrying with smaller or fewer files."
-              : [
-                  "Answer the latest real user request. It supersedes any stale Objective or Next Move preserved in the historical summary.",
-                  requestText ? `Latest real user request:\n${requestText.slice(0, 2_000)}` : undefined,
-                ]
-                  .filter((part): part is string => part !== undefined)
-                  .join("\n\n")
+              : requestText?.slice(0, 2_000) || "Continue the latest request."
             yield* session.updatePart({
               id: PartID.ascending(),
               messageID: continueMsg.id,
@@ -772,6 +799,14 @@ const layer = Layer.effect(
       if (result === "continue") {
         yield* events.publish(Event.Compacted, { sessionID: input.sessionID })
       }
+      yield* Effect.promise(() =>
+        SessionLog.write({
+          sessionID: input.sessionID,
+          type: "compaction.finished",
+          messageID: processor.message.id,
+          data: { result, auto: input.auto, overflow: input.overflow === true },
+        }),
+      )
       return result
     })
 

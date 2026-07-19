@@ -40,6 +40,7 @@ type Deps = {
   showUpdater: () => Promise<void> | void
   setBackgroundColor: (color: string) => void
   exportDebugLogs: () => Promise<string>
+  clearDebugLogs: () => Promise<{ files: number; bytes: number }>
   recordFatalRendererError: (error: FatalRendererError) => Promise<void> | void
 }
 
@@ -82,6 +83,7 @@ export function registerIpcHandlers(deps: Deps) {
   ipcMain.handle("updater-install", () => deps.updater.install())
   ipcMain.handle("set-background-color", (_event: IpcMainInvokeEvent, color: string) => deps.setBackgroundColor(color))
   ipcMain.handle("export-debug-logs", () => deps.exportDebugLogs())
+  ipcMain.handle("clear-debug-logs", () => deps.clearDebugLogs())
   ipcMain.handle("set-force-focus", (event: IpcMainInvokeEvent, enabled: boolean) =>
     setForceFocus(event.sender, enabled),
   )

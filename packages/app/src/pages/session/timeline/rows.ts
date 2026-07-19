@@ -24,7 +24,7 @@ export type TimelineRowMap = {
     group: PartGroup
     previousAssistantPart: boolean
   }
-  Thinking: { userMessageID: string; reasoningHeading?: string }
+  Thinking: { userMessageID: string; reasoningHeading?: string; status: SessionStatus["type"] }
   Retry: { userMessageID: string }
   DiffSummary: { userMessageID: string; diffs: SummaryDiff[] }
   Error: { userMessageID: string; text: string }
@@ -53,9 +53,11 @@ export namespace Timeline {
     const error = assistantMessages.find((m) => m.error && m.error.name !== "MessageAbortedError")?.error
 
     const assistantPartRefs = assistantMessages.flatMap((message, messageIndex) =>
-      getMessageParts(message.id)
-        .filter((part) => renderable(part, showReasoning))
-        .map((part) => ({ messageID: message.id, messageIndex, part })),
+      message.summary
+        ? []
+        : getMessageParts(message.id)
+            .filter((part) => renderable(part, showReasoning))
+            .map((part) => ({ messageID: message.id, messageIndex, part })),
     )
     const assistantItems =
       interrupted && !compaction
@@ -122,7 +124,11 @@ export namespace Timeline {
       assistantGroupIndex += 1
     })
 
-    if (isActive && status === "busy" && !error && (showReasoning ? assistantPartRefs.length === 0 : true)) {
+    if (
+      isActive &&
+      ["busy", "verifying", "repairing", "verified"].includes(status) &&
+      !error
+    ) {
       const heading = assistantMessages
         .flatMap((message) => getMessageParts(message.id))
         .map((part) => (part.type === "reasoning" && part.text ? reasoningHeading(part.text) : undefined))
@@ -132,6 +138,7 @@ export namespace Timeline {
         new TimelineRow.Thinking({
           userMessageID: userMessage.id,
           reasoningHeading: heading,
+          status,
         }),
       )
     }

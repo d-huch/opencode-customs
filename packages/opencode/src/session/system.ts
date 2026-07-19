@@ -28,6 +28,9 @@ import { RepositoryContextRouter } from "@opencode-ai/core/repository-context-ro
 
 export function provider(model: Provider.Model) {
   if (model.limit?.context > 0 && model.limit.context <= 8_192) return [PROMPT_COMPACT]
+  // LM Studio exposes OpenAI-compatible model IDs. Those compatibility aliases must
+  // not select cloud-provider prompts with unrelated browsing policies.
+  if (model.providerID === "lmstudio") return [PROMPT_DEFAULT]
   if (model.api.id.includes("muse-spark")) return [PROMPT_META]
   if (model.api.id.includes("gpt-4") || model.api.id.includes("o1") || model.api.id.includes("o3"))
     return [PROMPT_BEAST]

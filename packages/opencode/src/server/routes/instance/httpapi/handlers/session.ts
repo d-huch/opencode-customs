@@ -14,6 +14,7 @@ import { SessionRunState } from "@/session/run-state"
 import { SessionStatus } from "@/session/status"
 import { SessionSummary } from "@/session/summary"
 import { Todo } from "@/session/todo"
+import { SessionLog } from "@/local-agent-runtime/session-log"
 import { MessageID, PartID, SessionID } from "@/session/schema"
 import { NamedError } from "@opencode-ai/core/util/error"
 import { Cause, Effect, Option, Schema, Scope } from "effect"
@@ -85,6 +86,11 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
 
     const get = Effect.fn("SessionHttpApi.get")(function* (ctx: { params: { sessionID: SessionID } }) {
       return yield* requireSession(ctx.params.sessionID)
+    })
+
+    const log = Effect.fn("SessionHttpApi.log")(function* (ctx: { params: { sessionID: SessionID } }) {
+      yield* requireSession(ctx.params.sessionID)
+      return yield* Effect.promise(() => SessionLog.location(ctx.params.sessionID))
     })
 
     const children = Effect.fn("SessionHttpApi.children")(function* (ctx: { params: { sessionID: SessionID } }) {
@@ -318,9 +324,34 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
         Effect.catchCause((cause) =>
           Effect.gen(function* () {
             yield* Effect.logError("prompt_async failed", { sessionID: ctx.params.sessionID, cause })
+            const failure = Cause.squash(cause)
+            const error = new NamedError.Unknown({
+              message:
+                failure instanceof Error
+                  ? failure.message
+                  : Cause.pretty(cause).split("\n")[0] || "Asynchronous prompt failed",
+            }).toObject()
+            const messages = yield* session.messages({ sessionID: ctx.params.sessionID })
+            const latestUser = messages
+              .filter((message) => message.info.role === "user")
+              .toSorted((left, right) => right.info.id.localeCompare(left.info.id))[0]
+            const latestAssistant = latestUser
+              ? messages
+                  .filter(
+                    (message) => message.info.role === "assistant" && message.info.parentID === latestUser.info.id,
+                  )
+                  .toSorted((left, right) => right.info.id.localeCompare(left.info.id))[0]
+              : undefined
+            if (latestAssistant?.info.role === "assistant" && !latestAssistant.info.error) {
+              latestAssistant.info.error = error
+              latestAssistant.info.finish = "error"
+              latestAssistant.info.time.completed = Date.now()
+              yield* session.updateMessage(latestAssistant.info)
+            }
+            yield* statusSvc.set(ctx.params.sessionID, { type: "idle" })
             yield* events.publish(Session.Event.Error, {
               sessionID: ctx.params.sessionID,
-              error: new NamedError.Unknown({ message: Cause.pretty(cause) }).toObject(),
+              error,
             })
           }),
         ),
@@ -415,6 +446,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       .handle("list", list)
       .handle("status", status)
       .handle("get", get)
+      .handle("log", log)
       .handle("children", children)
       .handle("todo", todo)
       .handle("diff", diff)

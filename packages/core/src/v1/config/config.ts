@@ -4,6 +4,8 @@ import { Schema } from "effect"
 import { NonNegativeInt, PositiveInt, type DeepMutable } from "../../schema"
 import { ConfigExperimental } from "../../config/experimental"
 import { ConfigReference } from "../../config/reference"
+import { ConfigRag } from "../../config/rag"
+import { ConfigVerification } from "../../config/verification"
 import { ConfigAgentV1 } from "./agent"
 import { ConfigAttachmentV1 } from "./attachment"
 import { ConfigCommandV1 } from "./command"
@@ -166,6 +168,12 @@ export const Info = Schema.Struct({
       }),
     }),
   ),
+  verification: Schema.optional(ConfigVerification.Info).annotate({
+    description: "Bounded change verification, repair, and repository evidence behavior",
+  }),
+  rag: Schema.optional(ConfigRag.Info).annotate({
+    description: "Bounded local embedding retrieval and durable project memory behavior",
+  }),
   experimental: Schema.optional(
     Schema.Struct({
       disable_paste_summary: Schema.optional(Schema.Boolean),

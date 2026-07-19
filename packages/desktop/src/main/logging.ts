@@ -72,6 +72,27 @@ export async function exportDebugLogs() {
   }
 }
 
+export async function clearDebugLogs() {
+  const restartNetLog = netLog.currentlyLogging
+  if (restartNetLog) {
+    await netLog.stopLogging().catch((error) => write("network", "failed to stop net log", { error }))
+  }
+
+  const result = [...new Set([root, ...serverLogRoots(), app.getPath("crashDumps")])].reduce(
+    (total, dir) => {
+      const cleared = clearDirectory(dir)
+      return { files: total.files + cleared.files, bytes: total.bytes + cleared.bytes }
+    },
+    { files: 0, bytes: 0 },
+  )
+  write("main", "debug logs cleared", result)
+
+  if (restartNetLog) {
+    await startNetLog().catch((error) => write("network", "failed to restart net log", { error }))
+  }
+  return result
+}
+
 export function write(
   name: string,
   message: string,
@@ -176,6 +197,27 @@ function collect(dir: string, prefix: string): Entry[] {
   }
   walk(dir)
   return result
+}
+
+function clearDirectory(dir: string): { files: number; bytes: number } {
+  if (!existsSync(dir)) return { files: 0, bytes: 0 }
+  return readdirSync(dir).reduce(
+    (total, entry) => {
+      const file = join(dir, entry)
+      try {
+        const info = statSync(file)
+        if (info.isDirectory()) {
+          const cleared = clearDirectory(file)
+          return { files: total.files + cleared.files, bytes: total.bytes + cleared.bytes }
+        }
+        writeFileSync(file, "")
+        return { files: total.files + 1, bytes: total.bytes + info.size }
+      } catch {
+        return total
+      }
+    },
+    { files: 0, bytes: 0 },
+  )
 }
 
 async function writeZip(output: string, entries: Entry[]) {

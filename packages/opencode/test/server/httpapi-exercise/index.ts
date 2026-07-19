@@ -101,6 +101,24 @@ function repositoryDiagnostics(value: unknown) {
   })
 }
 
+function repositoryKnowledge(value: unknown) {
+  object(value)
+  object(value.memory)
+  object(value.rag)
+  check(typeof value.memory.total === "number", "repository memory should report total entries")
+  check(typeof value.memory.matched === "number", "repository memory should report matching entries")
+  array(value.memory.entries)
+  check(typeof value.rag.total === "number", "repository RAG should report total chunks")
+  check(typeof value.rag.matched === "number", "repository RAG should report matching chunks")
+  check(typeof value.rag.files === "number", "repository RAG should report indexed files")
+  array(value.rag.entries)
+}
+
+function repositoryKnowledgeMutation(value: unknown) {
+  object(value)
+  check(typeof value.removed === "number" && value.removed >= 0, "knowledge mutation should report removals")
+}
+
 const scenarios: Scenario[] = [
   http.protected
     .get("/global/health", "global.health")
@@ -721,6 +739,26 @@ const scenarios: Scenario[] = [
       body: { enabled: true, clear: true },
     }))
     .json(200, locationData(repositoryDiagnostics)),
+  http.protected
+    .get("/api/repository-map/knowledge", "v2.repositoryMap.knowledge")
+    .at((ctx) => ({ path: "/api/repository-map/knowledge?limit=10", headers: ctx.headers() }))
+    .json(200, locationData(repositoryKnowledge)),
+  http.protected
+    .delete("/api/repository-map/knowledge/{scope}/{id}", "v2.repositoryMap.removeKnowledge")
+    .at((ctx) => ({
+      path: route("/api/repository-map/knowledge/{scope}/{id}", { scope: "memory", id: "missing" }),
+      headers: ctx.headers(),
+    }))
+    .mutating()
+    .json(200, locationData(repositoryKnowledgeMutation)),
+  http.protected
+    .delete("/api/repository-map/knowledge/{scope}", "v2.repositoryMap.clearKnowledge")
+    .at((ctx) => ({
+      path: route("/api/repository-map/knowledge/{scope}", { scope: "rag" }),
+      headers: ctx.headers(),
+    }))
+    .mutating()
+    .json(200, locationData(repositoryKnowledgeMutation)),
   http.protected.get("/api/agent", "v2.agent.list").json(200, locationData(array)),
   http.protected.get("/api/model", "v2.model.list").json(200, locationData(array)),
   http.protected.get("/api/provider", "v2.provider.list").json(200, locationData(array)),

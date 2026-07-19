@@ -28,6 +28,9 @@ import { Usage, type LLMEvent } from "@opencode-ai/llm"
 import { completedCheckpoint } from "@/local-agent-runtime/checkpoint"
 import { recordModelFailure } from "@/local-agent-runtime/resource-governor"
 import { SessionExecutionCheckpoint } from "@opencode-ai/core/session/execution-checkpoint"
+import { SessionVerification } from "./verification"
+import { ResponseRepetition } from "@opencode-ai/core/response-repetition"
+import { SessionLog } from "@/local-agent-runtime/session-log"
 
 const DOOM_LOOP_THRESHOLD = 3
 export type Result = "compact" | "stop" | "continue"
@@ -47,7 +50,7 @@ export interface Handle {
       attachments?: SessionV1.FilePart[]
     },
   ) => Effect.Effect<void>
-  readonly beginToolCall: (toolCallID: string) => Effect.Effect<void>
+  readonly beginToolCall: (toolCallID: string, tool?: string, args?: unknown) => Effect.Effect<void>
   readonly process: (streamInput: LLM.StreamInput) => Effect.Effect<Result>
 }
 
@@ -132,11 +135,26 @@ const layer = Layer.effect(
         if (done) yield* Deferred.succeed(done, undefined).pipe(Effect.ignore)
       })
 
-      const beginToolCall = Effect.fn("SessionProcessor.beginToolCall")(function* (_toolCallID: string) {
+      const beginToolCall = Effect.fn("SessionProcessor.beginToolCall")(function* (
+        toolCallID: string,
+        tool?: string,
+        args?: unknown,
+      ) {
         if (!input.checkpoint) return
+        const match = yield* readToolCall(toolCallID)
+        const name = tool ?? match?.part.tool
         yield* SessionExecutionCheckpoint.advance(database.db, input.checkpoint, {
-          state: "settling_tools",
+          state: name === SessionVerification.TOOL_ID ? "verifying" : "settling_tools",
           step: input.step ?? 1,
+        })
+        if (name !== SessionVerification.TOOL_ID) return
+        const checks = isRecord(args) && Array.isArray(args.checks) ? args.checks.length : 0
+        yield* status.set(ctx.sessionID, {
+          type: "verifying",
+          attempt: SessionVerification.attempt(
+            yield* session.messages({ sessionID: ctx.sessionID }).pipe(Effect.orDie),
+          ),
+          checks,
         })
       })
 
@@ -194,6 +212,31 @@ const layer = Layer.effect(
             attachments: output.attachments,
           },
         })
+        if (match.part.tool === SessionVerification.TOOL_ID && output.metadata.verification === true) {
+          const passed = output.metadata.passed === true
+          if (input.checkpoint)
+            yield* SessionExecutionCheckpoint.advance(database.db, input.checkpoint, {
+              state: passed ? "verified" : "repairing",
+              step: input.step ?? 1,
+            })
+          const cfg = yield* config.get()
+          yield* status.set(
+            ctx.sessionID,
+            passed
+              ? {
+                  type: "verified",
+                  checks: Array.isArray(output.metadata.checks) ? output.metadata.checks.length : 0,
+                }
+              : {
+                  type: "repairing",
+                  attempt:
+                    typeof output.metadata.attempt === "number" && Number.isSafeInteger(output.metadata.attempt)
+                      ? output.metadata.attempt
+                      : 1,
+                  max: (cfg.verification?.repair_attempts ?? 2) + 1,
+                },
+          )
+        }
         yield* settleToolCall(toolCallID)
       })
 
@@ -213,6 +256,21 @@ const layer = Layer.effect(
         })
         if (error instanceof PermissionV1.RejectedError || error instanceof Question.RejectedError) {
           ctx.blocked = ctx.shouldBreak
+        }
+        if (match.part.tool === SessionVerification.TOOL_ID) {
+          if (input.checkpoint)
+            yield* SessionExecutionCheckpoint.advance(database.db, input.checkpoint, {
+              state: "repairing",
+              step: input.step ?? 1,
+            })
+          const cfg = yield* config.get()
+          yield* status.set(ctx.sessionID, {
+            type: "repairing",
+            attempt: SessionVerification.attempt(
+              yield* session.messages({ sessionID: ctx.sessionID }).pipe(Effect.orDie),
+            ),
+            max: (cfg.verification?.repair_attempts ?? 2) + 1,
+          })
         }
         yield* settleToolCall(toolCallID)
         return true
@@ -346,9 +404,17 @@ const layer = Layer.effect(
             if (ctx.assistantMessage.summary) {
               throw new Error(`Tool call not allowed while generating summary: ${value.name}`)
             }
-            yield* beginToolCall(value.id)
+            yield* beginToolCall(value.id, value.name, value.input)
             yield* ensureToolCall(value)
             const input = isRecord(value.input) ? value.input : { value: value.input }
+            yield* Effect.promise(() =>
+              SessionLog.write({
+                sessionID: ctx.sessionID,
+                type: "tool.call",
+                messageID: ctx.assistantMessage.id,
+                data: { callID: value.id, tool: value.name, input },
+              }),
+            )
             yield* updateToolCall(value.id, (match) => ({
               ...match,
               tool: value.name,
@@ -365,23 +431,26 @@ const layer = Layer.effect(
                 : value.providerMetadata,
             }))
 
-            const parts = yield* MessageV2.parts(ctx.assistantMessage.id).pipe(
-              Effect.provideService(Database.Service, database),
-            )
-            const recentParts = parts.slice(-DOOM_LOOP_THRESHOLD)
-
-            if (
-              recentParts.length !== DOOM_LOOP_THRESHOLD ||
-              !recentParts.every(
-                (part) =>
-                  part.type === "tool" &&
-                  part.tool === value.name &&
-                  part.state.status !== "pending" &&
-                  JSON.stringify(part.state.input) === JSON.stringify(input),
+            const history = (yield* session.messages({ sessionID: ctx.sessionID, limit: 24 }).pipe(Effect.orDie))
+              .flatMap((message) => message.parts)
+              .filter(
+                (part): part is SessionV1.ToolPart =>
+                  part.type === "tool" && part.callID !== value.id && part.state.status !== "pending",
               )
-            ) {
+              .map((part) => ({ tool: part.tool, input: part.state.input }))
+            if (value.name === "invalid") {
+              if (!ResponseRepetition.repeatedInvalidToolCall(history, { tool: value.name, input })) return
+              const tool = typeof input.tool === "string" ? input.tool : value.name
+              yield* failToolCall(
+                value.id,
+                new Error(`Stopped after 2 malformed calls for tool: ${tool}`),
+              )
+              ctx.blocked = true
               return
             }
+
+            if (!ResponseRepetition.repeatedToolCall(history, { tool: value.name, input }, DOOM_LOOP_THRESHOLD))
+              return
 
             const agent = yield* agents.get(ctx.assistantMessage.agent)
             yield* permission.ask({
@@ -399,6 +468,14 @@ const layer = Layer.effect(
             const toolCall = yield* readToolCall(value.id)
             if (!toolCall && value.result.type === "error") return
             if (value.result.type === "error") {
+              yield* Effect.promise(() =>
+                SessionLog.write({
+                  sessionID: ctx.sessionID,
+                  type: "tool.error",
+                  messageID: ctx.assistantMessage.id,
+                  data: { callID: value.id, tool: value.name, error: value.result.value },
+                }),
+              )
               yield* failToolCall(value.id, value.result.value)
               return
             }
@@ -424,11 +501,27 @@ const layer = Layer.effect(
                   : `${rawOutput.output}\n\n[${omitted} image${omitted === 1 ? "" : "s"} omitted: could not be resized below the image size limit.]`,
               attachments: attachments.length ? attachments : undefined,
             }
+            yield* Effect.promise(() =>
+              SessionLog.write({
+                sessionID: ctx.sessionID,
+                type: "tool.result",
+                messageID: ctx.assistantMessage.id,
+                data: { callID: value.id, tool: value.name, ...output },
+              }),
+            )
             yield* completeToolCall(value.id, output)
             return
           }
 
           case "tool-error": {
+            yield* Effect.promise(() =>
+              SessionLog.write({
+                sessionID: ctx.sessionID,
+                type: "tool.error",
+                messageID: ctx.assistantMessage.id,
+                data: { callID: value.id, tool: value.name, error: value.error ?? value.message },
+              }),
+            )
             yield* failToolCall(value.id, value.error ?? new Error(value.message))
             return
           }
@@ -537,6 +630,7 @@ const layer = Layer.effect(
               },
               { text: ctx.currentText.text },
             )).text
+            ctx.currentText.text = ResponseRepetition.normalize(ctx.currentText.text)
             {
               const end = Date.now()
               ctx.currentText.time = { start: ctx.currentText.time?.start ?? end, end }
@@ -569,6 +663,7 @@ const layer = Layer.effect(
 
         if (ctx.currentText) {
           const end = Date.now()
+          ctx.currentText.text = ResponseRepetition.normalize(ctx.currentText.text)
           ctx.currentText.time = { start: ctx.currentText.time?.start ?? end, end }
           yield* session.updatePart(ctx.currentText)
           ctx.currentText = undefined
@@ -612,6 +707,15 @@ const layer = Layer.effect(
       })
 
       const halt = Effect.fn("SessionProcessor.halt")(function* (e: unknown) {
+        yield* Effect.promise(() =>
+          SessionLog.write({
+            sessionID: input.sessionID,
+            type: "execution.error",
+            messageID: input.assistantMessage.id,
+            executionID: input.checkpoint?.executionID,
+            data: { step: input.step, error: e },
+          }),
+        )
         yield* Effect.logError("process", {
           "session.id": input.sessionID,
           messageID: input.assistantMessage.id,
@@ -665,6 +769,15 @@ const layer = Layer.effect(
       })
 
       const process = Effect.fn("SessionProcessor.process")(function* (streamInput: LLM.StreamInput) {
+        yield* Effect.promise(() =>
+          SessionLog.write({
+            sessionID: input.sessionID,
+            type: "execution.started",
+            messageID: input.assistantMessage.id,
+            executionID: input.checkpoint?.executionID,
+            data: { step: input.step, modelID: input.model.id, providerID: input.model.providerID },
+          }),
+        )
         yield* Effect.logInfo("process", {
           "session.id": input.sessionID,
           messageID: input.assistantMessage.id,
@@ -721,9 +834,23 @@ const layer = Layer.effect(
             Effect.ensuring(cleanup()),
           )
 
-          if (ctx.needsCompaction) return "compact"
-          if (ctx.blocked || ctx.assistantMessage.error) return "stop"
-          return "continue"
+          const result = ctx.needsCompaction ? "compact" : ctx.blocked || ctx.assistantMessage.error ? "stop" : "continue"
+          yield* Effect.promise(() =>
+            SessionLog.write({
+              sessionID: input.sessionID,
+              type: "execution.finished",
+              messageID: input.assistantMessage.id,
+              executionID: input.checkpoint?.executionID,
+              data: {
+                step: input.step,
+                result,
+                finish: ctx.assistantMessage.finish,
+                tokens: ctx.assistantMessage.tokens,
+                error: ctx.assistantMessage.error,
+              },
+            }),
+          )
+          return result
         })
       })
 

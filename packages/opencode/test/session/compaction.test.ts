@@ -595,14 +595,16 @@ describe("session.compaction.fitRequest", () => {
       Effect.gen(function* () {
         const compact = yield* SessionCompaction.Service
         const tools = Object.fromEntries(
-          ["read", "grep", "glob", "edit", "write", "bash", "question", "task"].map((name) => [
+          ["read", "grep", "evidence", "invalid", "glob", "edit", "write", "bash", "question", "task"].map((name) => [
             name,
             {
               description: `${name} ${"description ".repeat(200)}`,
               inputSchema: {
                 jsonSchema: {
                   type: "object",
-                  properties: { value: { type: "string", description: "schema ".repeat(400) } },
+                  properties: {
+                    value: { type: "string", description: "schema ".repeat(name === "invalid" ? 10 : 400) },
+                  },
                 },
               },
             } as unknown as Tool,
@@ -614,13 +616,16 @@ describe("session.compaction.fitRequest", () => {
           messages: [{ role: "user", content: "inspect the project" }],
           tools,
           model: createModel({ context: 4_096, output: 512 }),
-          requiredTools: ["read"],
+          requiredTools: ["read", "grep", "evidence"],
         })
 
         expect(result.compressed).toBe(true)
         expect(result.overflow).toBe(false)
         expect(result.tokens).toBeLessThan(result.limit)
         expect(result.tools.read).toBeDefined()
+        expect(result.tools.grep).toBeDefined()
+        expect(result.tools.evidence).toBeDefined()
+        expect(result.tools.invalid).toBeDefined()
         expect(Object.keys(result.tools).length).toBeLessThan(Object.keys(tools).length)
       }),
     ),
@@ -994,8 +999,7 @@ describe("session.compaction.process", () => {
         metadata: { compaction_continue: true },
       })
       if (last?.parts[0]?.type === "text") {
-        expect(last.parts[0].text).toContain("Answer the latest real user request")
-        expect(last.parts[0].text).toContain("hello")
+        expect(last.parts[0].text).toBe("hello")
       }
     }),
   )
@@ -1022,8 +1026,7 @@ describe("session.compaction.process", () => {
       const all = yield* ssn.messages({ sessionID: session.id })
       const continuation = all.at(-1)?.parts.find((part): part is SessionV1.TextPart => part.type === "text")
       expect(continuation?.synthetic).toBe(true)
-      expect(continuation?.text).toContain("Де знайти журнал спеціалістів?")
-      expect(continuation?.text).not.toContain("Create a PDF containing Hello World")
+      expect(continuation?.text).toBe("Де знайти журнал спеціалістів?")
       expect(MessageV2.latestUserRequest(all)?.info.id).toBe(latest.id)
     }),
   )
@@ -1319,7 +1322,7 @@ describe("session.compaction.process", () => {
       expect(result).toBe("continue")
       expect(last?.info.role).toBe("user")
       if (last?.parts[0]?.type === "text") {
-        expect(last.parts[0].text).toContain("previous request exceeded the provider's size limit")
+        expect(last.parts[0].text).toContain("latest user request exceeded the provider's size limit")
       }
     }),
   )

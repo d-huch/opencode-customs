@@ -10,6 +10,7 @@ import { described } from "./metadata"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { LmStudioProbe } from "@/local-agent-runtime/lmstudio"
 import { ResourceGovernorSnapshot } from "@/local-agent-runtime/resource-governor"
+import { ModelCapabilityRouter } from "@opencode-ai/core/model-capability-router"
 
 const root = "/provider"
 
@@ -67,6 +68,17 @@ export const ProviderApi = HttpApi.make("provider")
             summary: "Inspect Local Agent Runtime resources",
             description:
               "Report host memory pressure, local model concurrency, context safety limits, and recent governor decisions.",
+          }),
+        ),
+        HttpApiEndpoint.get("capabilityRouter", `${root}/runtime/router`, {
+          query: WorkspaceRoutingQuery,
+          success: described(ModelCapabilityRouter.Plan, "Local Agent Runtime model capability route"),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "provider.runtime.router",
+            summary: "Inspect model capability routing",
+            description:
+              "Report capability-based model role selections, scoring reasons, context limits, resource pressure, and the latest guarded LM Studio model handoff.",
           }),
         ),
         HttpApiEndpoint.get("auth", `${root}/auth`, {

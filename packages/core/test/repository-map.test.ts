@@ -37,7 +37,7 @@ const repositoryLayer = AppNodeBuilder.build(
           // Import discovery is enrichment. A pathological generated line must not
           // prevent the structural map and per-file parser from being available.
           grep: (input) =>
-            input.pattern.includes("журна")
+            input.pattern.includes("журн")
               ? Effect.succeed([
                   FileSystem.Match.make({
                     entry: FileSystem.Entry.make({
@@ -79,8 +79,20 @@ const repositoryLayer = AppNodeBuilder.build(
                     text: "статусом SoldierStatusJournal status state",
                     submatches: [],
                   }),
+                  FileSystem.Match.make({
+                    entry: FileSystem.Entry.make({
+                      path: RelativePath.make("resources/js/pages/offenders/OffendersTable.vue"),
+                      type: "file",
+                    }),
+                    line: 1,
+                    offset: 0,
+                    text: "Правопорушення OffendersTable offender audit",
+                    submatches: [],
+                  }),
                 ])
-              : input.pattern.includes("Navigation") || input.pattern.includes("Soldier")
+              : input.pattern.includes("Navigation") ||
+                  input.pattern.includes("Soldier") ||
+                  input.pattern.includes("навіга")
                 ? Effect.succeed([
                     FileSystem.Match.make({
                       entry: FileSystem.Entry.make({
@@ -136,7 +148,7 @@ const repositoryLayer = AppNodeBuilder.build(
                       }),
                       line: 24,
                       offset: 0,
-                      text: "navigation journals",
+                      text: "навігаційне меню navigation journals",
                       submatches: [],
                     }),
                   ])
@@ -273,11 +285,24 @@ describe("RepositoryMap", () => {
       { from: "src/session/runner.ts", to: "src/config/settings.ts", kind: "import", references: 1 },
     ])
     const routed = RepositoryContextRouter.select(map, { query: "change Settings session behavior" })
+    expect(routed?.grounded).toBe(true)
     expect(routed?.files).toContain("src/config/settings.ts")
     expect(routed?.symbols).toContainEqual(expect.objectContaining({ name: "Settings" }))
     expect(routed?.text).toContain('<repository_context source="query-router">')
     expect(routed?.text).toContain("call LSP workspaceSymbol once")
     expect(routed?.text).toContain("do not repeat equivalent grep/find/shell searches")
+    expect(RepositoryContextRouter.select(map, { query: "hello" })).toBeUndefined()
+
+    const embedded = RepositoryContextRouter.select(
+      map,
+      { query: "configure persistence" },
+      [],
+      undefined,
+      [],
+      [{ path: "src/session/runner.ts", start: 10, end: 20, score: 0.91 }],
+    )
+    expect(embedded?.grounded).toBe(true)
+    expect(embedded?.files[0]).toBe("src/session/runner.ts")
   })
 
   it.effect("learns project vocabulary and routes an abstract request through a topology slice", () =>
@@ -326,18 +351,38 @@ describe("RepositoryMap", () => {
     }),
   )
 
-  it.effect("keeps short navigation lookups on the lightweight route", () =>
+  it.effect("grounds short abstract navigation lookups in repository vocabulary", () =>
     Effect.gen(function* () {
       const router = yield* RepositoryContextRouter.Service
       yield* router.configureDiagnostics({ enabled: true, clear: true })
       const result = yield* router.route({ query: "знайди навігаційне меню" })
 
-      expect(result?.concepts).toEqual([])
+      expect(result?.concepts.map((concept) => concept.name)).toEqual(["навігаційне", "меню"])
+      expect(result?.files).toContain("resources/js/components/NavigationSidebar.vue")
       expect((yield* router.diagnostics()).entries.map((entry) => entry.stage)).toEqual([
         "prompt",
         "map",
+        "concept",
+        "concept",
+        "concept",
         "context",
       ])
+    }),
+  )
+
+  it.effect("grounds a misspelled inflected concept without a domain dictionary", () =>
+    Effect.gen(function* () {
+      const router = yield* RepositoryContextRouter.Service
+      const result = yield* router.route({
+        query: "Знайди журнал правопошунь і перевір як він працює",
+      })
+
+      const concept = result?.concepts.find((item) => item.name === "правопошунь")
+      expect(concept?.aliases).toContain("Правопорушення")
+      expect(concept?.terms).toContain("OffendersTable")
+      expect(result?.files).toContain("resources/js/pages/offenders/OffendersTable.vue")
+      expect(result?.text).toContain("repository forms: Правопорушення")
+      expect(result?.text).toContain("never invent a path or component from framework conventions")
     }),
   )
 

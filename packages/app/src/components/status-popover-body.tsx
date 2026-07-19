@@ -161,7 +161,7 @@ export function StatusPopoverServerBody() {
 
 function ServerStatusPopoverView(props: { state: ServerStatusState }) {
   return (
-    <div class="flex items-center gap-1 w-[360px] rounded-xl shadow-[var(--shadow-lg-border-base)]">
+    <div class="status-popover-layout flex items-stretch gap-1 w-[360px] rounded-xl shadow-[var(--shadow-lg-border-base)]">
       <Tabs
         aria-label={props.state.ariaLabel}
         class="tabs bg-background-strong rounded-xl overflow-hidden"
@@ -258,11 +258,27 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
     () => (props.shown() && desktop() ? sdk() : undefined),
     (context) => context.client.provider.lmstudio.probe().then((result) => result.data),
   )
-  const [governor, { refetch: refetchGovernor }] = createResource(
+  const [governor, { mutate: setGovernor, refetch: refetchGovernor }] = createResource(
     () => (props.shown() && desktop() ? sdk() : undefined),
     (context) => context.client.provider.runtime.resources().then((result) => result.data),
   )
+  const [capabilityRouter, { mutate: setCapabilityRouter, refetch: refetchCapabilityRouter }] = createResource(
+    () => (props.shown() && desktop() ? sdk() : undefined),
+    (context) => context.client.provider.runtime.router().then((result) => result.data),
+  )
   const [repositoryMapState, setRepositoryMapState] = createStore({ refreshing: false })
+  const [runtimeState, setRuntimeState] = createStore({
+    activeTab: settings.general.newLayoutDesigns() ? "mcp" : "servers",
+    refreshing: false,
+    clearingLogs: false,
+  })
+  const runtimeLoading = createMemo(
+    () =>
+      runtimeState.refreshing ||
+      (!lmStudio() && lmStudio.loading) ||
+      (!governor() && governor.loading) ||
+      (!capabilityRouter() && capabilityRouter.loading),
+  )
   const repositoryMapStatus = createMemo(() => {
     if (repositoryMap()?.status === "complete") return language.t("status.popover.repositoryMap.status.complete")
     if (repositoryMap()?.status === "truncated") return language.t("status.popover.repositoryMap.status.truncated")
@@ -286,6 +302,70 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
     if (governor()?.status === "pressured") return language.t("status.popover.runtime.governor.status.pressured")
     return language.t("status.popover.runtime.governor.status.critical")
   })
+  const capabilityRouterStatus = createMemo(() => {
+    if (capabilityRouter()?.status === "ready") return language.t("status.popover.runtime.router.status.ready")
+    if (capabilityRouter()?.status === "degraded") return language.t("status.popover.runtime.router.status.degraded")
+    return language.t("status.popover.runtime.router.status.unavailable")
+  })
+  const capabilityRole = (role: "embedding" | "utility" | "coding" | "vision" | "fallback") => {
+    if (role === "embedding") return language.t("status.popover.runtime.router.role.embedding")
+    if (role === "utility") return language.t("status.popover.runtime.router.role.utility")
+    if (role === "coding") return language.t("status.popover.runtime.router.role.coding")
+    if (role === "vision") return language.t("status.popover.runtime.router.role.vision")
+    return language.t("status.popover.runtime.router.role.fallback")
+  }
+  const capabilityReason = (reason: string) => {
+    if (reason === "role.embedding") return language.t("status.popover.runtime.router.reason.embedding")
+    if (reason === "role.utility") return language.t("status.popover.runtime.router.reason.utility")
+    if (reason === "role.coding") return language.t("status.popover.runtime.router.reason.coding")
+    if (reason === "role.vision") return language.t("status.popover.runtime.router.reason.vision")
+    if (reason === "role.fallback") return language.t("status.popover.runtime.router.reason.fallback")
+    if (reason === "preference.explicit") return language.t("status.popover.runtime.router.reason.preference")
+    if (reason === "candidate.unloaded") return language.t("status.popover.runtime.router.reason.candidateUnloaded")
+    if (reason === "switch.ready") return language.t("status.popover.runtime.router.reason.switchReady")
+    if (reason === "switch.failover.ready")
+      return language.t("status.popover.runtime.router.reason.switchFailoverReady")
+    if (reason === "switch.previous.busy") return language.t("status.popover.runtime.router.reason.switchPreviousBusy")
+    if (reason === "switch.previous.external")
+      return language.t("status.popover.runtime.router.reason.switchPreviousExternal")
+    if (reason === "switch.previous.unloaded")
+      return language.t("status.popover.runtime.router.reason.switchPreviousUnloaded")
+    if (reason === "switch.previous.cleanup_failed")
+      return language.t("status.popover.runtime.router.reason.switchCleanupFailed")
+    if (reason === "switch.no_candidate") return language.t("status.popover.runtime.router.reason.switchNoCandidate")
+    if (reason === "switch.unconfigured") return language.t("status.popover.runtime.router.reason.switchUnconfigured")
+    if (reason === "switch.primary.memory" || reason === "switch.fallback.memory")
+      return language.t("status.popover.runtime.router.reason.switchMemory")
+    if (reason === "switch.primary.failed" || reason === "switch.fallback.failed")
+      return language.t("status.popover.runtime.router.reason.switchFailed")
+    if (reason === "vision.file_reference") return language.t("status.popover.runtime.vision.reason.fileReference")
+    if (reason === "vision.within_limits") return language.t("status.popover.runtime.vision.reason.withinLimits")
+    if (reason === "vision.compressed") return language.t("status.popover.runtime.vision.reason.compressed")
+    if (reason === "vision.resources.pressured")
+      return language.t("status.popover.runtime.vision.reason.resourcesPressured")
+    if (reason === "vision.resources.critical")
+      return language.t("status.popover.runtime.vision.reason.resourcesCritical")
+    if (reason === "vision.model.selected") return language.t("status.popover.runtime.vision.reason.modelSelected")
+    if (reason === "vision.model.unavailable")
+      return language.t("status.popover.runtime.vision.reason.modelUnavailable")
+    if (reason === "vision.fallback") return language.t("status.popover.runtime.vision.reason.fallback")
+    if (reason === "vision.rollback") return language.t("status.popover.runtime.vision.reason.rollback")
+    if (reason === "vision.completed") return language.t("status.popover.runtime.vision.reason.completed")
+    if (reason === "vision.failed") return language.t("status.popover.runtime.vision.reason.failed")
+    return reason
+  }
+  const activationStatus = (status: "ready" | "switched" | "failed" | "rolled_back" | "degraded") => {
+    if (status === "ready") return language.t("status.popover.runtime.router.activation.ready")
+    if (status === "switched") return language.t("status.popover.runtime.router.activation.switched")
+    if (status === "rolled_back") return language.t("status.popover.runtime.router.activation.rolledBack")
+    if (status === "degraded") return language.t("status.popover.runtime.router.activation.degraded")
+    return language.t("status.popover.runtime.router.activation.failed")
+  }
+  const visionStatus = (status: "prepared" | "completed" | "failed") => {
+    if (status === "prepared") return language.t("status.popover.runtime.vision.status.prepared")
+    if (status === "completed") return language.t("status.popover.runtime.vision.status.completed")
+    return language.t("status.popover.runtime.vision.status.failed")
+  }
 
   const fail = (err: unknown) => {
     showToast({
@@ -302,9 +382,36 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
   })
 
   createEffect(() => {
-    if (!props.shown() || !desktop()) return
-    const timer = window.setInterval(() => void refetchGovernor(), 2_000)
-    onCleanup(() => window.clearInterval(timer))
+    if (!props.shown() || !desktop() || runtimeState.activeTab !== "runtime") return
+    const context = sdk()
+    const polling = { stopped: false, timer: undefined as number | undefined }
+    const refresh = async () => {
+      if (!runtimeState.refreshing) {
+        await Promise.all([
+          context.client.provider.runtime
+            .resources()
+            .then((result) => {
+              if (polling.stopped || !result.data) return
+              setGovernor(result.data)
+            })
+            .catch(() => undefined),
+          context.client.provider.runtime
+            .router()
+            .then((result) => {
+              if (polling.stopped || !result.data) return
+              setCapabilityRouter(result.data)
+            })
+            .catch(() => undefined),
+        ])
+      }
+      if (polling.stopped) return
+      polling.timer = window.setTimeout(() => void refresh(), 3_000)
+    }
+    polling.timer = window.setTimeout(() => void refresh(), 3_000)
+    onCleanup(() => {
+      polling.stopped = true
+      if (polling.timer !== undefined) window.clearTimeout(polling.timer)
+    })
   })
 
   let dialogRun = 0
@@ -341,15 +448,41 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
     if (repositoryDiagnostics.updating()) return
     await repositoryDiagnostics.configure(enabled, clear).catch(fail)
   }
+  const refreshRuntime = async () => {
+    if (runtimeState.refreshing) return
+    setRuntimeState("refreshing", true)
+    await Promise.all([refetchLmStudio(), refetchGovernor(), refetchCapabilityRouter()])
+      .catch(fail)
+      .finally(() => setRuntimeState("refreshing", false))
+  }
+  const clearRuntimeLogs = async () => {
+    if (!platform.clearDebugLogs || runtimeState.clearingLogs) return
+    if (!window.confirm(language.t("status.popover.runtime.logs.clearConfirm"))) return
+    setRuntimeState("clearingLogs", true)
+    await platform
+      .clearDebugLogs()
+      .then((result) =>
+        showToast({
+          variant: "success",
+          title: language.t("status.popover.runtime.logs.cleared"),
+          description: language.t("status.popover.runtime.logs.clearedDescription", {
+            files: result.files.toLocaleString(language.intl()),
+          }),
+        }),
+      )
+      .catch(fail)
+      .finally(() => setRuntimeState("clearingLogs", false))
+  }
 
   return (
-    <div class="flex items-center gap-1 w-[360px] rounded-xl shadow-[var(--shadow-lg-border-base)]">
+    <div class="status-popover-layout flex items-stretch gap-1 w-[360px] rounded-xl shadow-[var(--shadow-lg-border-base)]">
       <Tabs
         aria-label={language.t("status.popover.ariaLabel")}
         class="tabs bg-background-strong rounded-xl overflow-hidden"
         data-component="tabs"
-        data-active={settings.general.newLayoutDesigns() ? "mcp" : "servers"}
-        defaultValue={settings.general.newLayoutDesigns() ? "mcp" : "servers"}
+        data-active={runtimeState.activeTab}
+        value={runtimeState.activeTab}
+        onChange={(value) => setRuntimeState("activeTab", value)}
         variant="alt"
       >
         <Tabs.List data-slot="tablist" class="bg-transparent border-b-0 px-4 pt-2 pb-0 gap-4 h-10">
@@ -600,7 +733,8 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
                               </span>
                             </div>
                             <span class="truncate text-10-regular text-text-weaker">
-                              {decision().modelID} · {Number(decision().requestedContext).toLocaleString(language.intl())}
+                              {decision().modelID} ·{" "}
+                              {Number(decision().requestedContext).toLocaleString(language.intl())}
                               {decision().runtimeContext
                                 ? ` → ${Number(decision().runtimeContext).toLocaleString(language.intl())}`
                                 : ""}
@@ -612,12 +746,187 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
                   )}
                 </Show>
 
+                <Show when={capabilityRouter()}>
+                  {(route) => (
+                    <div class="flex flex-col gap-3 border-b border-border-weak-base pb-3">
+                      <div class="flex items-center gap-2 px-1">
+                        <div
+                          classList={{
+                            "size-1.5 shrink-0 rounded-full": true,
+                            "bg-icon-success-base": route().status === "ready",
+                            "bg-icon-warning-base": route().status === "degraded",
+                            "bg-icon-critical-base": route().status === "unavailable",
+                          }}
+                        />
+                        <span class="text-14-medium text-text-base">
+                          {language.t("status.popover.runtime.router.title")} · {capabilityRouterStatus()}
+                        </span>
+                        <span class="ml-auto text-10-regular tabular-nums text-text-weaker">
+                          {route().candidateCount} {language.t("status.popover.runtime.router.candidates")}
+                        </span>
+                      </div>
+
+                      <Show when={route().activation}>
+                        {(activation) => (
+                          <div class="flex flex-col gap-1 rounded-md border border-border-weak-base bg-surface-raised-base px-2 py-1.5">
+                            <div class="flex min-w-0 items-center gap-2">
+                              <div
+                                classList={{
+                                  "size-1.5 shrink-0 rounded-full": true,
+                                  "bg-icon-success-base":
+                                    activation().status === "ready" || activation().status === "switched",
+                                  "bg-icon-warning-base": activation().status === "degraded",
+                                  "bg-icon-critical-base":
+                                    activation().status === "failed" || activation().status === "rolled_back",
+                                }}
+                              />
+                              <span class="text-10-medium uppercase text-text-weaker">
+                                {language.t("status.popover.runtime.router.activation.title")}
+                              </span>
+                              <span class="min-w-0 flex-1 truncate text-12-medium text-text-base">
+                                {activation().activeModelID}
+                              </span>
+                              <span class="shrink-0 text-10-regular text-text-weaker">
+                                {activationStatus(activation().status)}
+                              </span>
+                            </div>
+                            <div class="flex items-center gap-2 text-10-regular text-text-weaker">
+                              <span>
+                                {activation().attempts}{" "}
+                                {language.t("status.popover.runtime.router.activation.attempts")}
+                              </span>
+                              <Show when={activation().failover}>
+                                <span>{language.t("status.popover.runtime.router.activation.failover")}</span>
+                              </Show>
+                              <Show when={activation().rollback}>
+                                <span>{language.t("status.popover.runtime.router.activation.rollback")}</span>
+                              </Show>
+                            </div>
+                            <span
+                              class="truncate text-10-regular text-text-weaker"
+                              title={activation().reason.map(capabilityReason).join(" · ")}
+                            >
+                              {capabilityReason(activation().reason[0] ?? "")}
+                            </span>
+                          </div>
+                        )}
+                      </Show>
+
+                      <Show when={route().vision}>
+                        {(vision) => (
+                          <div class="flex flex-col gap-1 rounded-md border border-border-weak-base bg-surface-raised-base px-2 py-1.5">
+                            <div class="flex min-w-0 items-center gap-2">
+                              <div
+                                classList={{
+                                  "size-1.5 shrink-0 rounded-full": true,
+                                  "bg-icon-success-base": vision().status === "completed",
+                                  "bg-icon-warning-base": vision().status === "prepared",
+                                  "bg-icon-critical-base": vision().status === "failed",
+                                }}
+                              />
+                              <span class="text-10-medium uppercase text-text-weaker">
+                                {language.t("status.popover.runtime.vision.title")}
+                              </span>
+                              <span class="min-w-0 flex-1 truncate text-12-medium text-text-base">
+                                {vision().modelID ?? language.t("status.popover.runtime.vision.noModel")}
+                              </span>
+                              <span class="shrink-0 text-10-regular text-text-weaker">
+                                {visionStatus(vision().status)}
+                              </span>
+                            </div>
+                            <div class="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-10-regular tabular-nums text-text-weaker">
+                              <span>
+                                {vision().imageCount} {language.t("status.popover.runtime.vision.images")}
+                              </span>
+                              <span>{formatRuntimeBytes(vision().preparedBytes)}</span>
+                              <span>
+                                ≈ {Number(vision().estimatedTokens).toLocaleString(language.intl())}{" "}
+                                {language.t("status.popover.runtime.router.tokens")}
+                              </span>
+                              <Show when={vision().requestTokens}>
+                                {(tokens) => (
+                                  <span>
+                                    {language.t("status.popover.runtime.vision.requestTokens")}:{" "}
+                                    {Number(tokens()).toLocaleString(language.intl())}
+                                  </span>
+                                )}
+                              </Show>
+                              <Show when={vision().failover}>
+                                <span>{language.t("status.popover.runtime.router.activation.failover")}</span>
+                              </Show>
+                            </div>
+                            <Show when={vision().artifacts[0]}>
+                              {(artifact) => (
+                                <span class="truncate text-10-regular tabular-nums text-text-weaker">
+                                  {Number(artifact().originalWidth).toLocaleString(language.intl())}×
+                                  {Number(artifact().originalHeight).toLocaleString(language.intl())}
+                                  {artifact().compressed
+                                    ? ` → ${Number(artifact().preparedWidth).toLocaleString(language.intl())}×${Number(
+                                        artifact().preparedHeight,
+                                      ).toLocaleString(language.intl())}`
+                                    : ""}
+                                  {` · ${formatRuntimeBytes(artifact().originalBytes)} → ${formatRuntimeBytes(
+                                    artifact().preparedBytes,
+                                  )}`}
+                                </span>
+                              )}
+                            </Show>
+                            <span
+                              class="truncate text-10-regular text-text-weaker"
+                              title={vision().reason.map(capabilityReason).join(" · ")}
+                            >
+                              {capabilityReason(vision().reason.at(-1) ?? "")}
+                            </span>
+                          </div>
+                        )}
+                      </Show>
+
+                      <div class="flex flex-col gap-1">
+                        <For each={route().selections.filter((selection) => selection.role !== "fallback")}>
+                          {(selection) => (
+                            <div class="flex flex-col gap-1 rounded-md bg-surface-raised-base px-2 py-1.5">
+                              <div class="flex min-w-0 items-center gap-2">
+                                <span class="shrink-0 text-10-medium uppercase text-text-weaker">
+                                  {capabilityRole(selection.role)}
+                                </span>
+                                <span class="min-w-0 flex-1 truncate text-12-medium text-text-base">
+                                  {selection.name}
+                                </span>
+                                <span class="shrink-0 text-10-regular tabular-nums text-text-weaker">
+                                  {language.t("status.popover.runtime.router.score")} {selection.score}
+                                </span>
+                              </div>
+                              <div class="flex items-center gap-2 text-10-regular tabular-nums text-text-weaker">
+                                <Show when={selection.context}>
+                                  {(context) => (
+                                    <span>
+                                      {Number(context()).toLocaleString(language.intl())}{" "}
+                                      {language.t("status.popover.runtime.router.tokens")}
+                                    </span>
+                                  )}
+                                </Show>
+                                <Show when={selection.sizeBytes}>
+                                  {(size) => <span>{formatRuntimeBytes(size())}</span>}
+                                </Show>
+                              </div>
+                              <span
+                                class="truncate text-10-regular text-text-weaker"
+                                title={selection.reason.map(capabilityReason).join(" · ")}
+                              >
+                                {capabilityReason(selection.reason[0] ?? "")}
+                              </span>
+                            </div>
+                          )}
+                        </For>
+                      </div>
+                    </div>
+                  )}
+                </Show>
+
                 <Show
                   when={lmStudio() || !lmStudio.loading}
                   fallback={
-                    <div class="my-auto text-center text-14-regular text-text-base">
-                      {language.t("common.loading")}
-                    </div>
+                    <div class="my-auto text-center text-14-regular text-text-base">{language.t("common.loading")}</div>
                   }
                 >
                   <div class="flex items-center gap-2 px-1">
@@ -667,9 +976,7 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
                           {(model) => (
                             <div class="flex flex-col gap-1 rounded-md bg-surface-raised-base px-2 py-1.5">
                               <div class="flex min-w-0 items-center gap-2">
-                                <span class="min-w-0 flex-1 truncate text-12-regular text-text-base">
-                                  {model.name}
-                                </span>
+                                <span class="min-w-0 flex-1 truncate text-12-regular text-text-base">{model.name}</span>
                                 <Show when={model.context.active}>
                                   {(context) => (
                                     <span class="shrink-0 text-10-regular tabular-nums text-text-weaker">
@@ -699,16 +1006,39 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
                   </Show>
                 </Show>
 
-                <Button
-                  variant="secondary"
-                  class="h-8 self-start px-3 py-1.5"
-                  disabled={lmStudio.loading || governor.loading}
-                  onClick={() => void Promise.all([refetchLmStudio(), refetchGovernor()])}
-                >
-                  {lmStudio.loading || governor.loading
-                    ? language.t("common.loading")
-                    : language.t("status.popover.runtime.probe")}
-                </Button>
+                <div class="flex flex-col gap-2 border-t border-border-weak-base pt-3">
+                  <div class="flex flex-wrap gap-2">
+                    <Button
+                      variant="secondary"
+                      class="h-8 px-3 py-1.5"
+                      disabled={runtimeLoading()}
+                      onClick={() => void refreshRuntime()}
+                    >
+                      {runtimeLoading() ? language.t("common.loading") : language.t("status.popover.runtime.probe")}
+                    </Button>
+                    <Show when={platform.exportDebugLogs}>
+                      <Button
+                        variant="secondary"
+                        class="h-8 px-3 py-1.5"
+                        onClick={() => void platform.exportDebugLogs?.().catch(fail)}
+                      >
+                        {language.t("status.popover.runtime.logs.export")}
+                      </Button>
+                    </Show>
+                    <Show when={platform.clearDebugLogs}>
+                      <Button
+                        variant="secondary"
+                        class="h-8 px-3 py-1.5"
+                        disabled={runtimeState.clearingLogs}
+                        onClick={() => void clearRuntimeLogs()}
+                      >
+                        {runtimeState.clearingLogs
+                          ? language.t("common.loading")
+                          : language.t("status.popover.runtime.logs.clear")}
+                      </Button>
+                    </Show>
+                  </div>
+                </div>
               </div>
             </div>
           </Tabs.Content>
@@ -850,16 +1180,31 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
                   </div>
                 </Show>
 
-                <Button
-                  variant="secondary"
-                  class="self-start h-8 px-3 py-1.5"
-                  disabled={repositoryMapState.refreshing}
-                  onClick={() => void refreshRepositoryMap()}
-                >
-                  {repositoryMapState.refreshing
-                    ? language.t("common.loading")
-                    : language.t("status.popover.repositoryMap.reindex")}
-                </Button>
+                <div class="flex items-center gap-2">
+                  <Button
+                    variant="secondary"
+                    class="h-8 px-3 py-1.5"
+                    onClick={() => {
+                      const run = ++dialogRun
+                      void import("./dialog-rag-memory-viewer").then((viewer) => {
+                        if (dialogDead || dialogRun !== run) return
+                        void dialog.show(() => <viewer.DialogRagMemoryViewer />)
+                      })
+                    }}
+                  >
+                    {language.t("status.popover.repositoryMap.knowledge")}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    class="h-8 px-3 py-1.5"
+                    disabled={repositoryMapState.refreshing}
+                    onClick={() => void refreshRepositoryMap()}
+                  >
+                    {repositoryMapState.refreshing
+                      ? language.t("common.loading")
+                      : language.t("status.popover.repositoryMap.reindex")}
+                  </Button>
+                </div>
               </div>
             </div>
           </Tabs.Content>

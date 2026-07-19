@@ -1933,8 +1933,8 @@ export default function Page() {
       .map((item) => ({ id: item.id, text: line(item.id) }))
   })
 
-  // attachment bytes are embedded as a data URL, so downloading always works;
-  // revealing requires the on-disk path captured by the client that attached the file
+  // Vision artifacts stay on disk so the transcript does not retain large base64 payloads.
+  // Other attachments can still use data URLs for browser downloads.
   const openAttachment = (file: FilePart) => {
     const download = () => {
       const anchor = document.createElement("a")
@@ -1942,7 +1942,13 @@ export default function Page() {
       anchor.download = getFilename(file.filename) || "attachment"
       anchor.click()
     }
-    const path = file.filename ?? ""
+    const filePath = (() => {
+      if (!file.url.startsWith("file:")) return
+      const pathname = decodeURIComponent(new URL(file.url).pathname)
+      if (/^\/[a-zA-Z]:\//.test(pathname)) return pathname.slice(1)
+      return pathname
+    })()
+    const path = filePath ?? file.filename ?? ""
     const absolute = path.startsWith("/") || path.startsWith("\\\\") || /^[a-zA-Z]:[\\/]/.test(path)
     if (platform.revealPath && absolute) {
       void platform.revealPath(path).then(

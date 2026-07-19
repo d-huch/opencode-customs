@@ -85,9 +85,27 @@ const it = testEffect(
 
 describe("session.system", () => {
   test("selects the compact prompt for small context models", () => {
-    expect(
-      SystemPrompt.provider({ api: { id: "local/model" }, limit: { context: 4_096 } } as Provider.Model)[0],
-    ).toContain("working in the user's project")
+    const prompt = SystemPrompt.provider({
+      api: { id: "local/model" },
+      limit: { context: 4_096 },
+    } as Provider.Model)[0]
+
+    expect(prompt).toContain("work in the user's project")
+    expect(prompt).toContain("answer general questions")
+    expect(prompt).toContain("never refuse solely because")
+  })
+
+  test("does not select cloud browsing prompts for LM Studio compatibility aliases", () => {
+    const prompt = SystemPrompt.provider({
+      providerID: "lmstudio",
+      api: { id: "gpt-4-compatible" },
+      limit: { context: 32_768 },
+    } as Provider.Model)[0]
+
+    expect(prompt).toContain("interactive CLI tool")
+    expect(prompt).toContain("General questions are also valid")
+    expect(prompt).not.toContain("EXTENSIVE INTERNET RESEARCH")
+    expect(prompt).not.toContain("www.google.com/search")
   })
 
   test("selects the Meta prompt for Muse Spark model IDs", () => {

@@ -1,7 +1,16 @@
 import { Location } from "@opencode-ai/schema/location"
 import { RepositoryMap } from "@opencode-ai/schema/repository-map"
+import { Schema } from "effect"
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { LocationQuery, locationQueryOpenApi } from "./location"
+
+const KnowledgeQuery = Schema.Struct({
+  location: LocationQuery.fields.location,
+  search: Schema.optional(Schema.String),
+  limit: Schema.optional(
+    Schema.NumberFromString.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(500)),
+  ),
+})
 
 export const RepositoryMapGroup = HttpApiGroup.make("server.repositoryMap")
   .add(
@@ -58,6 +67,51 @@ export const RepositoryMapGroup = HttpApiGroup.make("server.repositoryMap")
           identifier: "v2.repositoryMap.configureDiagnostics",
           summary: "Configure repository diagnostics",
           description: "Enable, disable, or clear the location-scoped diagnostic timeline.",
+        }),
+      ),
+  )
+  .add(
+    HttpApiEndpoint.get("repositoryMap.knowledge", "/api/repository-map/knowledge", {
+      query: KnowledgeQuery,
+      success: Location.response(RepositoryMap.Knowledge),
+    })
+      .annotateMerge(locationQueryOpenApi)
+      .annotateMerge(
+        OpenApi.annotations({
+          identifier: "v2.repositoryMap.knowledge",
+          summary: "Inspect repository RAG and memory",
+          description:
+            "Inspect location-scoped repository memory and embedding index metadata without returning vector payloads.",
+        }),
+      ),
+  )
+  .add(
+    HttpApiEndpoint.delete("repositoryMap.removeKnowledge", "/api/repository-map/knowledge/:scope/:id", {
+      params: { scope: RepositoryMap.KnowledgeScope, id: Schema.String },
+      query: LocationQuery,
+      success: Location.response(RepositoryMap.KnowledgeMutation),
+    })
+      .annotateMerge(locationQueryOpenApi)
+      .annotateMerge(
+        OpenApi.annotations({
+          identifier: "v2.repositoryMap.removeKnowledge",
+          summary: "Remove a repository knowledge entry",
+          description: "Remove one location-scoped memory item or RAG chunk by ID.",
+        }),
+      ),
+  )
+  .add(
+    HttpApiEndpoint.delete("repositoryMap.clearKnowledge", "/api/repository-map/knowledge/:scope", {
+      params: { scope: RepositoryMap.KnowledgeScope },
+      query: LocationQuery,
+      success: Location.response(RepositoryMap.KnowledgeMutation),
+    })
+      .annotateMerge(locationQueryOpenApi)
+      .annotateMerge(
+        OpenApi.annotations({
+          identifier: "v2.repositoryMap.clearKnowledge",
+          summary: "Clear repository knowledge",
+          description: "Clear all location-scoped memory items or RAG chunks for the selected store.",
         }),
       ),
   )

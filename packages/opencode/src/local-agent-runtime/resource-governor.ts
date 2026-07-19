@@ -1,4 +1,5 @@
 import os from "os"
+import { spawnSync } from "node:child_process"
 import { Schema } from "effect"
 import { findLmStudioModel, probeLmStudio } from "./lmstudio"
 
@@ -14,6 +15,7 @@ const MAX_UNLOADED_MODEL_CONTEXT = 16_384
 const MODEL_CRASH_COOLDOWN_MS = 10_000
 const MODEL_CRASH_RECOVERY_MS = 2 * 60_000
 const MODEL_CRASH_CONTEXT_PERCENT = 65
+const MAC_MEMORY_SAMPLE_CACHE_MS = 1_000
 
 const PressureStatus = Schema.Literals(["healthy", "pressured", "critical"])
 
@@ -67,14 +69,29 @@ type ModelPermit = {
   readonly release: () => Promise<void>
 }
 
+export type ModelRequestPriority = "interactive" | "background"
+
+export function rejectForPressure(status: PressureStatus, priority: ModelRequestPriority) {
+  return status === "critical" && priority === "background"
+}
+
 type Waiter = {
   readonly resolve: (permit: ModelPermit) => void
   readonly reject: (error: Error) => void
+  readonly priority: ModelRequestPriority
+  readonly model?: ModelIdentity
   readonly signal?: AbortSignal
   readonly abort?: () => void
 }
 
+type ModelIdentity = {
+  readonly providerID: string
+  readonly apiURL?: string
+  readonly modelID: string
+}
+
 const policy = loadPolicy()
+const macMemory = { expires: 0, availableBytes: undefined as number | undefined }
 const state = {
   activeModelRequests: 0,
   waitingModelRequests: 0,
@@ -82,6 +99,7 @@ const state = {
   throttledModelRequests: 0,
   rejectedModelRequests: 0,
   lastDecision: undefined as ResourceGovernorSnapshot["lastDecision"],
+  activeModels: new Map<string, number>(),
   lastModelCrash: undefined as
     | {
         providerID: string
@@ -99,7 +117,7 @@ export class ResourcePressureError extends Error {
 
   constructor(readonly snapshot: ResourceGovernorSnapshot) {
     super(
-      `Local Agent Runtime paused this request because available memory is critically low (${formatBytes(snapshot.memory.availableBytes)} free). Close memory-heavy apps or unload the local model, then try again.`,
+      `Local Agent Runtime paused this request because available memory is critically low (${formatBytes(snapshot.memory.availableBytes)} available). Close memory-heavy apps or unload the local model, then try again.`,
     )
   }
 }
@@ -170,18 +188,20 @@ export async function contextBudget(input: {
   readonly apiURL?: string
   readonly baseURL?: unknown
   readonly apiKey?: unknown
+  readonly request?: import("./lmstudio").LmStudioRequest
 }) {
   if (!localProvider(input)) return
 
   const current = snapshot()
-  if (current.status === "critical") {
-    state.rejectedModelRequests += 1
-    throw new ResourcePressureError(snapshot())
-  }
   const recovering = recoveryActive(input)
   const probe =
     input.providerID === "lmstudio"
-      ? await probeLmStudio({ baseURL: input.baseURL, apiKey: input.apiKey, refresh: recovering })
+      ? await probeLmStudio({
+          baseURL: input.baseURL,
+          apiKey: input.apiKey,
+          request: input.request,
+          refresh: recovering,
+        })
       : undefined
   const model = findLmStudioModel(probe, input.modelID)
   const runtimeContext = model?.context.active
@@ -199,13 +219,15 @@ export async function contextBudget(input: {
   })
   const reason = recovering
     ? "reduced context while the local model recovers from a process crash"
-    : runtimeContext
-      ? decision.hardContext < input.requestedContext
-        ? "clamped to the context of the loaded LM Studio model"
-        : "loaded model context with reserved output and safety headroom"
-      : model
-        ? "model is not loaded; conservative startup context applied"
-        : "runtime context is unknown; conservative local context applied"
+    : current.status === "critical"
+      ? "critical host pressure; interactive request admitted with minimum context"
+      : runtimeContext
+        ? decision.hardContext < input.requestedContext
+          ? "clamped to the context of the loaded LM Studio model"
+          : "loaded model context with reserved output and safety headroom"
+        : model
+          ? "model is not loaded; conservative startup context applied"
+          : "runtime context is unknown; conservative local context applied"
 
   state.contextAdjustments += 1
   state.lastDecision = {
@@ -223,6 +245,8 @@ export async function contextBudget(input: {
 export async function acquireModel(input: {
   readonly providerID: string
   readonly apiURL?: string
+  readonly modelID?: string
+  readonly priority?: ModelRequestPriority
   readonly signal?: AbortSignal
 }): Promise<ModelPermit> {
   if (!localProvider(input)) return permit(false)
@@ -235,13 +259,14 @@ export async function acquireModel(input: {
   }
 
   const current = snapshot()
-  if (current.status === "critical") {
+  const priority = input.priority ?? "interactive"
+  if (rejectForPressure(current.status, priority)) {
     state.rejectedModelRequests += 1
     throw new ResourcePressureError(snapshot())
   }
   if (state.activeModelRequests < policy.modelConcurrency) {
     state.activeModelRequests += 1
-    return permit(true)
+    return permit(true, identity(input))
   }
 
   state.waitingModelRequests += 1
@@ -250,6 +275,8 @@ export async function acquireModel(input: {
     const waiter: Waiter = {
       resolve,
       reject,
+      priority,
+      model: identity(input),
       signal: input.signal,
       abort: input.signal
         ? () => {
@@ -264,6 +291,10 @@ export async function acquireModel(input: {
     state.waiters.push(waiter)
     input.signal?.addEventListener("abort", waiter.abort!, { once: true })
   })
+}
+
+export function activeRequestsForModel(input: ModelIdentity) {
+  return state.activeModels.get(modelKey(input)) ?? 0
 }
 
 export function evaluateMemoryPressure(memory: MemorySample, limits: Policy = policy): PressureStatus {
@@ -304,14 +335,20 @@ export function safeContextBudget(input: {
   }
 }
 
-function permit(governed: boolean): ModelPermit {
+function permit(governed: boolean, model?: ModelIdentity): ModelPermit {
   let released = false
+  if (governed && model) state.activeModels.set(modelKey(model), (state.activeModels.get(modelKey(model)) ?? 0) + 1)
   return {
     governed,
     release: async () => {
       if (released || !governed) return
       released = true
       state.activeModelRequests = Math.max(0, state.activeModelRequests - 1)
+      if (model) {
+        const active = Math.max(0, (state.activeModels.get(modelKey(model)) ?? 1) - 1)
+        if (active === 0) state.activeModels.delete(modelKey(model))
+        if (active > 0) state.activeModels.set(modelKey(model), active)
+      }
       drain()
     },
   }
@@ -326,14 +363,27 @@ function drain() {
       waiter.reject(new Error("Local model request was cancelled while waiting for resources"))
       continue
     }
-    if (snapshot().status === "critical") {
+    if (rejectForPressure(snapshot().status, waiter.priority)) {
       state.rejectedModelRequests += 1
       waiter.reject(new ResourcePressureError(snapshot()))
       continue
     }
     state.activeModelRequests += 1
-    waiter.resolve(permit(true))
+    waiter.resolve(permit(true, waiter.model))
   }
+}
+
+function identity(input: { readonly providerID: string; readonly apiURL?: string; readonly modelID?: string }) {
+  if (!input.modelID) return
+  return {
+    providerID: input.providerID,
+    ...(input.apiURL ? { apiURL: input.apiURL } : {}),
+    modelID: input.modelID,
+  } satisfies ModelIdentity
+}
+
+function modelKey(input: ModelIdentity) {
+  return `${input.providerID}\0${input.apiURL?.replace(/\/$/, "") ?? ""}\0${input.modelID}`
 }
 
 function localProvider(input: { readonly providerID: string; readonly apiURL?: string; readonly baseURL?: unknown }) {
@@ -374,7 +424,7 @@ function crashText(value: unknown, depth = 0): string {
 function sampleMemory(): MemorySample {
   const usage = process.memoryUsage()
   const totalBytes = os.totalmem()
-  const availableBytes = os.freemem()
+  const availableBytes = availableMemory(totalBytes)
   return {
     totalBytes,
     availableBytes,
@@ -382,6 +432,32 @@ function sampleMemory(): MemorySample {
     processRssBytes: usage.rss,
     processHeapBytes: usage.heapUsed,
   }
+}
+
+function availableMemory(totalBytes: number) {
+  const fallback = os.freemem()
+  if (process.platform !== "darwin") return fallback
+  if (macMemory.expires > Date.now() && macMemory.availableBytes !== undefined) return macMemory.availableBytes
+
+  const result = spawnSync("/usr/bin/vm_stat", { encoding: "utf8" })
+  const parsed = result.status === 0 ? parseMacAvailableMemory(result.stdout) : undefined
+  const availableBytes = Math.min(totalBytes, Math.max(fallback, parsed ?? fallback))
+  macMemory.expires = Date.now() + MAC_MEMORY_SAMPLE_CACHE_MS
+  macMemory.availableBytes = availableBytes
+  return availableBytes
+}
+
+export function parseMacAvailableMemory(input: string) {
+  const pageSize = Number(input.match(/page size of (\d+) bytes/i)?.[1])
+  if (!Number.isSafeInteger(pageSize) || pageSize <= 0) return
+  const pages = Object.fromEntries(
+    [...input.matchAll(/^(Pages free|File-backed pages):\s+(\d+)\./gim)].map((match) => [match[1], Number(match[2])]),
+  )
+  if (![pages["Pages free"], pages["File-backed pages"]].every(Number.isSafeInteger)) return
+  // Activity Monitor exposes file-backed cache as reclaimable memory. Anonymous
+  // inactive pages may still require compression or swap, so excluding them keeps
+  // model admission conservative while avoiding os.freemem()'s false critical state.
+  return (pages["Pages free"] + pages["File-backed pages"]) * pageSize
 }
 
 function loadPolicy(): Policy {

@@ -14,6 +14,7 @@ import { Timestamps } from "../database/schema.sql"
 import type { SystemContext } from "../system-context/index"
 import { AgentV2 } from "../agent"
 import type { Revert } from "@opencode-ai/schema/revert"
+import type { ModelCapabilityRouter } from "../model-capability-router"
 
 type SessionMessageData = Omit<(typeof SessionMessage.Message)["Encoded"], "type" | "id">
 type V1MessageData = Omit<SessionV1.Info, "id" | "sessionID">
@@ -190,6 +191,9 @@ export const SessionExecutionCheckpointTable = sqliteTable(
         | "preparing"
         | "streaming"
         | "settling_tools"
+        | "verifying"
+        | "repairing"
+        | "verified"
         | "continuing"
         | "completed"
         | "interrupted"
@@ -198,6 +202,7 @@ export const SessionExecutionCheckpointTable = sqliteTable(
       .notNull(),
     step: integer().notNull(),
     assistant_message_id: text().$type<SessionMessage.ID>(),
+    model_route: text({ mode: "json" }).$type<ModelCapabilityRouter.Plan>(),
     owner_pid: integer().notNull(),
     recoveries: integer().notNull().default(0),
     error: text(),
