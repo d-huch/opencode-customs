@@ -37,7 +37,8 @@ model:
   memory pressure while background embedding work pauses, and asynchronous failures remain visible in the timeline.
 - Local Agent Runtime layers for LM Studio: a read-only capability bridge, an adaptive Resource Governor, and durable
   execution checkpoints that recover abandoned sessions after an OpenCode process restart without replaying completed
-  local tools.
+  local tools. Generation-fenced per-request counters bound provider turns, tool calls, repeated compactions, and
+  evidence follow-ups without relying on compactable transcript text.
 - A capability-based multi-model router that assigns embedding, utility, coding, and vision roles from
   metadata, task shape, context capacity, model size, and live resource pressure without model-name or project-specific
   keyword tables. A compatible model explicitly selected in the composer remains the primary coding model; larger
@@ -54,9 +55,11 @@ model:
   permissions, adds changed-file LSP diagnostics, and repairs failed checks without assuming a language or framework.
 - A bounded evidence loop for read-only repository research. Findings must cite files actually read in the current turn,
   while unresolved searches finish as explicitly blocked instead of becoming guessed conclusions.
-- A semantic freshness gate for general factual questions. The selected interactive model classifies whether external
-  evidence is required; risky turns must complete a live web search before answering, prefer primary sources, and fail
-  closed without automatic retries or a hidden utility-model fallback when verification is unavailable.
+- A semantic scope and freshness gate that classifies each genuine request as conversation-only, repository work, or
+  external research before RAG runs. External turns expose only live web tools, repository turns expose workspace tools,
+  and unavailable verification fails closed without retries or a hidden utility-model fallback. Repeated terse
+  follow-ups preserve their original scope across Build/Planning mode changes, and LM Studio can call the built-in live
+  search tool directly.
 - Response-language binding that keeps the latest active request authoritative after compaction and bounded continuation
   turns, even when summaries, memories, and tool output are written in another language. Repeated invalid tool repairs
   are detected across provider turns and stopped before they can create an unbounded local-model loop. Conservative

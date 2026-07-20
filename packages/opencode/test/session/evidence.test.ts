@@ -8,10 +8,7 @@ import { SessionEvidence } from "@/session/evidence"
 const sessionID = SessionID.make("ses_evidence")
 const model = { providerID: ProviderV2.ID.make("test"), modelID: ModelV2.ID.make("model") }
 
-function user(
-  id: string,
-  synthetic?: "compaction" | "evidence",
-): SessionV1.WithParts {
+function user(id: string, synthetic?: "compaction" | "evidence"): SessionV1.WithParts {
   const messageID = MessageID.make(id)
   return {
     info: {
@@ -211,6 +208,17 @@ describe("SessionEvidence", () => {
         ],
         directory: "/project",
         followupAttempts: 2,
+      }),
+    ).toEqual({ type: "exhausted" })
+  })
+
+  test("keeps the durable evidence bound after compaction removes earlier checkpoints", () => {
+    expect(
+      SessionEvidence.inspect({
+        messages: [user("msg_01", "compaction"), read("msg_02")],
+        directory: "/project",
+        followupAttempts: 2,
+        attempts: 3,
       }),
     ).toEqual({ type: "exhausted" })
   })

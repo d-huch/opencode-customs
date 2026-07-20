@@ -268,6 +268,11 @@ generation records its runtime (`v1` or `v2`), execution identity, owner process
 the current phase: `preparing`, `streaming`, `settling_tools`, `verifying`, `repairing`, `verified`, or `continuing`.
 Completion, interruption, and failure are terminal states with timestamps and an optional error.
 
+The same generation-fenced checkpoint owns the per-request execution counters. A request may use at most 32 provider
+turns, 64 tool calls, and 12 context compactions. Compaction is deliberately not limited to one pass: long local-model
+requests may compact repeatedly, but they still terminate at the durable total budget. Counter increments are atomic,
+survive crash recovery, and reject writes from stale generations.
+
 After the OpenCode server process exits unexpectedly, a new process claims only checkpoints whose previous owner is no
 longer alive. The V2 runtime discovers these abandoned generations during startup. The legacy desktop runtime discovers
 them when the desktop refreshes session status, filters them to the active project, and schedules recovery in the
@@ -443,10 +448,16 @@ inventing paths or relationships from framework conventions, and allows at most 
 missing relationship. This keeps abstract investigations on the strongest observed implementation path instead of
 restarting equivalent grep, glob, and shell discovery loops.
 
-The default budget is the initial investigation plus two bounded follow-ups. Continuations repeat the exact latest
-active user text instead of an English control message. This keeps local models anchored to both the current objective
-and the user's language after automatic compaction. Historical `Objective` and `Next Move` sections remain background
-context and cannot replace the current request.
+The default budget is the initial investigation plus two bounded follow-ups. The attempt counter is stored in the
+durable execution checkpoint rather than inferred from compactable transcript text, so crash recovery or any number of
+bounded compactions cannot reset the evidence loop. Continuations repeat the exact latest active user text instead of
+an English control message. This keeps local models anchored to both the current objective and the user's language after
+automatic compaction. Historical `Objective` and `Next Move` sections remain background context and cannot replace the
+current request.
+
+Request fitting treats only tools required by the current route as mandatory. Historical tool calls do not keep old
+schemas in the next provider request. If a model calls a tool that was not advertised for that turn, execution fails
+closed with the available-tool list; the missing name is never rewritten into an endlessly repeatable `invalid` call.
 
 The evidence loop complements change verification rather than replacing it. Turns that modify files are checked by the
 `verification` tool; read-only investigations are grounded by the `evidence` tool. Simple conversation without routed
@@ -455,22 +466,32 @@ repository context remains ungated.
 ### Freshness and external fact verification
 
 General conversation is allowed, but concrete external facts are no longer trusted solely because the selected model
-can produce a fluent answer. When no project context grounds the request, the same interactive model selected in the
-composer performs a short epistemic classification. The classifier distinguishes requests answerable from supplied
-context, calculation, transformation, or creative work from requests whose exact answer depends on current or
-potentially post-training external information. The policy is domain-, language-, framework-, and product-neutral; it
-does not use a dictionary of brand names or translated trigger words.
+can produce a fluent answer. Before repository RAG or tools are selected, the same interactive model selected in the
+composer performs a short scope classification. It routes the latest genuine request to conversation-only work,
+repository work, or external research. Up to three recent genuine user requests are supplied only to resolve repeated
+terse follow-ups and mode changes, so “then search” can still inherit the original external subject without reviving a
+stale project task.
+The policy is domain-, language-, framework-, and product-neutral; it does not use a dictionary of brand names or
+translated trigger words. Lexical similarity to a project symbol cannot activate repository RAG by itself.
 
 The decision is persisted on the genuine user message so tool continuation, compaction, and crash recovery do not
-classify the same request repeatedly. A turn that requires fresh evidence is temporarily restricted to the `websearch`
-tool with required tool choice. After a successful search, the normal tool set is restored and the answer must prefer
-primary or authoritative sources, link them directly, and disclose unverified claims. If search is unavailable, denied,
-or fails, the gate permits no automatic retry and instructs the model to report that verification is unavailable rather
-than fill exact facts from memory. The classifier never switches to a utility model or an automatic fallback model.
+classify the same request repeatedly. Conversation-only turns receive no workspace or web tools. Repository turns may
+use RAG and workspace tools. External turns are restricted to `websearch` until evidence exists and remain restricted to
+`websearch` and `webfetch` afterward, so an external comparison cannot drift into unrelated repository searches. If
+search is unavailable, denied, or fails, the gate exposes no tools, permits no automatic retry, and instructs the model
+to report that verification is unavailable rather than fill exact facts from memory. The classifier never switches to
+a utility model or an automatic fallback model. The built-in web-search tool is available to LM Studio sessions in both
+Build and Planning modes; changing the agent mode does not change the request scope.
 
-The per-session JSONL log records `freshness.routed` with the selected interactive model, decision, reason, and whether
-the conservative failure policy was used. The visible web-search tool call provides the corresponding source evidence
-inside the session timeline.
+The response-language contract remains a system instruction. It is not appended to user content, preventing a local
+model from quoting an internal language reminder as though the user had written it.
+
+A provider turn that reports a tool-call finish reason without emitting an executable tool call is terminated as an
+error immediately. This prevents empty native-tool responses from entering evidence, compaction, or invalid-tool loops.
+
+The per-session JSONL log records `freshness.routed` with the selected interactive model, scope, reason, and whether the
+conservative failure policy was used. The visible web-search tool call provides the corresponding source evidence inside
+the session timeline.
 
 Custom providers do not always publish model limits. OpenCode Customs treats missing capacity as unknown rather than
 unlimited. A custom model without catalog or user-supplied limits receives a conservative 4,096-token context budget and

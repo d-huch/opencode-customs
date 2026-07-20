@@ -1770,6 +1770,23 @@ describe("session.message-v2.latest", () => {
     ).toBe("Як мене звати?")
   })
 
+  test("includes recent genuine requests when classifying repeated follow-ups", () => {
+    const request = (id: string, text: string): SessionV1.WithParts => ({
+      info: userInfo(id),
+      parts: [{ ...basePart(id, `prt_${id}`), type: "text", text }] as SessionV1.Part[],
+    })
+
+    expect(
+      MessageV2.routingRequest([
+        request("msg_30", "Що краще M5 Max чи M1 Pro?"),
+        request("msg_31", "А характеристики їх?"),
+        request("msg_32", "То пошукай"),
+      ]),
+    ).toBe(
+      "Recent user context (oldest to newest):\n- Що краще M5 Max чи M1 Pro?\n- А характеристики їх?\n\nLatest user request:\nТо пошукай",
+    )
+  })
+
   test("keeps evidence and verification checkpoints separate from the active request", () => {
     const checkpoint = (id: string, key: "evidence_continue" | "verification_continue") =>
       ({

@@ -341,23 +341,27 @@ const live: Layer.Layer<
               : prepared.tools[lower]
                 ? lower
                 : undefined
-            const repaired = toolName ? ToolCallRepair.input(failed.toolCall.input) : undefined
-            if (toolName && repaired) {
+            if (!toolName) {
+              throw new Error(
+                `Model tried to call unavailable tool '${failed.toolCall.toolName}'. Available tools: ${Object.keys(prepared.tools).join(", ") || "none"}.`,
+              )
+            }
+            const repaired = ToolCallRepair.input(failed.toolCall.input)
+            if (repaired) {
               return {
                 ...failed.toolCall,
                 input: repaired,
                 toolName,
               }
             }
-            if (
-              toolName &&
-              toolName !== failed.toolCall.toolName &&
-              !failed.error.message.includes("JSON parsing failed")
-            ) {
+            if (toolName !== failed.toolCall.toolName && !failed.error.message.includes("JSON parsing failed")) {
               return {
                 ...failed.toolCall,
                 toolName,
               }
+            }
+            if (!prepared.tools.invalid) {
+              throw new Error(`Invalid input for tool '${toolName}': ${failed.error.message}`)
             }
             return {
               ...failed.toolCall,
@@ -372,9 +376,6 @@ const live: Layer.Layer<
           topP: prepared.params.topP,
           topK: prepared.params.topK,
           providerOptions: ProviderTransform.providerOptions(input.model, prepared.params.options),
-          // Unknown provider tool names are repaired to `invalid` above. Keep
-          // the guard active so the repaired call can produce a useful tool
-          // error instead of failing schema validation as an unavailable tool.
           activeTools: Object.keys(prepared.tools),
           tools: prepared.tools,
           toolChoice: input.toolChoice,

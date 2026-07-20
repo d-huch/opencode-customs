@@ -27,6 +27,7 @@ import { SessionCompactionEvent } from "@opencode-ai/schema/session-compaction-e
 import type { ModelMessage, Tool } from "ai"
 import { ModelSwitcher } from "@/local-agent-runtime/model-switcher"
 import { SessionLog } from "@/local-agent-runtime/session-log"
+import { SessionFreshness } from "./freshness"
 
 export const Event = SessionCompactionEvent
 
@@ -313,13 +314,6 @@ const layer = Layer.effect(
         ]),
       )
       const required = new Set(input.requiredTools ?? [])
-      if (compactTools.invalid) required.add("invalid")
-      for (const message of input.messages) {
-        if (!Array.isArray(message.content)) continue
-        for (const part of message.content) {
-          if (part.type === "tool-call") required.add(part.toolName)
-        }
-      }
       const query = JSON.stringify(input.messages.at(-1) ?? "").toLowerCase()
       const words = new Set(query.match(/[\p{L}\p{N}_-]{3,}/gu) ?? [])
       const relevance = (name: string) => {
@@ -783,7 +777,10 @@ const layer = Layer.effect(
               // Internal marker for auto-compaction followups so provider plugins
               // can distinguish them from manual post-compaction user prompts.
               // This is not a stable plugin contract and may change or disappear.
-              metadata: { compaction_continue: true },
+              metadata: SessionFreshness.continuationMetadata({
+                messages: input.messages,
+                request: latestRequest,
+              }),
               synthetic: true,
               text,
               time: {

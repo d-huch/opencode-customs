@@ -652,6 +652,37 @@ export function repositoryQuery(messages: readonly WithParts[]) {
   return `${context}\n${current}`.slice(-1_200)
 }
 
+export function routingRequest(messages: readonly WithParts[]) {
+  const active = activeUserRequest(messages)
+  const current = userRequestText(active)
+  if (!current) return ""
+  const previous = messages
+    .filter(
+      (message): message is WithParts & { info: User } =>
+        message.info.role === "user" &&
+        message.info.id !== active?.info.id &&
+        !message.parts.some((part) => part.type === "compaction") &&
+        message.parts.some(
+          (part) =>
+            (part.type === "text" && part.synthetic !== true && part.text.trim().length > 0) || part.type === "file",
+        ),
+    )
+    .toSorted((left, right) => right.info.id.localeCompare(left.info.id))
+    .slice(0, 3)
+    .toReversed()
+    .map(userRequestText)
+    .filter(Boolean)
+  if (previous.length === 0) return `Latest user request:\n${current}`
+  return [
+    "Recent user context (oldest to newest):",
+    ...previous.map((text) => `- ${text}`),
+    "",
+    `Latest user request:\n${current}`,
+  ]
+    .join("\n")
+    .slice(-1_500)
+}
+
 function isCompactionContinuation(part: Extract<Part, { type: "text" }>) {
   return part.metadata?.compaction_continue === true
 }

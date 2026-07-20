@@ -114,6 +114,15 @@ describe("SessionExecutionCheckpoint", () => {
       expect(yield* SessionExecutionCheckpoint.advance(db, checkpoint, { state: "verifying", step: 3 })).toBe(true)
       expect(yield* SessionExecutionCheckpoint.advance(db, checkpoint, { state: "repairing", step: 4 })).toBe(true)
       expect(yield* SessionExecutionCheckpoint.advance(db, checkpoint, { state: "verified", step: 5 })).toBe(true)
+      expect(
+        yield* SessionExecutionCheckpoint.consume(db, checkpoint, { counter: "evidence_attempts", limit: 2 }),
+      ).toEqual({ used: 1 })
+      expect(
+        yield* SessionExecutionCheckpoint.consume(db, checkpoint, { counter: "evidence_attempts", limit: 2 }),
+      ).toEqual({ used: 2 })
+      expect(
+        yield* SessionExecutionCheckpoint.consume(db, checkpoint, { counter: "evidence_attempts", limit: 2 }),
+      ).toBeUndefined()
       expect(yield* SessionExecutionCheckpoint.load(db, sessionID)).toMatchObject({
         execution_id: checkpoint.executionID,
         runtime: "v2",
@@ -122,6 +131,10 @@ describe("SessionExecutionCheckpoint", () => {
         step: 5,
         owner_pid: process.pid,
         model_route: activated,
+        evidence_attempts: 2,
+        provider_turns: 0,
+        tool_calls: 0,
+        compactions: 0,
       })
 
       expect(yield* SessionExecutionCheckpoint.finish(db, checkpoint, { state: "completed" })).toBe(true)
@@ -137,6 +150,9 @@ describe("SessionExecutionCheckpoint", () => {
       const sessionID = SessionV2.ID.make("ses_checkpoint_recovery")
       const db = yield* setup(sessionID)
       const abandoned = yield* SessionExecutionCheckpoint.begin(db, sessionID, "v2")
+      expect(yield* SessionExecutionCheckpoint.consume(db, abandoned, { counter: "tool_calls", limit: 4 })).toEqual({
+        used: 1,
+      })
       yield* db
         .update(SessionExecutionCheckpointTable)
         .set({ state: "continuing", owner_pid: 2_147_483_647 })
@@ -168,7 +184,11 @@ describe("SessionExecutionCheckpoint", () => {
         generation: 2,
         state: "preparing",
         recoveries: 1,
+        tool_calls: 1,
       })
+      expect(
+        yield* SessionExecutionCheckpoint.consume(db, abandoned, { counter: "tool_calls", limit: 4 }),
+      ).toBeUndefined()
     }),
   )
 })

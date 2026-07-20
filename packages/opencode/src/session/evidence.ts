@@ -61,6 +61,7 @@ export function inspect(input: {
   readonly messages: readonly SessionV1.WithParts[]
   readonly directory: string
   readonly followupAttempts: number
+  readonly attempts?: number
 }) {
   const messages = currentTurn(input.messages)
   if (!messages || changedRepository(messages)) return { type: "none" } satisfies Decision
@@ -110,13 +111,15 @@ export function inspect(input: {
   const blocked = latest?.status === "blocked" && latest.unresolved > 0 && research.length > 0
   if ((complete || blocked) && !laterResearch) return { type: "accepted", status: latest.status } satisfies Decision
 
-  const prompts = messages.flatMap((message) =>
-    message.info.role === "user"
-      ? message.parts.filter(
-          (part) => part.type === "text" && part.synthetic === true && part.metadata?.evidence_continue === true,
-        )
-      : [],
-  ).length
+  const prompts =
+    input.attempts ??
+    messages.flatMap((message) =>
+      message.info.role === "user"
+        ? message.parts.filter(
+            (part) => part.type === "text" && part.synthetic === true && part.metadata?.evidence_continue === true,
+          )
+        : [],
+    ).length
   const maxAttempts = Math.max(1, input.followupAttempts + 1)
   if (prompts >= maxAttempts) return { type: "exhausted" } satisfies Decision
   return {

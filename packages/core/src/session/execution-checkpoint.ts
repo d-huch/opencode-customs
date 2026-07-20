@@ -1,6 +1,6 @@
 export * as SessionExecutionCheckpoint from "./execution-checkpoint"
 
-import { and, eq, inArray } from "drizzle-orm"
+import { and, eq, inArray, lt, sql } from "drizzle-orm"
 import { Effect } from "effect"
 import type { Database } from "../database/database"
 import { SessionMessage } from "./message"
@@ -28,6 +28,8 @@ export type Token = {
   readonly generation: number
   readonly recovered: boolean
 }
+
+export type Counter = "evidence_attempts" | "provider_turns" | "tool_calls" | "compactions"
 
 const activeStates: readonly ActiveState[] = [
   "preparing",
@@ -113,6 +115,7 @@ export const begin = Effect.fn("SessionExecutionCheckpoint.begin")(function* (
         const generation = (previous?.generation ?? 0) + 1
         const now = Date.now()
         const executionID = crypto.randomUUID()
+        const counters = recovered ? previous : undefined
         yield* tx
           .insert(SessionExecutionCheckpointTable)
           .values({
@@ -122,6 +125,10 @@ export const begin = Effect.fn("SessionExecutionCheckpoint.begin")(function* (
             generation,
             state: "preparing",
             step: 1,
+            evidence_attempts: counters?.evidence_attempts ?? 0,
+            provider_turns: counters?.provider_turns ?? 0,
+            tool_calls: counters?.tool_calls ?? 0,
+            compactions: counters?.compactions ?? 0,
             owner_pid: process.pid,
             recoveries: (previous?.recoveries ?? 0) + Number(recovered),
             time_started: now,
@@ -135,6 +142,10 @@ export const begin = Effect.fn("SessionExecutionCheckpoint.begin")(function* (
               generation,
               state: "preparing",
               step: 1,
+              evidence_attempts: counters?.evidence_attempts ?? 0,
+              provider_turns: counters?.provider_turns ?? 0,
+              tool_calls: counters?.tool_calls ?? 0,
+              compactions: counters?.compactions ?? 0,
               assistant_message_id: null,
               model_route: null,
               owner_pid: process.pid,
@@ -149,6 +160,36 @@ export const begin = Effect.fn("SessionExecutionCheckpoint.begin")(function* (
         return { sessionID, runtime, executionID, generation, recovered } satisfies Token
       }),
     )
+    .pipe(Effect.orDie)
+})
+
+export const consume = Effect.fn("SessionExecutionCheckpoint.consume")(function* (
+  db: DatabaseService,
+  token: Token,
+  input: { readonly counter: Counter; readonly limit: number },
+) {
+  const column = SessionExecutionCheckpointTable[input.counter]
+  const value =
+    input.counter === "evidence_attempts"
+      ? { evidence_attempts: sql`${column} + 1` }
+      : input.counter === "provider_turns"
+        ? { provider_turns: sql`${column} + 1` }
+        : input.counter === "tool_calls"
+          ? { tool_calls: sql`${column} + 1` }
+          : { compactions: sql`${column} + 1` }
+  return yield* db
+    .update(SessionExecutionCheckpointTable)
+    .set({ ...value, time_updated: Date.now() })
+    .where(
+      and(
+        eq(SessionExecutionCheckpointTable.session_id, token.sessionID),
+        eq(SessionExecutionCheckpointTable.execution_id, token.executionID),
+        eq(SessionExecutionCheckpointTable.generation, token.generation),
+        lt(column, input.limit),
+      ),
+    )
+    .returning({ used: column })
+    .get()
     .pipe(Effect.orDie)
 })
 

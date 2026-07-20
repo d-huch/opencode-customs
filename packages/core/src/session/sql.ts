@@ -201,6 +201,10 @@ export const SessionExecutionCheckpointTable = sqliteTable(
       >()
       .notNull(),
     step: integer().notNull(),
+    evidence_attempts: integer().notNull().default(0),
+    provider_turns: integer().notNull().default(0),
+    tool_calls: integer().notNull().default(0),
+    compactions: integer().notNull().default(0),
     assistant_message_id: text().$type<SessionMessage.ID>(),
     model_route: text({ mode: "json" }).$type<ModelCapabilityRouter.Plan>(),
     owner_pid: integer().notNull(),

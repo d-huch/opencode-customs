@@ -43,5 +43,6 @@ export const migrations = (
     import("./migration/20260718184927_session_execution_checkpoint"),
     import("./migration/20260718185428_execution_runtime"),
     import("./migration/20260719055409_model_capability_route"),
+    import("./migration/20260719120708_durable_execution_budgets"),
   ])
 ).map((module) => module.default) satisfies DatabaseMigration.Migration[]

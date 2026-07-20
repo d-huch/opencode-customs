@@ -33,6 +33,7 @@ import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { SessionFreshness } from "@/session/freshness"
 
 const summary = Layer.succeed(
   SessionSummary.Service,
@@ -630,6 +631,52 @@ describe("session.compaction.fitRequest", () => {
       }),
     ),
   )
+
+  it.live(
+    "does not retain a tool only because an older message called it",
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const compact = yield* SessionCompaction.Service
+        const tools = Object.fromEntries(
+          ["read", "grep", "glob", "edit", "write", "bash", "question", "task", "historical"].map((name) => [
+            name,
+            {
+              description: `${name} ${"description ".repeat(200)}`,
+              inputSchema: {
+                jsonSchema: {
+                  type: "object",
+                  properties: {
+                    value: { type: "string", description: "schema ".repeat(name === "historical" ? 900 : 300) },
+                  },
+                },
+              },
+            } as unknown as Tool,
+          ]),
+        )
+        const messages = [
+          { role: "user" as const, content: "inspect the project" },
+          {
+            role: "assistant" as const,
+            content: [{ type: "tool-call" as const, toolCallId: "old", toolName: "historical", input: {} }],
+          },
+          { role: "user" as const, content: "read the relevant file" },
+        ]
+        const result = yield* compact.fitRequest({
+          fixedSystem: ["agent prompt"],
+          system: ["repository context ".repeat(1_000)],
+          messages,
+          tools,
+          model: createModel({ context: 4_096, output: 512 }),
+          requiredTools: ["read", "grep"],
+        })
+
+        expect(result.compressed).toBe(true)
+        expect(result.tools.read).toBeDefined()
+        expect(result.tools.grep).toBeDefined()
+        expect(result.tools.historical).toBeUndefined()
+      }),
+    ),
+  )
 })
 
 describe("session.compaction.create", () => {
@@ -979,7 +1026,22 @@ describe("session.compaction.process", () => {
       const ssn = yield* SessionNs.Service
       const session = yield* ssn.create({})
       const msg = yield* createUserMessage(session.id, "hello")
+      const original = (yield* ssn.messages({ sessionID: session.id }))[0]?.parts.find(
+        (part): part is SessionV1.TextPart => part.type === "text",
+      )
+      expect(original).toBeDefined()
+      if (!original) return
+      yield* ssn.updatePart(
+        SessionFreshness.write(original, {
+          scope: "local",
+          required: false,
+          reason: "Conversation-only request",
+          query: "hello",
+          source: "model",
+        }),
+      )
       const msgs = yield* ssn.messages({ sessionID: session.id })
+      expect(SessionFreshness.read(msgs[0])).toMatchObject({ scope: "local" })
 
       const result = yield* SessionCompaction.use.process({
         parentID: msg.id,
@@ -1001,6 +1063,7 @@ describe("session.compaction.process", () => {
       if (last?.parts[0]?.type === "text") {
         expect(last.parts[0].text).toBe("hello")
       }
+      expect(SessionFreshness.read(last)).toMatchObject({ scope: "local" })
     }),
   )
 

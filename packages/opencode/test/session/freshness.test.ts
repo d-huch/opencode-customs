@@ -72,6 +72,7 @@ function tool(status: "completed" | "error"): SessionV1.ToolPart {
 
 describe("session freshness", () => {
   const decision: SessionFreshness.Decision = {
+    scope: "external",
     required: true,
     reason: "Changing external facts",
     query: "compare current specifications",
@@ -104,7 +105,7 @@ describe("session freshness", () => {
   test("restores normal tools after completed evidence", () => {
     const tools = { websearch: "search", webfetch: "fetch", grep: "grep" }
     const routed = SessionFreshness.route({ decision, evidence: "completed", tools })
-    expect(routed.tools).toBe(tools)
+    expect(routed.tools).toEqual({ websearch: "search", webfetch: "fetch" })
     expect(routed.toolChoice).toBeUndefined()
   })
 
@@ -116,6 +117,28 @@ describe("session freshness", () => {
     })
     expect(routed.toolChoice).toBe("none")
     expect(routed.unavailable).toBe(true)
+    expect(routed.tools).toEqual({})
+  })
+
+  test("keeps repository tools only for an explicit repository route", () => {
+    const tools = { websearch: "search", grep: "grep", read: "read" }
+    const routed = SessionFreshness.route({
+      decision: { ...decision, scope: "repository", required: false },
+      evidence: "missing",
+      tools,
+    })
+    expect(routed.tools).toBe(tools)
+    expect(routed.toolChoice).toBeUndefined()
+  })
+
+  test("does not expose workspace tools to a local conversation", () => {
+    const routed = SessionFreshness.route({
+      decision: { ...decision, scope: "local", required: false },
+      evidence: "missing",
+      tools: { websearch: "search", grep: "grep", read: "read" },
+    })
+    expect(routed.tools).toEqual({})
+    expect(routed.toolChoice).toBe("none")
   })
 
   test("derives evidence state from tool completion", () => {
@@ -133,5 +156,39 @@ describe("session freshness", () => {
         request.info.id,
       ),
     ).toBe("failed")
+  })
+
+  test("preserves scope and web evidence across a compaction continuation", () => {
+    const part = SessionFreshness.write(
+      {
+        id: PartID.make("prt_original"),
+        sessionID,
+        messageID: userID,
+        type: "text",
+        text: "compare current specifications",
+      },
+      decision,
+    )
+    const request = message({ id: userID, role: "user", parts: [part] })
+    const searched = message({ id: assistantID, role: "assistant", parts: [tool("completed")] })
+    const continuationID = MessageID.make("msg_continue")
+    const continuation = message({
+      id: continuationID,
+      role: "user",
+      parts: [
+        {
+          id: PartID.make("prt_continue"),
+          sessionID,
+          messageID: continuationID,
+          type: "text",
+          text: "compare current specifications",
+          synthetic: true,
+          metadata: SessionFreshness.continuationMetadata({ messages: [request, searched], request }),
+        },
+      ],
+    })
+
+    expect(SessionFreshness.read(continuation)).toEqual(decision)
+    expect(SessionFreshness.evidence([continuation], continuation.info.id)).toBe("completed")
   })
 })

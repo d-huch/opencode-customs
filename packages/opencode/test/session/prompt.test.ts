@@ -690,15 +690,20 @@ it.instance("loop instructs the model to match the user's language", () =>
       title: "Pinned",
       permission: [{ permission: "*", pattern: "*", action: "allow" }],
     })
+    yield* llm.textMatch(
+      (hit) => JSON.stringify(hit.body).includes("epistemic routing classifier"),
+      "LOCAL\nConversation answer",
+    )
     yield* llm.hang
     yield* user(chat.id, "Поясни, як працює цей модуль")
 
     const fiber = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.forkChild)
-    yield* awaitWithTimeout(llm.wait(1), "timed out waiting for language instruction request", "10 seconds")
+    yield* awaitWithTimeout(llm.wait(2), "timed out waiting for language instruction request", "10 seconds")
 
-    const body = JSON.stringify((yield* llm.hits)[0]?.body)
+    const body = JSON.stringify((yield* llm.hits).find((hit) => JSON.stringify(hit.body).includes("Always answer"))?.body)
     expect(body).toContain("Always answer in the same natural language")
     expect(body).not.toContain("response-contract")
+    expect(body).not.toContain("<response-language>")
     expect(body).toContain("Поясни, як працює цей модуль")
     yield* Fiber.interrupt(fiber)
   }),

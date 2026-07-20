@@ -31,6 +31,7 @@ import { SessionExecutionCheckpoint } from "@opencode-ai/core/session/execution-
 import { SessionVerification } from "./verification"
 import { ResponseRepetition } from "@opencode-ai/core/response-repetition"
 import { SessionLog } from "@/local-agent-runtime/session-log"
+import { SessionExecutionBudget } from "./execution-budget"
 
 const DOOM_LOOP_THRESHOLD = 3
 export type Result = "compact" | "stop" | "continue"
@@ -81,6 +82,8 @@ interface ProcessorContext extends Input {
   needsCompaction: boolean
   currentText: SessionV1.TextPart | undefined
   reasoningMap: Record<string, SessionV1.ReasoningPart>
+  budgetedToolCalls: Set<string>
+  stepToolCalls: number
 }
 
 type StreamEvent = LLMEvent
@@ -120,6 +123,8 @@ const layer = Layer.effect(
         needsCompaction: false,
         currentText: undefined,
         reasoningMap: {},
+        budgetedToolCalls: new Set(),
+        stepToolCalls: 0,
       }
       let aborted = false
 
@@ -141,6 +146,27 @@ const layer = Layer.effect(
         args?: unknown,
       ) {
         if (!input.checkpoint) return
+        if (!ctx.budgetedToolCalls.has(toolCallID)) {
+          const consumed = yield* SessionExecutionCheckpoint.consume(database.db, input.checkpoint, {
+            counter: "tool_calls",
+            limit: SessionExecutionBudget.limits.tool_calls,
+          })
+          if (!consumed) {
+            const message = SessionExecutionBudget.message("tool_calls")
+            ctx.blocked = true
+            yield* Effect.promise(() =>
+              SessionLog.write({
+                sessionID: input.sessionID,
+                type: "execution.budget_exhausted",
+                messageID: input.assistantMessage.id,
+                executionID: input.checkpoint?.executionID,
+                data: { counter: "tool_calls", limit: SessionExecutionBudget.limits.tool_calls },
+              }),
+            )
+            throw new Error(message)
+          }
+          ctx.budgetedToolCalls.add(toolCallID)
+        }
         const match = yield* readToolCall(toolCallID)
         const name = tool ?? match?.part.tool
         yield* SessionExecutionCheckpoint.advance(database.db, input.checkpoint, {
@@ -405,6 +431,7 @@ const layer = Layer.effect(
               throw new Error(`Tool call not allowed while generating summary: ${value.name}`)
             }
             yield* beginToolCall(value.id, value.name, value.input)
+            ctx.stepToolCalls += 1
             yield* ensureToolCall(value)
             const input = isRecord(value.input) ? value.input : { value: value.input }
             yield* Effect.promise(() =>
@@ -441,16 +468,12 @@ const layer = Layer.effect(
             if (value.name === "invalid") {
               if (!ResponseRepetition.repeatedInvalidToolCall(history, { tool: value.name, input })) return
               const tool = typeof input.tool === "string" ? input.tool : value.name
-              yield* failToolCall(
-                value.id,
-                new Error(`Stopped after 2 malformed calls for tool: ${tool}`),
-              )
+              yield* failToolCall(value.id, new Error(`Stopped after 2 malformed calls for tool: ${tool}`))
               ctx.blocked = true
               return
             }
 
-            if (!ResponseRepetition.repeatedToolCall(history, { tool: value.name, input }, DOOM_LOOP_THRESHOLD))
-              return
+            if (!ResponseRepetition.repeatedToolCall(history, { tool: value.name, input }, DOOM_LOOP_THRESHOLD)) return
 
             const agent = yield* agents.get(ctx.assistantMessage.agent)
             yield* permission.ask({
@@ -530,6 +553,7 @@ const layer = Layer.effect(
             throw new Error(value.message)
 
           case "step-start":
+            ctx.stepToolCalls = 0
             if (!ctx.snapshot) ctx.snapshot = yield* snapshot.track()
             yield* session.updatePart({
               id: PartID.ascending(),
@@ -549,6 +573,14 @@ const layer = Layer.effect(
               metadata: value.providerMetadata,
             })
             ctx.assistantMessage.finish = value.reason
+            if (value.reason === "tool-calls" && ctx.stepToolCalls === 0) {
+              ctx.blocked = true
+              ctx.assistantMessage.finish = "error"
+              ctx.assistantMessage.error = MessageV2.fromError(
+                new Error("Provider reported tool calls but emitted no executable tool call"),
+                { providerID: input.model.providerID },
+              )
+            }
             ctx.assistantMessage.cost += usage.cost
             ctx.assistantMessage.tokens = usage.tokens
             yield* session.updatePart({
@@ -834,7 +866,11 @@ const layer = Layer.effect(
             Effect.ensuring(cleanup()),
           )
 
-          const result = ctx.needsCompaction ? "compact" : ctx.blocked || ctx.assistantMessage.error ? "stop" : "continue"
+          const result = ctx.needsCompaction
+            ? "compact"
+            : ctx.blocked || ctx.assistantMessage.error
+              ? "stop"
+              : "continue"
           yield* Effect.promise(() =>
             SessionLog.write({
               sessionID: input.sessionID,

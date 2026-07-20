@@ -1,9 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "a11d57d8-dfc6-4731-967d-53fa55fb48ee",
+  "id": "c8be9362-574c-4dc4-9710-b5d7961c6b83",
   "prevIds": [
-    "0e8ad3a4-a6d4-4783-8bc3-13f7cb1b317b"
+    "a11d57d8-dfc6-4731-967d-53fa55fb48ee"
   ],
   "ddl": [
     {
@@ -983,6 +983,46 @@
       "default": null,
       "generated": null,
       "name": "step",
+      "entityType": "columns",
+      "table": "session_execution_checkpoint"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "evidence_attempts",
+      "entityType": "columns",
+      "table": "session_execution_checkpoint"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "provider_turns",
+      "entityType": "columns",
+      "table": "session_execution_checkpoint"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "tool_calls",
+      "entityType": "columns",
+      "table": "session_execution_checkpoint"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "compactions",
       "entityType": "columns",
       "table": "session_execution_checkpoint"
     },

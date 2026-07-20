@@ -10,7 +10,7 @@ import { Session } from "./session"
 import { Agent } from "../agent/agent"
 import { Provider } from "@/provider/provider"
 
-import { type ModelMessage, type Tool as AITool, tool, jsonSchema } from "ai"
+import { type Tool as AITool, tool, jsonSchema } from "ai"
 import type { JSONSchema7 } from "@ai-sdk/provider"
 import { SessionCompaction } from "./compaction"
 import { SystemPrompt } from "./system"
@@ -68,6 +68,7 @@ import { ToolCallRepair } from "./tool-call-repair"
 import { SessionLog } from "@/local-agent-runtime/session-log"
 import { SessionFreshness } from "./freshness"
 import { acquireModel } from "@/local-agent-runtime/resource-governor"
+import { SessionExecutionBudget } from "./execution-budget"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -1137,6 +1138,25 @@ const layer = Layer.effect(
       throw new Error("Impossible")
     })
 
+    const budgetExceeded = Effect.fn("SessionPrompt.budgetExceeded")(function* (input: {
+      sessionID: SessionID
+      checkpoint: SessionExecutionCheckpoint.Token
+      counter: keyof typeof SessionExecutionBudget.limits
+    }) {
+      const message = SessionExecutionBudget.message(input.counter)
+      const error = new NamedError.Unknown({ message })
+      yield* Effect.promise(() =>
+        SessionLog.write({
+          sessionID: input.sessionID,
+          type: "execution.budget_exhausted",
+          executionID: input.checkpoint.executionID,
+          data: { counter: input.counter, limit: SessionExecutionBudget.limits[input.counter] },
+        }),
+      )
+      yield* events.publish(Session.Event.Error, { sessionID: input.sessionID, error: error.toObject() })
+      return yield* Effect.fail(error)
+    })
+
     const runLoop: (
       sessionID: SessionID,
       checkpoint: SessionExecutionCheckpoint.Token,
@@ -1150,6 +1170,9 @@ const layer = Layer.effect(
       const session = yield* sessions.get(sessionID).pipe(Effect.orDie)
       const cfg = yield* config.get()
       const verification = cfg.verification
+      const execution = yield* SessionExecutionCheckpoint.load(db, sessionID)
+      let evidenceAttempts = execution?.evidence_attempts ?? 0
+      let providerTurns = execution?.provider_turns ?? 0
 
       if (checkpoint.recovered) {
         yield* Effect.promise(() =>
@@ -1273,41 +1296,53 @@ const layer = Layer.effect(
                   messages: msgs,
                   directory: ctx.directory,
                   followupAttempts: verification?.evidence_attempts ?? 2,
+                  attempts: evidenceAttempts,
                 })
           if (evidenceDecision.type === "continue") {
-            const request = MessageV2.activeUserRequest(msgs)
-            if (!request) throw new Error("Evidence continuation requires an active user request")
-            const message = yield* sessions.updateMessage({
-              id: MessageID.ascending(),
-              role: "user",
-              sessionID,
-              time: { created: Date.now() },
-              agent: request.info.agent,
-              model: request.info.model,
-              format: request.info.format,
-              tools: request.info.tools,
-              system: request.info.system,
+            const consumed = yield* SessionExecutionCheckpoint.consume(db, checkpoint, {
+              counter: "evidence_attempts",
+              limit: evidenceDecision.maxAttempts,
             })
-            yield* sessions.updatePart({
-              id: PartID.ascending(),
-              messageID: message.id,
-              sessionID,
-              type: "text",
-              text: SessionEvidence.prompt(evidenceDecision),
-              synthetic: true,
-              metadata: {
-                evidence_continue: true,
-                evidence_attempt: evidenceDecision.attempt,
-                evidence_max_attempts: evidenceDecision.maxAttempts,
-                evidence_reason: evidenceDecision.reason,
-              },
-              time: { start: Date.now(), end: Date.now() },
+            if (consumed) {
+              evidenceAttempts = consumed.used
+              const request = MessageV2.activeUserRequest(msgs)
+              if (!request) throw new Error("Evidence continuation requires an active user request")
+              const message = yield* sessions.updateMessage({
+                id: MessageID.ascending(),
+                role: "user",
+                sessionID,
+                time: { created: Date.now() },
+                agent: request.info.agent,
+                model: request.info.model,
+                format: request.info.format,
+                tools: request.info.tools,
+                system: request.info.system,
+              })
+              yield* sessions.updatePart({
+                id: PartID.ascending(),
+                messageID: message.id,
+                sessionID,
+                type: "text",
+                text: SessionEvidence.prompt({ ...evidenceDecision, attempt: evidenceAttempts }),
+                synthetic: true,
+                metadata: {
+                  evidence_continue: true,
+                  evidence_attempt: evidenceAttempts,
+                  evidence_max_attempts: evidenceDecision.maxAttempts,
+                  evidence_reason: evidenceDecision.reason,
+                },
+                time: { start: Date.now(), end: Date.now() },
+              })
+              yield* SessionExecutionCheckpoint.advance(db, checkpoint, {
+                state: "continuing",
+                step: step + 1,
+              })
+              continue
+            }
+            yield* Effect.logWarning("research evidence attempts exhausted in durable checkpoint", {
+              "session.id": sessionID,
+              attempts: evidenceAttempts,
             })
-            yield* SessionExecutionCheckpoint.advance(db, checkpoint, {
-              state: "continuing",
-              step: step + 1,
-            })
-            continue
           }
           if (evidenceDecision.type === "exhausted")
             yield* Effect.logWarning("research evidence attempts exhausted", {
@@ -1387,6 +1422,12 @@ const layer = Layer.effect(
         }
 
         if (task?.type === "compaction") {
+          const consumed = yield* SessionExecutionCheckpoint.consume(db, checkpoint, {
+            counter: "compactions",
+            limit: SessionExecutionBudget.limits.compactions,
+          })
+          if (!consumed)
+            return yield* budgetExceeded({ sessionID, checkpoint, counter: "compactions" }).pipe(Effect.orDie)
           const result = yield* compaction.process({
             messages: msgs,
             parentID: lastUser.id,
@@ -1423,7 +1464,7 @@ const layer = Layer.effect(
           throw error
         }
         const maxSteps = agent.steps ?? Infinity
-        const isLastStep = step >= maxSteps
+        const isLastStep = step >= maxSteps || providerTurns + 1 >= SessionExecutionBudget.limits.provider_turns
         msgs = yield* SessionReminders.apply({ messages: msgs, agent, session }).pipe(
           Effect.provideService(RuntimeFlags.Service, flags),
           Effect.provideService(FSUtil.Service, fsys),
@@ -1543,53 +1584,67 @@ const layer = Layer.effect(
           const requestUserMsg = MessageV2.activeUserRequest(msgs)
           const responseLanguageSample = MessageV2.userRequestText(requestUserMsg).slice(0, 240)
           const responseLanguageInstruction = ResponseLanguage.instruction(responseLanguageSample ?? "")
+          const bypassAgentCheck = requestUserMsg?.parts.some((p) => p.type === "agent") ?? false
+          const evidenceRequired = verification?.evidence !== false && SessionEvidence.requiresDeclaration(msgs)
+          const promptOps = yield* ops()
+          const freshnessPart = requestUserMsg?.parts.find(
+            (part): part is SessionV1.TextPart =>
+              part.type === "text" &&
+              (part.synthetic !== true || part.metadata?.compaction_continue === true),
+          )
+          const storedFreshness = SessionFreshness.read(requestUserMsg)
+          const freshnessText = MessageV2.userRequestText(requestUserMsg).trim()
+          const requestFiles = (requestUserMsg?.parts ?? [])
+            .filter((part) => part.type === "file")
+            .map((part) => part.url)
+          const freshnessDecision =
+            !freshnessPart || !freshnessText
+              ? undefined
+              : (storedFreshness ??
+                (requestFiles.length
+                  ? SessionFreshness.repository(freshnessText)
+                  : (yield* Effect.gen(function* () {
+                      const [language, item] = yield* Effect.all([
+                        provider.getLanguage(model).pipe(Effect.orDie),
+                        provider.getProvider(model.providerID).pipe(Effect.orDie),
+                      ])
+                      return yield* Effect.acquireUseRelease(
+                        Effect.tryPromise((signal) =>
+                          acquireModel({
+                            providerID: model.providerID,
+                            apiURL: typeof item.options.baseURL === "string" ? item.options.baseURL : model.api.url,
+                            modelID: model.api.id,
+                            priority: "interactive",
+                            signal,
+                          }),
+                        ),
+                        () =>
+                          Effect.tryPromise((signal) =>
+                            SessionFreshness.classify({
+                              model: language,
+                              request: MessageV2.routingRequest(msgs),
+                              signal,
+                            }),
+                          ),
+                        (permit) => Effect.promise(() => permit.release()),
+                      ).pipe(Effect.catch(() => Effect.succeed(SessionFreshness.conservative(freshnessText))))
+                    }))))
+          const repositoryContext =
+            freshnessDecision?.scope === "repository"
+              ? yield* sys.repository({
+                  query: MessageV2.repositoryQuery(msgs),
+                  files: requestFiles,
+                  budget: RepositoryContextRouter.contextBudget(model.limit.context),
+                })
+              : undefined
           const responseControl = [
             responseLanguageInstruction,
             ResponseRepetition.instruction,
             ToolCallRepair.instruction,
-            RepositoryContextRouter.searchScopeInstruction,
+            freshnessDecision?.scope === "repository" ? RepositoryContextRouter.searchScopeInstruction : undefined,
           ]
             .filter((part): part is string => part !== undefined)
             .join("\n")
-          const bypassAgentCheck = requestUserMsg?.parts.some((p) => p.type === "agent") ?? false
-          const evidenceRequired = verification?.evidence !== false && SessionEvidence.requiresDeclaration(msgs)
-          const promptOps = yield* ops()
-          const repositoryContext = yield* sys.repository({
-            query: MessageV2.repositoryQuery(msgs),
-            files: (requestUserMsg?.parts ?? []).filter((part) => part.type === "file").map((part) => part.url),
-            budget: RepositoryContextRouter.contextBudget(model.limit.context),
-          })
-          const freshnessPart = requestUserMsg?.parts.find(
-            (part): part is SessionV1.TextPart => part.type === "text" && part.synthetic !== true,
-          )
-          const storedFreshness = SessionFreshness.read(requestUserMsg)
-          const freshnessText = MessageV2.userRequestText(requestUserMsg).trim()
-          const freshnessDecision =
-            repositoryContext || !freshnessPart || !freshnessText
-              ? undefined
-              : (storedFreshness ??
-                (yield* Effect.gen(function* () {
-                  const [language, item] = yield* Effect.all([
-                    provider.getLanguage(model).pipe(Effect.orDie),
-                    provider.getProvider(model.providerID).pipe(Effect.orDie),
-                  ])
-                  return yield* Effect.acquireUseRelease(
-                    Effect.tryPromise((signal) =>
-                      acquireModel({
-                        providerID: model.providerID,
-                        apiURL: typeof item.options.baseURL === "string" ? item.options.baseURL : model.api.url,
-                        modelID: model.api.id,
-                        priority: "interactive",
-                        signal,
-                      }),
-                    ),
-                    () =>
-                      Effect.tryPromise((signal) =>
-                        SessionFreshness.classify({ model: language, request: freshnessText, signal }),
-                      ),
-                    (permit) => Effect.promise(() => permit.release()),
-                  ).pipe(Effect.catch(() => Effect.succeed(SessionFreshness.conservative(freshnessText))))
-                })))
           if (freshnessDecision && !storedFreshness && freshnessPart) {
             const persisted = SessionFreshness.write(freshnessPart, freshnessDecision)
             Object.assign(freshnessPart, persisted)
@@ -1602,6 +1657,7 @@ const layer = Layer.effect(
                 messageID: requestUserMsg?.info.id,
                 data: {
                   required: freshnessDecision.required,
+                  scope: freshnessDecision.scope,
                   reason: freshnessDecision.reason,
                   source: freshnessDecision.source,
                   model: { providerID: model.providerID, modelID: model.id, instanceID: model.api.id },
@@ -1611,9 +1667,12 @@ const layer = Layer.effect(
             yield* sys.repositoryTrace({
               level: "info",
               stage: "context",
-              message: freshnessDecision.required
-                ? `Freshness gate requires external evidence: ${freshnessDecision.reason}`
-                : `Freshness gate permits a local answer: ${freshnessDecision.reason}`,
+              message:
+                freshnessDecision.scope === "external"
+                  ? `Request routed to external evidence: ${freshnessDecision.reason}`
+                  : freshnessDecision.scope === "repository"
+                    ? `Request routed to repository evidence: ${freshnessDecision.reason}`
+                    : `Request routed to local conversation: ${freshnessDecision.reason}`,
             })
           }
           const freshnessEvidence = SessionFreshness.evidence(msgs, requestUserMsg?.info.id)
@@ -1647,7 +1706,7 @@ const layer = Layer.effect(
           const freshnessRoute = SessionFreshness.route({
             decision: freshnessDecision,
             evidence: freshnessEvidence,
-            tools,
+            tools: isLastStep ? {} : tools,
           })
           const freshnessPrompt = SessionFreshness.systemPrompt(
             freshnessDecision,
@@ -1678,7 +1737,7 @@ const layer = Layer.effect(
               ? []
               : [
                   SessionEvidence.systemPrompt(
-                    SessionEvidence.attempt(msgs) >= Math.max(1, (verification?.evidence_attempts ?? 2) + 1),
+                    evidenceAttempts >= Math.max(1, (verification?.evidence_attempts ?? 2) + 1),
                   ),
                 ]),
             ...(repositoryContext ? [repositoryContext.text] : []),
@@ -1694,7 +1753,7 @@ const layer = Layer.effect(
             ...(evidenceRequired ? [SessionEvidence.TOOL_ID] : []),
           ].filter((name, index, names) => freshnessRoute.tools[name] && names.indexOf(name) === index)
           const requestMessages = [
-            ...bindResponseLanguage(modelMsgs, responseLanguageSample),
+            ...modelMsgs,
             ...(isLastStep ? [{ role: "assistant" as const, content: MAX_STEPS_PROMPT }] : []),
           ]
           const fitted = yield* compaction.fitRequest({
@@ -1720,6 +1779,29 @@ const layer = Layer.effect(
             yield* compaction.create({ sessionID, agent: lastUser.agent, model: lastUser.model, auto: true })
             return "continue" as const
           }
+          const providerTurn = yield* SessionExecutionCheckpoint.consume(db, checkpoint, {
+            counter: "provider_turns",
+            limit: SessionExecutionBudget.limits.provider_turns,
+          })
+          if (!providerTurn) {
+            const error = new NamedError.Unknown({ message: SessionExecutionBudget.message("provider_turns") })
+            handle.message.error = error.toObject()
+            handle.message.finish = "error"
+            handle.message.time.completed = Date.now()
+            yield* sessions.updateMessage(handle.message)
+            yield* Effect.promise(() =>
+              SessionLog.write({
+                sessionID,
+                type: "execution.budget_exhausted",
+                messageID: handle.message.id,
+                executionID: checkpoint.executionID,
+                data: { counter: "provider_turns", limit: SessionExecutionBudget.limits.provider_turns },
+              }),
+            )
+            yield* events.publish(Session.Event.Error, { sessionID, error: error.toObject() })
+            return "break" as const
+          }
+          providerTurns = providerTurn.used
           yield* sys.repositoryTrace({
             level: fitted.compressed ? "warning" : "info",
             stage: "model",
@@ -1736,7 +1818,9 @@ const layer = Layer.effect(
               messages: requestMessages,
               tools: fitted.tools,
               model,
-              toolChoice: freshnessRoute.toolChoice ?? (format.type === "json_schema" ? "required" : undefined),
+              toolChoice: isLastStep
+                ? "none"
+                : (freshnessRoute.toolChoice ?? (format.type === "json_schema" ? "required" : undefined)),
             })
             .pipe(
               Effect.catchCause((cause) =>
@@ -2168,22 +2252,5 @@ export const node = LayerNode.make({
     Database.node,
   ],
 })
-
-function bindResponseLanguage(messages: ModelMessage[], sample: string | undefined) {
-  const reminder = ResponseLanguage.reminder(sample ?? "")
-  if (!reminder) return messages
-  const index = messages.findLastIndex((message) => message.role === "user")
-  if (index === -1) return messages
-  return messages.map((message, current) => {
-    if (current !== index || message.role !== "user") return message
-    return {
-      ...message,
-      content:
-        typeof message.content === "string"
-          ? `${message.content}\n\n${reminder}`
-          : [...message.content, { type: "text" as const, text: reminder }],
-    }
-  })
-}
 
 export * as SessionPrompt from "./prompt"

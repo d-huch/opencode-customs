@@ -103,8 +103,8 @@ export function DialogRagMemoryViewer() {
       size="x-large"
       class="w-full max-w-[840px] mx-auto"
     >
-      <div class="flex min-h-0 flex-col gap-4 px-6 pb-6">
-        <form class="flex items-end gap-2" onSubmit={submitSearch}>
+      <div class="flex h-full min-h-0 flex-1 flex-col gap-4 overflow-hidden px-6 pb-6">
+        <form class="flex shrink-0 items-end gap-2" onSubmit={submitSearch}>
           <div class="min-w-0 flex-1">
             <TextField
               autofocus
@@ -137,6 +137,7 @@ export function DialogRagMemoryViewer() {
               if (value === "rag" || value === "memory") setScope(value)
             }}
             variant="alt"
+            class="!h-auto min-h-0 flex-1"
           >
             <Tabs.List class="gap-4 border-b border-border-weak-base">
               <Tabs.Trigger value="rag" class="text-12-regular">
@@ -147,13 +148,13 @@ export function DialogRagMemoryViewer() {
               </Tabs.Trigger>
             </Tabs.List>
 
-            <Tabs.Content value="rag" class="pt-3">
+            <Tabs.Content value="rag" class="flex min-h-0 flex-col !overflow-hidden pt-3">
               <Show
                 when={!knowledge.loading && knowledge()?.rag}
                 fallback={<KnowledgeLoading label={language.t("knowledge.loading")} />}
               >
                 {(rag) => (
-                  <div class="flex flex-col gap-3">
+                  <div class="flex h-full min-h-0 flex-col gap-3">
                     <KnowledgeStats
                       items={[
                         `${rag().total.toLocaleString(language.intl())} ${language.t("knowledge.stats.chunks")}`,
@@ -178,13 +179,13 @@ export function DialogRagMemoryViewer() {
               </Show>
             </Tabs.Content>
 
-            <Tabs.Content value="memory" class="pt-3">
+            <Tabs.Content value="memory" class="flex min-h-0 flex-col !overflow-hidden pt-3">
               <Show
                 when={!knowledge.loading && knowledge()?.memory}
                 fallback={<KnowledgeLoading label={language.t("knowledge.loading")} />}
               >
                 {(memory) => (
-                  <div class="flex flex-col gap-3">
+                  <div class="flex h-full min-h-0 flex-col gap-3">
                     <KnowledgeStats
                       items={[
                         `${memory().total.toLocaleString(language.intl())} ${language.t("knowledge.stats.entries")}`,
@@ -209,7 +210,7 @@ export function DialogRagMemoryViewer() {
           </Tabs>
         </Show>
 
-        <div class="flex flex-wrap justify-end gap-2 border-t border-border-weak-base pt-3">
+        <div class="flex shrink-0 flex-wrap justify-end gap-2 border-t border-border-weak-base pt-3">
           <Button
             type="button"
             variant="secondary"
@@ -329,7 +330,7 @@ function KnowledgeStats(props: { items: string[]; detail?: string }) {
 
 function KnowledgeList(props: { empty: boolean; emptyLabel: string; children: JSXElement }) {
   return (
-    <div class="flex h-[430px] flex-col gap-2 overflow-y-auto pr-1">
+    <div class="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overscroll-contain pb-4 pr-1">
       <Show
         when={!props.empty}
         fallback={<div class="m-auto text-13-regular text-text-weaker">{props.emptyLabel}</div>}
@@ -341,13 +342,13 @@ function KnowledgeList(props: { empty: boolean; emptyLabel: string; children: JS
 }
 
 function KnowledgeLoading(props: { label: string }) {
-  return <div class="flex h-[490px] items-center justify-center text-13-regular text-text-weaker">{props.label}</div>
+  return <div class="flex min-h-0 flex-1 items-center justify-center text-13-regular text-text-weaker">{props.label}</div>
 }
 
 function KnowledgeError(props: { error: unknown }) {
   const language = useLanguage()
   return (
-    <div class="flex h-[490px] flex-col items-center justify-center gap-2 text-center">
+    <div class="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 text-center">
       <span class="text-13-medium text-text-base">{language.t("common.requestFailed")}</span>
       <span class="max-w-lg break-words font-mono text-11-regular text-text-weaker">
         {props.error instanceof Error ? props.error.message : String(props.error)}
