@@ -2988,13 +2988,43 @@ export type RepositoryMapKnowledgeOutput = {
       readonly matched: number
       readonly entries: ReadonlyArray<{
         readonly id: string
-        readonly kind: "route" | "summary"
+        readonly kind: "route" | "summary" | "conversation"
         readonly text: string
         readonly terms: ReadonlyArray<string>
         readonly files: ReadonlyArray<string>
         readonly updatedAt: number
         readonly embeddingModel?: string
         readonly dimensions: number
+        readonly category?: "identity" | "preference" | "constraint" | "decision" | "context"
+        readonly topic?: string
+        readonly confidence?: number | "Infinity" | "-Infinity" | "NaN"
+        readonly source?: "classifier" | "answer" | "manual" | "route" | "compaction"
+        readonly evidence?: string
+        readonly originProject?: string
+        readonly scope?: "global" | "cross-project" | "project" | "session" | "pattern"
+        readonly scopeID?: string
+        readonly lifecycle?: "candidate" | "verified" | "durable" | "rejected" | "expired" | "archived"
+        readonly createdAt?: number
+        readonly verifiedAt?: number
+        readonly ttl?: number
+        readonly classification?: "fact" | "analogy"
+        readonly status?: "active" | "conflict"
+        readonly conflictsWith?: string
+        readonly conflicts?: ReadonlyArray<string>
+        readonly pinned?: boolean
+        readonly expiresAt?: number
+        readonly lastUsedAt?: number
+        readonly useCount?: number
+        readonly confirmationCount?: number
+        readonly lastQuery?: string
+        readonly matchReason?: "lexical" | "semantic"
+        readonly usage?: ReadonlyArray<{
+          readonly at: number
+          readonly query: string
+          readonly reason: "lexical" | "semantic"
+          readonly project: string
+          readonly classification: "fact" | "analogy"
+        }>
       }>
     }
     readonly rag: {
@@ -3012,12 +3042,48 @@ export type RepositoryMapKnowledgeOutput = {
         readonly dimensions: number
       }>
     }
+    readonly retrieval: {
+      readonly total: number
+      readonly matched: number
+      readonly recallAt5?: number | "Infinity" | "-Infinity" | "NaN"
+      readonly recallAt10?: number | "Infinity" | "-Infinity" | "NaN"
+      readonly entries: ReadonlyArray<{
+        readonly id: string
+        readonly query: string
+        readonly files: ReadonlyArray<{
+          readonly path: string
+          readonly score: number | "Infinity" | "-Infinity" | "NaN"
+          readonly confidence: number | "Infinity" | "-Infinity" | "NaN"
+          readonly classification: "fact" | "assumption" | "analogy"
+          readonly reasons: ReadonlyArray<{
+            readonly stage:
+              | "attachment"
+              | "exact"
+              | "lexical"
+              | "concept"
+              | "embedding"
+              | "lsp"
+              | "graph"
+              | "memory"
+              | "analogy"
+            readonly detail: string
+            readonly weight: number | "Infinity" | "-Infinity" | "NaN"
+          }>
+          readonly used?: boolean
+          readonly rejected?: boolean
+        }>
+        readonly createdAt: number
+        readonly updatedAt: number
+        readonly recallAt5?: number | "Infinity" | "-Infinity" | "NaN"
+        readonly recallAt10?: number | "Infinity" | "-Infinity" | "NaN"
+      }>
+    }
   }
 }
 
 export type RepositoryMapRemoveKnowledgeInput = {
-  readonly scope: { readonly scope: "memory" | "rag"; readonly id: string }["scope"]
-  readonly id: { readonly scope: "memory" | "rag"; readonly id: string }["id"]
+  readonly scope: { readonly scope: "memory" | "rag" | "retrieval"; readonly id: string }["scope"]
+  readonly id: { readonly scope: "memory" | "rag" | "retrieval"; readonly id: string }["id"]
   readonly location?: {
     readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
   }["location"]
@@ -3032,8 +3098,160 @@ export type RepositoryMapRemoveKnowledgeOutput = {
   readonly data: { readonly removed: number }
 }
 
+export type RepositoryMapUpdateMemoryInput = {
+  readonly id: { readonly id: string }["id"]
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+  }["location"]
+  readonly pinned?: {
+    readonly pinned?: boolean
+    readonly expiresAt?: number
+    readonly clearExpiration?: boolean
+    readonly resolve?: boolean
+    readonly lifecycle?: "candidate" | "verified" | "durable" | "rejected" | "expired" | "archived"
+  }["pinned"]
+  readonly expiresAt?: {
+    readonly pinned?: boolean
+    readonly expiresAt?: number
+    readonly clearExpiration?: boolean
+    readonly resolve?: boolean
+    readonly lifecycle?: "candidate" | "verified" | "durable" | "rejected" | "expired" | "archived"
+  }["expiresAt"]
+  readonly clearExpiration?: {
+    readonly pinned?: boolean
+    readonly expiresAt?: number
+    readonly clearExpiration?: boolean
+    readonly resolve?: boolean
+    readonly lifecycle?: "candidate" | "verified" | "durable" | "rejected" | "expired" | "archived"
+  }["clearExpiration"]
+  readonly resolve?: {
+    readonly pinned?: boolean
+    readonly expiresAt?: number
+    readonly clearExpiration?: boolean
+    readonly resolve?: boolean
+    readonly lifecycle?: "candidate" | "verified" | "durable" | "rejected" | "expired" | "archived"
+  }["resolve"]
+  readonly lifecycle?: {
+    readonly pinned?: boolean
+    readonly expiresAt?: number
+    readonly clearExpiration?: boolean
+    readonly resolve?: boolean
+    readonly lifecycle?: "candidate" | "verified" | "durable" | "rejected" | "expired" | "archived"
+  }["lifecycle"]
+}
+
+export type RepositoryMapUpdateMemoryOutput = {
+  readonly location: {
+    readonly directory: string
+    readonly workspaceID?: string
+    readonly project: { readonly id: string; readonly directory: string }
+  }
+  readonly data: { readonly removed: number }
+}
+
+export type RepositoryMapPreviewMemoryConsolidationInput = {
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+  }["location"]
+}
+
+export type RepositoryMapPreviewMemoryConsolidationOutput = {
+  readonly location: {
+    readonly directory: string
+    readonly workspaceID?: string
+    readonly project: { readonly id: string; readonly directory: string }
+  }
+  readonly data: {
+    readonly fingerprint: string
+    readonly generatedAt: number
+    readonly total: number
+    readonly protected: number
+    readonly actionable: number
+    readonly unresolved: number
+    readonly actions: ReadonlyArray<{
+      readonly type:
+        | "merge_duplicate"
+        | "resolve_conflict"
+        | "decrease_confidence"
+        | "increase_confidence"
+        | "archive_unused"
+        | "unresolved_conflict"
+      readonly id: string
+      readonly relatedIDs: ReadonlyArray<string>
+      readonly reason: string
+      readonly beforeConfidence?: number | "Infinity" | "-Infinity" | "NaN"
+      readonly afterConfidence?: number | "Infinity" | "-Infinity" | "NaN"
+      readonly winnerID?: string
+    }>
+  }
+}
+
+export type RepositoryMapApplyMemoryConsolidationInput = {
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+  }["location"]
+  readonly fingerprint: { readonly fingerprint: string; readonly generatedAt: number }["fingerprint"]
+  readonly generatedAt: { readonly fingerprint: string; readonly generatedAt: number }["generatedAt"]
+}
+
+export type RepositoryMapApplyMemoryConsolidationOutput = {
+  readonly location: {
+    readonly directory: string
+    readonly workspaceID?: string
+    readonly project: { readonly id: string; readonly directory: string }
+  }
+  readonly data: {
+    readonly applied: boolean
+    readonly stale: boolean
+    readonly removed: number
+    readonly updated: number
+    readonly archived: number
+    readonly preview: {
+      readonly fingerprint: string
+      readonly generatedAt: number
+      readonly total: number
+      readonly protected: number
+      readonly actionable: number
+      readonly unresolved: number
+      readonly actions: ReadonlyArray<{
+        readonly type:
+          | "merge_duplicate"
+          | "resolve_conflict"
+          | "decrease_confidence"
+          | "increase_confidence"
+          | "archive_unused"
+          | "unresolved_conflict"
+        readonly id: string
+        readonly relatedIDs: ReadonlyArray<string>
+        readonly reason: string
+        readonly beforeConfidence?: number | "Infinity" | "-Infinity" | "NaN"
+        readonly afterConfidence?: number | "Infinity" | "-Infinity" | "NaN"
+        readonly winnerID?: string
+      }>
+    }
+  }
+}
+
+export type RepositoryMapFeedbackRetrievalInput = {
+  readonly id: { readonly id: string }["id"]
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+  }["location"]
+  readonly path: { readonly path: string; readonly relevance: "used" | "rejected" | "clear" }["path"]
+  readonly relevance: { readonly path: string; readonly relevance: "used" | "rejected" | "clear" }["relevance"]
+}
+
+export type RepositoryMapFeedbackRetrievalOutput = {
+  readonly location: {
+    readonly directory: string
+    readonly workspaceID?: string
+    readonly project: { readonly id: string; readonly directory: string }
+  }
+  readonly data: { readonly removed: number }
+}
+
 export type RepositoryMapClearKnowledgeInput = {
-  readonly scope: { readonly scope: "memory" | "rag" }["scope"]
+  readonly scope: { readonly scope: "memory" | "rag" | "retrieval" }["scope"]
   readonly location?: {
     readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
   }["location"]

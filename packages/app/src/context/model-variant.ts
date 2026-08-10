@@ -35,6 +35,17 @@ export function resolveModelVariant(input: VariantInput) {
   return undefined
 }
 
+export function defaultModelVariant(variants: string[]) {
+  if (variants.includes("none")) return "none"
+  return variants.includes("off") ? "off" : undefined
+}
+
+export function modelVariantOptions(variants: string[]) {
+  if (variants.includes("none")) return ["none", ...variants.filter((variant) => variant !== "none")]
+  if (!variants.includes("off")) return ["default", ...variants]
+  return ["off", ...variants.filter((variant) => variant !== "off")]
+}
+
 export function cycleModelVariant(input: VariantInput) {
   if (input.variants.length === 0) return undefined
   if (input.selected === null) return input.variants[0]

@@ -26,8 +26,10 @@ import { ResponseLanguage } from "@opencode-ai/core/response-language"
 import { SessionCompactionEvent } from "@opencode-ai/schema/session-compaction-event"
 import type { ModelMessage, Tool } from "ai"
 import { ModelSwitcher } from "@/local-agent-runtime/model-switcher"
+import { CapabilityRouter } from "@/local-agent-runtime/capability-router"
 import { SessionLog } from "@/local-agent-runtime/session-log"
 import { SessionFreshness } from "./freshness"
+import { ContextCompiler, type Preview, type SystemFragment } from "./context-compiler"
 
 export const Event = SessionCompactionEvent
 
@@ -36,11 +38,7 @@ export const PRUNE_PROTECT = 40_000
 const TOOL_OUTPUT_MAX_CHARS = 2_000
 const COMPACTION_PROMPT_HEADROOM = 512
 const PRUNE_PROTECTED_TOOLS = ["skill"]
-const REQUEST_HEADROOM = 128
 const REQUEST_ESTIMATE_MULTIPLIER = 1.35
-const TOOL_DESCRIPTION_MAX_CHARS = 160
-const TOOL_BUDGET_RATIO = 0.5
-const CORE_TOOL_ORDER = ["read", "grep", "glob", "edit", "write", "bash"]
 const DEFAULT_TAIL_TURNS = 2
 const MIN_PRESERVE_RECENT_TOKENS = 2_000
 const MAX_PRESERVE_RECENT_TOKENS = 8_000
@@ -175,18 +173,23 @@ export interface Interface {
   readonly fitRequest: (input: {
     fixedSystem: string[]
     system: string[]
+    systemFragments?: SystemFragment[]
     messages: ModelMessage[]
     tools: Record<string, Tool>
     model: Provider.Model
     requiredTools?: string[]
+    currentUserText?: string
+    checkpointSummary?: string
   }) => Effect.Effect<{
     system: string[]
+    messages: ModelMessage[]
     tools: Record<string, Tool>
     tokens: number
     limit: number
     usage: number
     compressed: boolean
     overflow: boolean
+    preview: Preview
   }>
   readonly prune: (input: { sessionID: SessionID }) => Effect.Effect<void>
   readonly process: (input: {
@@ -259,10 +262,13 @@ const layer = Layer.effect(
     const fitRequest = Effect.fn("SessionCompaction.fitRequest")(function* (input: {
       fixedSystem: string[]
       system: string[]
+      systemFragments?: SystemFragment[]
       messages: ModelMessage[]
       tools: Record<string, Tool>
       model: Provider.Model
       requiredTools?: string[]
+      currentUserText?: string
+      checkpointSummary?: string
     }) {
       const cfg = yield* config.get()
       const providerConfig = cfg.provider?.[input.model.providerID]
@@ -281,93 +287,22 @@ const layer = Layer.effect(
         usable({ cfg, model: input.model, outputTokenMax: flags.outputTokenMax }),
         governed?.safeInputTokens ?? Number.POSITIVE_INFINITY,
       )
-      const size = (system: string[], tools: Record<string, Tool>) =>
-        safeEstimate(JSON.stringify({ system: [...input.fixedSystem, ...system], messages: input.messages, tools }))
-      const tokens = size(input.system, input.tools)
-      const result = (system: string[], tools: Record<string, Tool>, compressed: boolean) => {
-        const count = size(system, tools)
-        return {
-          system,
-          tools,
-          tokens: count,
-          limit,
-          usage: limit ? Math.min(100, Math.round((count / limit) * 100)) : 0,
-          compressed,
-          overflow: limit > 0 && count >= limit,
-        }
-      }
-      if (limit === 0 || tokens < limit) return result(input.system, input.tools, false)
-
-      const budget = Math.max(0, limit - REQUEST_HEADROOM)
-      const notice =
-        "[Context budget applied: optional instructions and tools may be omitted. Inspect files when needed.]"
-      const compactTools = Object.fromEntries(
-        Object.entries(input.tools).map(([name, item]) => [
-          name,
-          {
-            ...item,
-            description:
-              typeof item.description === "string"
-                ? item.description.trim().split("\n").find(Boolean)?.slice(0, TOOL_DESCRIPTION_MAX_CHARS)
-                : item.description,
-          },
-        ]),
-      )
-      const required = new Set(input.requiredTools ?? [])
-      const query = JSON.stringify(input.messages.at(-1) ?? "").toLowerCase()
-      const words = new Set(query.match(/[\p{L}\p{N}_-]{3,}/gu) ?? [])
-      const relevance = (name: string) => {
-        const haystack = `${name} ${compactTools[name]?.description ?? ""}`.toLowerCase()
-        return [...words].filter((word) => haystack.includes(word)).length
-      }
-      const names = Object.keys(compactTools).toSorted((left, right) => {
-        const requiredOrder = Number(required.has(right)) - Number(required.has(left))
-        if (requiredOrder) return requiredOrder
-        const relevantOrder = relevance(right) - relevance(left)
-        if (relevantOrder) return relevantOrder
-        const leftCore = CORE_TOOL_ORDER.indexOf(left)
-        const rightCore = CORE_TOOL_ORDER.indexOf(right)
-        if (leftCore !== -1 || rightCore !== -1) {
-          if (leftCore === -1) return 1
-          if (rightCore === -1) return -1
-          return leftCore - rightCore
-        }
-        return JSON.stringify(compactTools[left]).length - JSON.stringify(compactTools[right]).length
+      return ContextCompiler.compile({
+        fixedSystem: input.fixedSystem,
+        system:
+          input.systemFragments ??
+          input.system.map((content, index) => ({
+            source: "stable_system_prefix",
+            provenance: `legacy_system_${index}`,
+            content,
+          })),
+        messages: input.messages,
+        tools: input.tools,
+        requiredTools: input.requiredTools,
+        currentUserText: input.currentUserText,
+        checkpointSummary: input.checkpointSummary,
+        limit,
       })
-      const selectedTools: Record<string, Tool> = {}
-      const fixedTokens = size([notice], {})
-      if (fixedTokens >= budget) return result([], {}, true)
-      const toolBudget = Math.floor((budget - fixedTokens) * TOOL_BUDGET_RATIO)
-      for (const name of names) {
-        const candidate = { ...selectedTools, [name]: compactTools[name] }
-        const candidateSize = size([notice], candidate)
-        if (!required.has(name) && candidateSize - fixedTokens > toolBudget) continue
-        if (candidateSize >= budget) continue
-        selectedTools[name] = compactTools[name]
-      }
-
-      const orderedSystem = [input.system[0], input.system.at(-1), ...input.system.slice(1, -1)].filter(
-        (item, index, items): item is string => !!item && items.indexOf(item) === index,
-      )
-      const selectedSystem = [notice]
-      for (const item of orderedSystem) {
-        if (size([...selectedSystem, item], selectedTools) < budget) {
-          selectedSystem.push(item)
-          continue
-        }
-        const available = Math.max(0, (budget - size(selectedSystem, selectedTools)) * 4)
-        if (available < 256) continue
-        const truncated = `${item.slice(0, Math.max(0, available - 80))}\n[Instruction truncated to fit context]`
-        if (size([...selectedSystem, truncated], selectedTools) < budget) selectedSystem.push(truncated)
-      }
-
-      for (const name of names) {
-        if (selectedTools[name]) continue
-        const candidate = { ...selectedTools, [name]: compactTools[name] }
-        if (size(selectedSystem, candidate) >= budget) continue
-        selectedTools[name] = compactTools[name]
-      }
-      return result(selectedSystem, selectedTools, true)
     })
 
     const fitCompactionHead = Effect.fn("SessionCompaction.fitHead")(function* (input: {
@@ -555,10 +490,10 @@ const layer = Layer.effect(
       }
 
       const agent = yield* agents.get("compaction")
-      const preferredModel = agent.model
+      const cfg = yield* config.get()
+      const preferredModel = agent.model && CapabilityRouter.automaticRoutingEnabled(cfg)
         ? yield* provider.getModel(agent.model.providerID, agent.model.modelID).pipe(Effect.orDie)
         : yield* provider.getModel(userMessage.model.providerID, userMessage.model.modelID).pipe(Effect.orDie)
-      const cfg = yield* config.get()
       const activation =
         preferredModel.providerID === "lmstudio"
           ? yield* Effect.promise(() =>
@@ -749,7 +684,11 @@ const layer = Layer.effect(
               { enabled: true },
             )).enabled
           ) {
-            const latestRequest = MessageV2.latestUserRequest(input.messages)
+            // A nested compaction may no longer project the original user message.
+            // In that case the previous compaction continuation is the durable copy
+            // of the active request and must win over a generic continuation prompt.
+            const latestRequest =
+              MessageV2.latestUserRequest(input.messages) ?? MessageV2.activeUserRequest(input.messages)
             const continueMsg = yield* session.updateMessage({
               id: MessageID.ascending(),
               role: "user",
@@ -761,11 +700,7 @@ const layer = Layer.effect(
               tools: latestRequest?.info.tools,
               system: latestRequest?.info.system,
             })
-            const requestText = latestRequest?.parts
-              .flatMap((part) =>
-                part.type === "text" && part.synthetic !== true && part.text.trim() ? [part.text.trim()] : [],
-              )
-              .join("\n")
+            const requestText = MessageV2.userRequestText(latestRequest)
             const text = input.overflow
               ? "The latest user request exceeded the provider's size limit because of large media attachments. Explain that the attachments were too large to process and suggest retrying with smaller or fewer files."
               : requestText?.slice(0, 2_000) || "Continue the latest request."

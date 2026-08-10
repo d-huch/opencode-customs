@@ -192,6 +192,7 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
           for await (const event of events.stream) {
             resetHeartbeat()
             streamErrorLogged = false
+            if (event.payload.type === "server.heartbeat") continue
             if (event.payload.type !== "sync") {
               const directory = event.directory ?? "global"
               const payload = event.payload as Event

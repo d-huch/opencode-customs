@@ -103,6 +103,8 @@ const live: Layer.Layer<
             modelID: input.model.id,
             instanceID: input.model.api.id,
             context: input.model.limit.context,
+            variant: input.user.model.variant,
+            reasoningEffort: input.user.model.variant ?? "none",
             small: input.small ?? false,
             agent: input.agent.name,
             mode: input.agent.mode,
@@ -360,17 +362,9 @@ const live: Layer.Layer<
                 toolName,
               }
             }
-            if (!prepared.tools.invalid) {
-              throw new Error(`Invalid input for tool '${toolName}': ${failed.error.message}`)
-            }
-            return {
-              ...failed.toolCall,
-              input: JSON.stringify({
-                tool: failed.toolCall.toolName,
-                error: failed.error.message,
-              }),
-              toolName: "invalid",
-            }
+            throw new Error(
+              `Invalid input for tool '${toolName}': ${failed.error.message}. The call was blocked before execution.`,
+            )
           },
           temperature: prepared.params.temperature,
           topP: prepared.params.topP,
@@ -401,6 +395,7 @@ const live: Layer.Layer<
                   return args.params
                 },
               },
+              ToolCallRepair.compatibilityMiddleware(),
             ],
           }),
           experimental_telemetry: {

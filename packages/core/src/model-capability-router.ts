@@ -130,15 +130,19 @@ export function plan(input: {
   readonly needsVision?: boolean
   readonly needsTools?: boolean
   readonly allowUnloaded?: boolean
+  readonly disabledModelIDs?: readonly string[]
 }): Plan {
   const eligible = input.candidates.filter(
     (candidate) => candidate.loaded || (input.allowUnloaded === true && input.pressure !== "critical"),
   )
-  const llms = eligible.filter((candidate) => candidate.type !== "embedding" && !candidate.capabilities.embeddings)
+  const disabled = new Set(input.disabledModelIDs ?? [])
+  const automatic = eligible.filter((candidate) => !disabled.has(candidate.modelID))
+  const llms = automatic.filter((candidate) => candidate.type !== "embedding" && !candidate.capabilities.embeddings)
+  const coding = eligible.filter((candidate) => candidate.type !== "embedding" && !candidate.capabilities.embeddings)
   const selections = [
-    select("embedding", eligible, input),
+    select("embedding", automatic, input),
     select("utility", llms, input),
-    ...(input.preferredModelID ? [select("coding", llms, input)] : []),
+    ...(input.preferredModelID ? [select("coding", coding, input)] : []),
     ...(input.needsVision ? [select("vision", llms, input)] : []),
   ].filter((selection) => selection !== undefined)
 
@@ -152,7 +156,7 @@ export function plan(input: {
     providerID: input.providerID,
     complexity: input.complexity,
     pressure: input.pressure,
-    candidateCount: eligible.length,
+    candidateCount: automatic.length,
     selections,
     reason: [
       eligible.length > 0
@@ -161,6 +165,7 @@ export function plan(input: {
           : "candidates.loaded"
         : "candidates.none",
       ...(missing.length > 0 ? ["roles.missing"] : []),
+      ...(automatic.length < eligible.length ? ["candidates.blocked"] : []),
       input.pressure === "healthy" ? "resources.healthy" : "resources.pressure",
     ],
   }

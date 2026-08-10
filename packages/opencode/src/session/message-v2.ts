@@ -131,6 +131,19 @@ function providerMeta(metadata: Record<string, any> | undefined) {
   return Object.keys(rest).length > 0 ? rest : undefined
 }
 
+function retryFingerprint(message: WithParts) {
+  if (message.info.role !== "user") return
+  const parts: Array<Record<string, string>> = message.parts.flatMap((part): Array<Record<string, string>> => {
+    if (part.type === "text" && part.ignored !== true) return [{ type: part.type, text: part.text }]
+    if (part.type === "file")
+      return [{ type: part.type, mime: part.mime, url: part.url, filename: part.filename ?? "" }]
+    if (part.type === "compaction" || part.type === "subtask") return [{ type: part.type }]
+    return []
+  })
+  if (parts.length === 0) return
+  return JSON.stringify(parts)
+}
+
 export const toModelMessagesEffect = Effect.fnUntraced(function* (
   input: WithParts[],
   model: Provider.Model,
@@ -138,6 +151,25 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
 ) {
   const result: UIMessage[] = []
   const toolNames = new Set<string>()
+  const failedParents = new Set(
+    input.flatMap((message) =>
+      message.info.role === "assistant" &&
+      message.info.error &&
+      message.parts.every((part) => part.type === "step-start" || part.type === "reasoning")
+        ? [message.info.parentID]
+        : [],
+    ),
+  )
+  const laterRetries = new Set<string>()
+  const skippedFailedRequests = new Set(
+    input.toReversed().flatMap((message) => {
+      const fingerprint = retryFingerprint(message)
+      if (!fingerprint) return []
+      const skip = failedParents.has(message.info.id) && laterRetries.has(fingerprint)
+      laterRetries.add(fingerprint)
+      return skip ? [message.info.id] : []
+    }),
+  )
   // Track media from tool results that need to be injected as user messages
   // for providers that don't support that media type in tool results.
   //
@@ -196,6 +228,7 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
   }
 
   for (const msg of input) {
+    if (skippedFailedRequests.has(msg.info.id)) continue
     if (msg.parts.length === 0) continue
 
     if (msg.info.role === "user") {

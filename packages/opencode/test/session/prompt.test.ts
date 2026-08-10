@@ -578,81 +578,112 @@ it.instance("loop calls LLM and returns assistant message", () =>
   }),
 )
 
-it.instance("routes a screenshot through vision, repository context, and a grounded recommendation", () =>
-  Effect.gen(function* () {
-    const { dir, llm } = yield* useServerConfig(visionProviderCfg)
-    const prompt = yield* SessionPrompt.Service
-    const sessions = yield* Session.Service
-    const db = (yield* Database.Service).db
-    yield* writeText(
-      path.join(dir, "resources/js/components/MedicalJournal.vue"),
-      "<template><MedicalJournalTable /></template>\n<script setup>const emptyState = 'No records'</script>",
-    )
-    yield* writeText(
-      path.join(dir, "app/Http/Controllers/MedicalJournalController.php"),
-      "<?php final class MedicalJournalController { public function index() {} }",
-    )
+it.instance(
+  "routes a screenshot through vision, repository context, and a grounded recommendation",
+  () =>
+    Effect.gen(function* () {
+      const symbol = {
+        name: "MedicalJournal",
+        kind: "class" as const,
+        path: "resources/js/components/MedicalJournal.vue",
+        line: 1,
+        source: "lsp" as const,
+      }
+      const unregister = RepositorySemantic.register({
+        enrich: () =>
+          Effect.succeed({
+            files: [symbol.path],
+            servers: ["vue"],
+            symbols: [symbol],
+            edges: [],
+          }),
+        search: (input) =>
+          Effect.succeed({
+            query: input.query,
+            servers: ["vue"],
+            symbols: [symbol],
+            edges: [],
+          }),
+      })
+      yield* Effect.addFinalizer(() => Effect.sync(unregister))
+      const { dir, llm } = yield* useServerConfig(visionProviderCfg)
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const db = (yield* Database.Service).db
 
-    const photon = yield* Effect.promise(() => import("@silvia-odwyer/photon-node"))
-    const screenshot = new photon.PhotonImage(
-      new Uint8Array(Array.from({ length: 64 * 48 * 4 }, (_, index) => (index % 4 === 3 ? 255 : index % 251))),
-      64,
-      48,
-    )
-    const image = `data:image/png;base64,${Buffer.from(screenshot.get_bytes()).toString("base64")}`
-    screenshot.free()
+      const photon = yield* Effect.promise(() => import("@silvia-odwyer/photon-node"))
+      const screenshot = new photon.PhotonImage(
+        new Uint8Array(Array.from({ length: 64 * 48 * 4 }, (_, index) => (index % 4 === 3 ? 255 : index % 251))),
+        64,
+        48,
+      )
+      const image = `data:image/png;base64,${Buffer.from(screenshot.get_bytes()).toString("base64")}`
+      screenshot.free()
 
-    const session = yield* sessions.create({ title: "Vision pipeline" })
-    yield* llm.text(
-      "The screenshot maps to resources/js/components/MedicalJournal.vue. I recommend fixing its empty-state layout there.",
-      { usage: { input: 321, output: 19 } },
-    )
-    const result = yield* prompt.prompt({
-      sessionID: session.id,
-      agent: "build",
-      model: { providerID: ProviderV2.ID.make("lmstudio"), modelID: ModelV2.ID.make("vision-model") },
-      parts: [
-        {
-          type: "text",
-          text: "Analyze this MedicalJournal screenshot, find the related local code, and recommend a UI change.",
-        },
-        { type: "file", mime: "image/png", filename: "medical-journal.png", url: image },
-      ],
-    })
+      const session = yield* sessions.create({ title: "Vision pipeline" })
+      yield* llm.text(
+        "The screenshot maps to resources/js/components/MedicalJournal.vue. I recommend fixing its empty-state layout there.",
+        { usage: { input: 321, output: 19 } },
+      )
+      const result = yield* prompt.prompt({
+        sessionID: session.id,
+        agent: "build",
+        model: { providerID: ProviderV2.ID.make("lmstudio"), modelID: ModelV2.ID.make("vision-model") },
+        parts: [
+          {
+            type: "text",
+            text: "Analyze this MedicalJournal screenshot, find the related local code, and recommend a UI change.",
+          },
+          { type: "file", mime: "image/png", filename: "medical-journal.png", url: image },
+        ],
+      })
 
-    expect(result.info.role).toBe("assistant")
-    expect(
-      result.parts.some(
-        (part) => part.type === "text" && part.text.includes("resources/js/components/MedicalJournal.vue"),
-      ),
-    ).toBe(true)
-    const history = yield* sessions.messages({ sessionID: session.id })
-    const storedImage = history
-      .flatMap((message) => message.parts)
-      .find((part): part is SessionV1.FilePart => part.type === "file" && part.mime === "image/png")
-    expect(storedImage?.url.startsWith("file:")).toBe(true)
-    expect(storedImage?.url.includes("base64")).toBe(false)
+      expect(result.info.role).toBe("assistant")
+      expect(
+        result.parts.some(
+          (part) => part.type === "text" && part.text.includes("resources/js/components/MedicalJournal.vue"),
+        ),
+      ).toBe(true)
+      const history = yield* sessions.messages({ sessionID: session.id })
+      const storedImage = history
+        .flatMap((message) => message.parts)
+        .find((part): part is SessionV1.FilePart => part.type === "file" && part.mime === "image/png")
+      expect(storedImage?.url.startsWith("file:")).toBe(true)
+      expect(storedImage?.url.includes("base64")).toBe(false)
 
-    const request = JSON.stringify((yield* llm.inputs)[0])
-    expect(request).toContain("data:image/png;base64,")
-    expect(request).toContain("resources/js/components/MedicalJournal.vue")
-    expect(request).toContain("find the related local code")
+      const request = JSON.stringify((yield* llm.inputs)[0])
+      expect(request).toContain("data:image/png;base64,")
+      expect(request).toContain("resources/js/components/MedicalJournal.vue")
+      expect(request).toContain("find the related local code")
 
-    const checkpoint = yield* SessionExecutionCheckpoint.load(db, session.id)
-    expect(checkpoint?.model_route?.activation).toMatchObject({
-      role: "vision",
-      activeModelID: "vision-model",
-      activeInstanceID: "vision-instance",
-    })
-    expect(checkpoint?.model_route?.vision).toMatchObject({
-      status: "completed",
-      modelID: "vision-model",
-      instanceID: "vision-instance",
-      imageCount: 1,
-      requestTokens: 321,
-      failover: false,
-    })
-  }),
+      const checkpoint = yield* SessionExecutionCheckpoint.load(db, session.id)
+      expect(checkpoint?.model_route?.activation).toMatchObject({
+        role: "vision",
+        activeModelID: "vision-model",
+        activeInstanceID: "vision-instance",
+      })
+      expect(checkpoint?.model_route?.vision).toMatchObject({
+        status: "completed",
+        modelID: "vision-model",
+        instanceID: "vision-instance",
+        imageCount: 1,
+        requestTokens: 321,
+        failover: false,
+      })
+    }),
+  {
+    init: (dir) =>
+      Effect.gen(function* () {
+        yield* writeText(
+          path.join(dir, "resources/js/components/MedicalJournal.vue"),
+          "<template><MedicalJournalTable /></template>\n<script setup>const emptyState = 'No records'</script>",
+        )
+        yield* writeText(
+          path.join(dir, "app/Http/Controllers/MedicalJournalController.php"),
+          "<?php final class MedicalJournalController { public function index() {} }",
+        )
+      }),
+  },
 )
 
 withMcpInstructions.instance(
@@ -691,21 +722,129 @@ it.instance("loop instructs the model to match the user's language", () =>
       permission: [{ permission: "*", pattern: "*", action: "allow" }],
     })
     yield* llm.textMatch(
-      (hit) => JSON.stringify(hit.body).includes("epistemic routing classifier"),
+      (hit) => JSON.stringify(hit.body).includes("epistemic routing and durable-memory classifier"),
       "LOCAL\nConversation answer",
     )
     yield* llm.hang
     yield* user(chat.id, "Поясни, як працює цей модуль")
 
     const fiber = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.forkChild)
-    yield* awaitWithTimeout(llm.wait(2), "timed out waiting for language instruction request", "10 seconds")
+    yield* awaitWithTimeout(llm.wait(1), "timed out waiting for language instruction request", "10 seconds")
 
-    const body = JSON.stringify((yield* llm.hits).find((hit) => JSON.stringify(hit.body).includes("Always answer"))?.body)
+    const body = JSON.stringify(
+      (yield* llm.hits).find((hit) => JSON.stringify(hit.body).includes("Always answer"))?.body,
+    )
     expect(body).toContain("Always answer in the same natural language")
     expect(body).not.toContain("response-contract")
     expect(body).not.toContain("<response-language>")
     expect(body).toContain("Поясни, як працює цей модуль")
+    expect(yield* llm.serviceHits).toHaveLength(1)
     yield* Fiber.interrupt(fiber)
+  }),
+)
+
+it.instance("keeps service calls isolated and pins one model for the durable request", () =>
+  Effect.gen(function* () {
+    const { llm } = yield* useServerConfig(providerCfg)
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const db = (yield* Database.Service).db
+    const chat = yield* sessions.create({ title: "Orchestrated" })
+
+    yield* llm.textMatch(
+      (hit) => JSON.stringify(hit.body).includes("epistemic routing and durable-memory classifier"),
+      "LOCAL\nConversation answer\nNO_MEMORY",
+    )
+    yield* prompt.prompt({
+      sessionID: chat.id,
+      agent: "build",
+      noReply: true,
+      parts: [{ type: "text", text: "Поясни коротко" }],
+    })
+    yield* llm.text("Готово")
+
+    const result = yield* prompt.loop({ sessionID: chat.id })
+    const checkpoint = yield* SessionExecutionCheckpoint.load(db, chat.id)
+
+    expect(result.parts).toEqual(expect.arrayContaining([expect.objectContaining({ type: "text", text: "Готово" })]))
+    expect(yield* llm.hits).toHaveLength(1)
+    expect(yield* llm.serviceHits).toHaveLength(1)
+    expect(checkpoint).toMatchObject({
+      state: "completed",
+      phase: "complete",
+      classifier_turns: 1,
+      rag_retrievals: 0,
+      memory_retrievals: 1,
+      memory_writes: 0,
+      provider_turns: 1,
+      selected_provider_id: "test",
+      selected_model_id: "test-model",
+    })
+    expect(checkpoint?.selected_instance_id).toBeTruthy()
+    expect(checkpoint?.pipeline_state).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ phase: "prompt_admission", status: "completed" }),
+        expect.objectContaining({ phase: "classification", status: "completed" }),
+        expect.objectContaining({ phase: "repository_recall", status: "skipped" }),
+        expect.objectContaining({ phase: "memory_recall", status: "completed" }),
+        expect.objectContaining({ phase: "model_readiness", status: "completed" }),
+        expect.objectContaining({ phase: "context_compilation", status: "completed" }),
+        expect.objectContaining({ phase: "execution", status: "completed" }),
+        expect.objectContaining({ phase: "verification", status: "completed" }),
+        expect.objectContaining({ phase: "memory_admission", status: "skipped" }),
+        expect.objectContaining({ phase: "completion", status: "completed" }),
+      ]),
+    )
+  }),
+)
+
+it.instance("keeps orchestration budgets stable across tool continuations", () =>
+  Effect.gen(function* () {
+    const { llm } = yield* useServerConfig(providerCfg)
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const db = (yield* Database.Service).db
+    const chat = yield* sessions.create({
+      title: "Orchestrated tools",
+      permission: [{ permission: "*", pattern: "*", action: "allow" }],
+    })
+
+    yield* llm.textMatch(
+      (hit) => JSON.stringify(hit.body).includes("epistemic routing and durable-memory classifier"),
+      "LOCAL\nConversation answer\nNO_MEMORY",
+    )
+    yield* prompt.prompt({
+      sessionID: chat.id,
+      agent: "build",
+      noReply: true,
+      parts: [{ type: "text", text: "Знайди тест durable turn" }],
+    })
+    yield* llm.tool("grep", { pattern: "durable turn", path: "test/session/prompt.test.ts" })
+    yield* llm.text("Готово")
+
+    const result = yield* prompt.loop({ sessionID: chat.id })
+    const checkpoint = yield* SessionExecutionCheckpoint.load(db, chat.id)
+    const hits = yield* llm.hits
+
+    expect(result.parts).toEqual(expect.arrayContaining([expect.objectContaining({ type: "text", text: "Готово" })]))
+    expect(hits).toHaveLength(2)
+    expect(yield* llm.serviceHits).toHaveLength(1)
+    expect(hits.map((hit) => hit.body.model)).toEqual(["test-model", "test-model"])
+    expect(checkpoint).toMatchObject({
+      state: "completed",
+      phase: "complete",
+      classifier_turns: 1,
+      rag_retrievals: 0,
+      memory_retrievals: 1,
+      memory_writes: 0,
+      provider_turns: 2,
+      tool_calls: 1,
+      selected_provider_id: "test",
+      selected_model_id: "test-model",
+    })
+    expect(checkpoint?.pipeline_state.find((item) => item.phase === "classification")?.status).toBe("completed")
+    expect(checkpoint?.pipeline_state.find((item) => item.phase === "repository_recall")?.status).toBe("skipped")
+    expect(checkpoint?.pipeline_state.find((item) => item.phase === "memory_recall")?.status).toBe("completed")
   }),
 )
 
@@ -776,6 +915,10 @@ it.instance("loop surfaces content-filter finishes as session errors", () =>
       return Effect.void
     })
 
+    yield* llm.textMatch(
+      (hit) => JSON.stringify(hit.body).includes("epistemic routing and durable-memory classifier"),
+      "LOCAL\nConversation answer\nNO_MEMORY",
+    )
     yield* prompt.prompt({
       sessionID: chat.id,
       agent: "build",
@@ -800,6 +943,52 @@ it.instance("loop surfaces content-filter finishes as session errors", () =>
     expect(result.parts).toEqual(
       expect.arrayContaining([expect.objectContaining({ type: "text", text: "partial response" })]),
     )
+  }),
+)
+
+it.instance("loop surfaces an empty length finish instead of going idle silently", () =>
+  Effect.gen(function* () {
+    const { llm } = yield* useServerConfig(providerCfg)
+    const events = yield* EventV2Bridge.Service
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const chat = yield* sessions.create({ title: "Pinned" })
+    const errors: NonNullable<SessionV1.Assistant["error"]>[] = []
+    const off = yield* events.listen((event) => {
+      if (event.type !== Session.Event.Error.type) return Effect.void
+      const data = event.data as typeof Session.Event.Error.data.Type
+      if (data.sessionID === chat.id && data.error) errors.push(data.error)
+      return Effect.void
+    })
+
+    yield* prompt.prompt({
+      sessionID: chat.id,
+      agent: "build",
+      noReply: true,
+      parts: [{ type: "text", text: "hello" }],
+    })
+    yield* llm.push(
+      reply().reason("The output budget is spent on reasoning").usage({ input: 100, output: 512 }).length(),
+    )
+
+    const result = yield* prompt.loop({ sessionID: chat.id })
+    const stored = yield* MessageV2.get({ sessionID: chat.id, messageID: result.info.id })
+    yield* off
+
+    expect(yield* llm.hits).toHaveLength(1)
+    expect(yield* llm.serviceHits).toHaveLength(1)
+    expect(result.info.role).toBe("assistant")
+    expect(stored.info.role).toBe("assistant")
+    if (result.info.role === "assistant" && stored.info.role === "assistant") {
+      expect(result.info.finish).toBe("length")
+      expect(result.info.error).toMatchObject({
+        name: "UnknownError",
+        data: { message: expect.stringContaining("exhausted its output token limit") },
+      })
+      expect(stored.info.error).toEqual(result.info.error)
+      expect(errors).toContainEqual(result.info.error!)
+    }
+    expect(result.parts.some((part) => part.type === "text" && part.text.trim().length > 0)).toBe(false)
   }),
 )
 
@@ -908,7 +1097,6 @@ it.instance("static loop returns assistant text through local provider", () =>
     expect(result.info.role).toBe("assistant")
     expect(result.parts.some((part) => part.type === "text" && part.text === "world")).toBe(true)
     expect(yield* llm.hits).toHaveLength(1)
-    expect(JSON.stringify((yield* llm.inputs)[0])).toContain("repository_context source")
     expect(yield* llm.pending).toBe(0)
   }),
 )

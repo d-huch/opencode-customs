@@ -11,6 +11,7 @@ import { StickyAccordionHeader } from "@opencode-ai/ui/sticky-accordion-header"
 import { File } from "@opencode-ai/session-ui/file"
 import { Markdown } from "@opencode-ai/session-ui/markdown"
 import { ScrollView } from "@opencode-ai/ui/scroll-view"
+import { useDialog } from "@opencode-ai/ui/context/dialog"
 import type { Message, Part, UserMessage } from "@opencode-ai/sdk/v2/client"
 import { useLanguage } from "@/context/language"
 import { useProviders } from "@/hooks/use-providers"
@@ -22,6 +23,7 @@ import { showToast } from "@/utils/toast"
 import { getSessionContext } from "./session-context-metrics"
 import { estimateSessionContextBreakdown, type SessionContextBreakdownKey } from "./session-context-breakdown"
 import { createSessionContextFormatter } from "./session-context-format"
+import { DialogTurnInspector } from "@/components/dialog-turn-inspector"
 
 const BREAKDOWN_COLOR: Record<SessionContextBreakdownKey, string> = {
   system: "var(--syntax-info)",
@@ -101,6 +103,7 @@ export function SessionContextTab() {
   const sdk = useSDK()
   const platform = usePlatform()
   const server = useServer()
+  const dialog = useDialog()
   const providers = useProviders(() => sdk().directory)
   const { params, view } = useSessionLayout()
   const canRevealSessionLog = createMemo(
@@ -115,6 +118,11 @@ export function SessionContextTab() {
     },
   )
   const [openingSessionLog, setOpeningSessionLog] = createSignal(false)
+  const openTurnInspector = () => {
+    const sessionID = params.id
+    if (!sessionID) return
+    void dialog.push(() => <DialogTurnInspector sessionID={sessionID} />)
+  }
 
   const revealSessionLog = async () => {
     if (!platform.revealPath || openingSessionLog()) return
@@ -333,19 +341,25 @@ export function SessionContextTab() {
           </For>
         </div>
 
-        <Show when={canRevealSessionLog()}>
-          <div class="flex flex-col gap-2 min-w-0">
-            <Button
-              type="button"
-              variant="secondary"
-              size="normal"
-              icon="open-file"
-              class="self-start"
-              disabled={openingSessionLog() || sessionLog.loading}
-              onClick={() => void revealSessionLog()}
-            >
-              {language.t("context.sessionLog.open")}
+        <div class="flex flex-col gap-2 min-w-0">
+          <div class="flex flex-wrap gap-2">
+            <Button type="button" variant="secondary" size="normal" onClick={openTurnInspector}>
+              {language.t("turnInspector.open")}
             </Button>
+            <Show when={canRevealSessionLog()}>
+              <Button
+                type="button"
+                variant="secondary"
+                size="normal"
+                icon="open-file"
+                disabled={openingSessionLog() || sessionLog.loading}
+                onClick={() => void revealSessionLog()}
+              >
+                {language.t("context.sessionLog.open")}
+              </Button>
+            </Show>
+          </div>
+          <Show when={canRevealSessionLog()}>
             <Show when={sessionLog()?.path}>
               {(value) => (
                 <div class="text-11-regular text-text-weaker truncate select-text" title={value()}>
@@ -353,8 +367,8 @@ export function SessionContextTab() {
                 </div>
               )}
             </Show>
-          </div>
-        </Show>
+          </Show>
+        </div>
 
         <Show when={breakdown().length > 0}>
           <div class="flex flex-col gap-2">

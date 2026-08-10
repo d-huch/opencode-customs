@@ -15,6 +15,9 @@ import type { SystemContext } from "../system-context/index"
 import { AgentV2 } from "../agent"
 import type { Revert } from "@opencode-ai/schema/revert"
 import type { ModelCapabilityRouter } from "../model-capability-router"
+import type { ChangeRisk } from "../change-risk"
+import type { VerificationMatrix } from "../verification-matrix"
+import type { CriticPass } from "../critic-pass"
 
 type SessionMessageData = Omit<(typeof SessionMessage.Message)["Encoded"], "type" | "id">
 type V1MessageData = Omit<SessionV1.Info, "id" | "sessionID">
@@ -194,19 +197,63 @@ export const SessionExecutionCheckpointTable = sqliteTable(
         | "verifying"
         | "repairing"
         | "verified"
+        | "reviewing"
+        | "reviewed"
         | "continuing"
         | "completed"
         | "interrupted"
         | "failed"
       >()
       .notNull(),
+    phase: text()
+      .$type<"classify" | "recall" | "execute" | "verify" | "critic" | "complete" | "failed">()
+      .notNull()
+      .default("classify"),
     step: integer().notNull(),
+    request_message_id: text(),
     evidence_attempts: integer().notNull().default(0),
+    classifier_turns: integer().notNull().default(0),
+    rag_retrievals: integer().notNull().default(0),
+    memory_retrievals: integer().notNull().default(0),
+    memory_writes: integer().notNull().default(0),
+    verification_turns: integer().notNull().default(0),
+    critic_turns: integer().notNull().default(0),
     provider_turns: integer().notNull().default(0),
     tool_calls: integer().notNull().default(0),
     compactions: integer().notNull().default(0),
     assistant_message_id: text().$type<SessionMessage.ID>(),
     model_route: text({ mode: "json" }).$type<ModelCapabilityRouter.Plan>(),
+    risk_assessment: text({ mode: "json" }).$type<ChangeRisk.Assessment>(),
+    verification_plan: text({ mode: "json" }).$type<VerificationMatrix.Plan>(),
+    critic_pass: text({ mode: "json" }).$type<CriticPass.Review>(),
+    selected_provider_id: text(),
+    selected_model_id: text(),
+    selected_instance_id: text(),
+    repository_context: text(),
+    memory_context: text({ mode: "json" }).$type<readonly string[]>(),
+    pipeline_state: text({ mode: "json" })
+      .$type<
+        ReadonlyArray<{
+          readonly phase:
+            | "prompt_admission"
+            | "classification"
+            | "repository_recall"
+            | "memory_recall"
+            | "model_readiness"
+            | "context_compilation"
+            | "execution"
+            | "verification"
+            | "critic_review"
+            | "memory_admission"
+            | "completion"
+          readonly status: "pending" | "running" | "completed" | "skipped" | "timed_out" | "cancelled" | "failed"
+          readonly startedAt?: number
+          readonly completedAt?: number
+          readonly detail?: string
+        }>
+      >()
+      .notNull()
+      .default([]),
     owner_pid: integer().notNull(),
     recoveries: integer().notNull().default(0),
     error: text(),

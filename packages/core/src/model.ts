@@ -8,6 +8,8 @@ export type ID = typeof ID.Type
 export const VariantID = Model.VariantID
 export type VariantID = typeof VariantID.Type
 
+export const MIN_CONTEXT_LIMIT = 8_192
+
 // Grouping of models, eg claude opus, claude sonnet
 export const Family = Model.Family
 export type Family = Model.Family

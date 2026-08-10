@@ -4,9 +4,7 @@ import { Image } from "@/image/image"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { Cause, Deferred, Effect, Exit, Layer, Context, Scope, Schema } from "effect"
 import * as Stream from "effect/Stream"
-import { Agent } from "@/agent/agent"
 import { Config } from "@/config/config"
-import { Permission } from "@/permission"
 import { Plugin } from "@/plugin"
 import { Snapshot } from "@/snapshot"
 import { Session } from "./session"
@@ -32,12 +30,14 @@ import { SessionVerification } from "./verification"
 import { ResponseRepetition } from "@opencode-ai/core/response-repetition"
 import { SessionLog } from "@/local-agent-runtime/session-log"
 import { SessionExecutionBudget } from "./execution-budget"
+import { SessionMutation } from "./mutation"
 
 const DOOM_LOOP_THRESHOLD = 3
 export type Result = "compact" | "stop" | "continue"
 
 export interface Handle {
   readonly message: SessionV1.Assistant
+  readonly checkpoint?: SessionExecutionCheckpoint.Token
   readonly updateToolCall: (
     toolCallID: string,
     update: (part: SessionV1.ToolPart) => SessionV1.ToolPart,
@@ -84,6 +84,8 @@ interface ProcessorContext extends Input {
   reasoningMap: Record<string, SessionV1.ReasoningPart>
   budgetedToolCalls: Set<string>
   stepToolCalls: number
+  mutatedFiles: Set<string>
+  firstOutput: boolean
 }
 
 type StreamEvent = LLMEvent
@@ -96,9 +98,7 @@ const layer = Layer.effect(
     const session = yield* Session.Service
     const config = yield* Config.Service
     const snapshot = yield* Snapshot.Service
-    const agents = yield* Agent.Service
     const llm = yield* LLM.Service
-    const permission = yield* Permission.Service
     const plugin = yield* Plugin.Service
     const summary = yield* SessionSummary.Service
     const scope = yield* Scope.Scope
@@ -125,6 +125,8 @@ const layer = Layer.effect(
         reasoningMap: {},
         budgetedToolCalls: new Set(),
         stepToolCalls: 0,
+        mutatedFiles: new Set(),
+        firstOutput: false,
       }
       let aborted = false
 
@@ -238,6 +240,13 @@ const layer = Layer.effect(
             attachments: output.attachments,
           },
         })
+        for (const file of SessionMutation.toolFiles({
+          tool: match.part.tool,
+          metadata: output.metadata,
+          root: ctx.assistantMessage.path.root,
+        })) {
+          ctx.mutatedFiles.add(file)
+        }
         if (match.part.tool === SessionVerification.TOOL_ID && output.metadata.verification === true) {
           const passed = output.metadata.passed === true
           if (input.checkpoint)
@@ -374,6 +383,23 @@ const layer = Layer.effect(
       }
 
       const handleEvent = Effect.fnUntraced(function* (value: StreamEvent) {
+        if (
+          !ctx.firstOutput &&
+          ["reasoning-start", "reasoning-delta", "text-start", "text-delta", "tool-input-start", "tool-call"].includes(
+            value.type,
+          )
+        ) {
+          ctx.firstOutput = true
+          yield* Effect.sync(() => {
+            void SessionLog.write({
+              sessionID: input.sessionID,
+              type: "model.first_output",
+              messageID: input.assistantMessage.id,
+              executionID: input.checkpoint?.executionID,
+              data: { step: input.step, outputType: value.type },
+            })
+          })
+        }
         switch (value.type) {
           case "reasoning-start":
             if (value.id in ctx.reasoningMap) return
@@ -474,16 +500,17 @@ const layer = Layer.effect(
             }
 
             if (!ResponseRepetition.repeatedToolCall(history, { tool: value.name, input }, DOOM_LOOP_THRESHOLD)) return
-
-            const agent = yield* agents.get(ctx.assistantMessage.agent)
-            yield* permission.ask({
-              permission: "doom_loop",
-              patterns: [value.name],
-              sessionID: ctx.assistantMessage.sessionID,
-              metadata: { tool: value.name, input },
-              always: [value.name],
-              ruleset: agent.permission,
-            })
+            const error = new Error(`Stopped repeated tool call '${value.name}' after ${DOOM_LOOP_THRESHOLD} attempts`)
+            yield* Effect.promise(() =>
+              SessionLog.write({
+                sessionID: ctx.sessionID,
+                type: "tool.blocked",
+                messageID: ctx.assistantMessage.id,
+                data: { callID: value.id, tool: value.name, reason: error.message },
+              }),
+            )
+            yield* failToolCall(value.id, error)
+            ctx.blocked = true
             return
           }
 
@@ -596,24 +623,27 @@ const layer = Layer.effect(
             yield* session.updateMessage(ctx.assistantMessage)
             if (ctx.snapshot) {
               const patch = yield* snapshot.patch(ctx.snapshot)
-              if (patch.files.length) {
+              const files = SessionMutation.filter(ctx.assistantMessage.path.root, patch.files, ctx.mutatedFiles)
+              if (files.length) {
                 yield* session.updatePart({
                   id: PartID.ascending(),
                   messageID: ctx.assistantMessage.id,
                   sessionID: ctx.sessionID,
                   type: "patch",
                   hash: patch.hash,
-                  files: patch.files,
+                  files,
                 })
               }
               ctx.snapshot = undefined
             }
-            yield* summary
-              .summarize({
-                sessionID: ctx.sessionID,
-                messageID: ctx.assistantMessage.parentID,
-              })
-              .pipe(Effect.ignore, Effect.forkIn(scope))
+            if (ctx.mutatedFiles.size)
+              yield* summary
+                .summarize({
+                  sessionID: ctx.sessionID,
+                  messageID: ctx.assistantMessage.parentID,
+                })
+                .pipe(Effect.ignore, Effect.forkIn(scope))
+            ctx.mutatedFiles.clear()
             if (
               !ctx.assistantMessage.summary &&
               isOverflow({ cfg: yield* config.get(), tokens: usage.tokens, model: ctx.model })
@@ -680,18 +710,20 @@ const layer = Layer.effect(
       const cleanup = Effect.fn("SessionProcessor.cleanup")(function* () {
         if (ctx.snapshot) {
           const patch = yield* snapshot.patch(ctx.snapshot)
-          if (patch.files.length) {
+          const files = SessionMutation.filter(ctx.assistantMessage.path.root, patch.files, ctx.mutatedFiles)
+          if (files.length) {
             yield* session.updatePart({
               id: PartID.ascending(),
               messageID: ctx.assistantMessage.id,
               sessionID: ctx.sessionID,
               type: "patch",
               hash: patch.hash,
-              files: patch.files,
+              files,
             })
           }
           ctx.snapshot = undefined
         }
+        ctx.mutatedFiles.clear()
 
         if (ctx.currentText) {
           const end = Date.now()
@@ -801,6 +833,7 @@ const layer = Layer.effect(
       })
 
       const process = Effect.fn("SessionProcessor.process")(function* (streamInput: LLM.StreamInput) {
+        ctx.firstOutput = false
         yield* Effect.promise(() =>
           SessionLog.write({
             sessionID: input.sessionID,
@@ -894,6 +927,7 @@ const layer = Layer.effect(
         get message() {
           return ctx.assistantMessage
         },
+        checkpoint: input.checkpoint,
         updateToolCall,
         completeToolCall,
         beginToolCall,
@@ -912,9 +946,7 @@ export const node = LayerNode.make({
     Session.node,
     Config.node,
     Snapshot.node,
-    Agent.node,
     LLM.node,
-    Permission.node,
     Plugin.node,
     SessionSummary.node,
     SessionStatus.node,

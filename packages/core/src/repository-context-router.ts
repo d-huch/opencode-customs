@@ -9,6 +9,7 @@ import { Location } from "./location"
 import { RepositoryMap } from "./repository-map"
 import { RepositoryMemory } from "./repository-memory"
 import { RepositoryEmbeddings } from "./repository-embeddings"
+import { RepositoryRetrievalFeedback } from "./repository-retrieval-feedback"
 import { RepositorySemantic } from "./repository-semantic"
 import { Ripgrep } from "./ripgrep"
 
@@ -32,6 +33,7 @@ const MAX_CONTEXT_BUDGET = 1_600
 const SEMANTIC_LOOKUP_TIMEOUT = "1 second"
 const CONCEPT_SEARCH_TIMEOUT = "1500 millis"
 const EMBEDDING_LOOKUP_TIMEOUT = "3 seconds"
+const EXACT_SEARCH_TIMEOUT = "1 second"
 
 export const searchScopeInstruction =
   "Treat the user's current project and workspace as the default scope for requests to find, locate, trace, or inspect code. Use repository tools and supplied repository context first. Never use web search or webfetch as a substitute for searching the local project. Use external network tools only when the user explicitly requests external or current web information, or supplies an external URL."
@@ -160,6 +162,9 @@ export type Selection = {
   readonly slice: ReadonlyArray<Slice>
   readonly snippets: ReadonlyArray<Snippet>
   readonly memory: ReadonlyArray<string>
+  readonly evidence: ReadonlyArray<RepositoryRetrievalFeedback.File>
+  readonly confidence: number
+  readonly retrievalID?: string
 }
 
 export type TraceInput = {
@@ -174,6 +179,11 @@ export interface Interface {
   readonly configureDiagnostics: (input: RepositoryMap.DiagnosticsConfig) => Effect.Effect<RepositoryMap.Diagnostics>
   readonly trace: (input: TraceInput) => Effect.Effect<void>
   readonly remember: (summary: string) => Effect.Effect<void>
+  readonly recallMemory: (
+    query: string,
+    input?: { readonly sessionID?: string },
+  ) => Effect.Effect<RepositoryMemory.Recall>
+  readonly rememberConversation: (input: string | RepositoryMemory.ConversationInput) => Effect.Effect<void>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/v2/RepositoryContextRouter") {}
@@ -184,6 +194,7 @@ const layer = Layer.effect(
     const map = yield* RepositoryMap.Service
     const memory = yield* RepositoryMemory.Service
     const embeddings = yield* RepositoryEmbeddings.Service
+    const feedback = yield* RepositoryRetrievalFeedback.Service
     const location = yield* Location.Service
     const ripgrep = yield* Ripgrep.Service
     const fs = yield* FSUtil.Service
@@ -446,6 +457,14 @@ const layer = Layer.effect(
         hits: mergeConceptHits([...seedHits, ...walked.hits]),
       } satisfies ConceptSearch
     })
+    const discoverExact = Effect.fn("RepositoryContextRouter.discoverExact")(function* (identifier: string) {
+      return yield* ripgrep.grep({
+        cwd: location.directory,
+        pattern: `\\b${escapeRegExp(identifier)}\\b`,
+        exclude: conceptExcludes,
+        limit: 80,
+      })
+    })
     const complete = Effect.fn("RepositoryContextRouter.complete")(function* (
       input: Input,
       selected: Selection | undefined,
@@ -453,6 +472,7 @@ const layer = Layer.effect(
       conceptSearch: ConceptSearch | undefined,
       recalled: RepositoryMemory.Recall,
       embedded: RepositoryEmbeddings.Search,
+      exact: ReadonlyArray<Match> = [],
     ) {
       if (!selected) return
       const contents = new Map(
@@ -477,7 +497,10 @@ const layer = Layer.effect(
           files: selected.files,
           symbols: selected.symbols,
           hits: conceptSearch?.hits ?? [],
-          anchors: embedded.matches,
+          anchors: [
+            ...exact.map((match) => ({ path: String(match.entry.path), start: match.line })),
+            ...embedded.matches,
+          ],
           contents,
         }),
         memory: recalled.notes,
@@ -498,45 +521,31 @@ const layer = Layer.effect(
         })
         .pipe(Effect.forkIn(scope))
       yield* embeddings.index(result.files).pipe(Effect.forkIn(scope))
-      return result
+      const retrieval = yield* feedback
+        .record({ query: input.query, files: result.evidence })
+        .pipe(Effect.catch(() => Effect.succeed(undefined)))
+      return { ...result, retrievalID: retrieval?.id }
     })
     return Service.of({
       route: Effect.fn("RepositoryContextRouter.route")(function* (input) {
         yield* trace({ level: "info", stage: "prompt", message: `Received: ${diagnosticQuery(input.query)}` })
-        const info = yield* map.load()
+        const [info, recalled, feedbackHint] = yield* Effect.all(
+          [map.load(), memory.recall(input.query), feedback.recall(input.query)],
+          { concurrency: 3 },
+        )
         yield* trace({
           level: info.status === "unavailable" ? "warning" : "info",
           stage: "map",
           message: `${info.status}; ${info.files} files, ${info.symbols.length} symbols, ${info.edges.length} links`,
         })
-        const recalled = yield* memory.recall(input.query)
         const query = semanticQuery(input.query, info)
         const seeds = conceptSeeds(input.query)
         if (!query && !isConceptRoute(seeds) && !input.files?.length) {
           yield* trace({ level: "info", stage: "context", message: "No repository-specific signal detected" })
           return
         }
-        const staticSelection = select(info, input, [], undefined, recalled.files)
+        const staticSelection = select(info, input, [], undefined, recalled.files, [], feedbackHint)
         const emptyEmbedding: RepositoryEmbeddings.Search = { matches: [], indexedFiles: 0, indexedChunks: 0 }
-        const embedded =
-          query || staticSelection?.grounded
-            ? yield* embeddings.search(input.query).pipe(
-                Effect.timeout(EMBEDDING_LOOKUP_TIMEOUT),
-                Effect.catchCause((cause) =>
-                  Effect.logWarning("repository embedding lookup unavailable", {
-                    directory: location.directory,
-                    cause: Cause.pretty(cause),
-                  }).pipe(Effect.as(emptyEmbedding)),
-                ),
-              )
-            : emptyEmbedding
-        if (embedded.model || embedded.indexedChunks) {
-          yield* trace({
-            level: embedded.matches.length ? "info" : "warning",
-            stage: "embedding",
-            message: `${embedded.matches.length} matches from ${embedded.indexedChunks} chunks across ${embedded.indexedFiles} files${embedded.model ? `; ${embedded.model}` : ""}`,
-          })
-        }
         if (!query && isConceptRoute(seeds)) {
           yield* trace({
             level: "info",
@@ -544,15 +553,29 @@ const layer = Layer.effect(
             message: `Query concepts: ${seeds.join(", ")}`,
           })
           const started = Date.now()
-          const conceptSearch = yield* discoverConcepts(input.query).pipe(
-            Effect.timeout(CONCEPT_SEARCH_TIMEOUT),
-            Effect.catchCause((cause) =>
-              trace({
-                level: "error",
-                stage: "concept",
-                message: `Search failed after ${Date.now() - started}ms: ${Cause.pretty(cause).split("\n")[0] || "Unknown error"}`,
-              }).pipe(Effect.as({ concepts: [], hits: [] } satisfies ConceptSearch)),
-            ),
+          const [conceptSearch, conceptEmbedded] = yield* Effect.all(
+            [
+              discoverConcepts(input.query).pipe(
+                Effect.timeout(CONCEPT_SEARCH_TIMEOUT),
+                Effect.catchCause((cause) =>
+                  trace({
+                    level: "error",
+                    stage: "concept",
+                    message: `Search failed after ${Date.now() - started}ms: ${Cause.pretty(cause).split("\n")[0] || "Unknown error"}`,
+                  }).pipe(Effect.as({ concepts: [], hits: [] } satisfies ConceptSearch)),
+                ),
+              ),
+              embeddings.search(input.query).pipe(
+                Effect.timeout(EMBEDDING_LOOKUP_TIMEOUT),
+                Effect.catchCause((cause) =>
+                  Effect.logWarning("repository embedding lookup unavailable", {
+                    directory: location.directory,
+                    cause: Cause.pretty(cause),
+                  }).pipe(Effect.as(emptyEmbedding)),
+                ),
+              ),
+            ],
+            { concurrency: 2 },
           )
           yield* trace({
             level: conceptSearch.concepts.length ? "info" : "warning",
@@ -584,17 +607,6 @@ const layer = Layer.effect(
               })
               .join("; ")}`,
           })
-          const conceptEmbedded = conceptSearch.hits.length
-            ? yield* embeddings.search(input.query).pipe(
-                Effect.timeout(EMBEDDING_LOOKUP_TIMEOUT),
-                Effect.catchCause((cause) =>
-                  Effect.logWarning("repository embedding lookup unavailable", {
-                    directory: location.directory,
-                    cause: Cause.pretty(cause),
-                  }).pipe(Effect.as(emptyEmbedding)),
-                ),
-              )
-            : emptyEmbedding
           if (conceptEmbedded.model || conceptEmbedded.indexedChunks) {
             yield* trace({
               level: conceptEmbedded.matches.length ? "info" : "warning",
@@ -602,7 +614,15 @@ const layer = Layer.effect(
               message: `${conceptEmbedded.matches.length} matches from ${conceptEmbedded.indexedChunks} chunks across ${conceptEmbedded.indexedFiles} files${conceptEmbedded.model ? `; ${conceptEmbedded.model}` : ""}`,
             })
           }
-          const selected = select(info, input, [], conceptSearch, recalled.files, conceptEmbedded.matches)
+          const selected = select(
+            info,
+            input,
+            [],
+            conceptSearch,
+            recalled.files,
+            conceptEmbedded.matches,
+            feedbackHint,
+          )
           yield* trace({
             level: selected ? "info" : "warning",
             stage: "context",
@@ -610,14 +630,56 @@ const layer = Layer.effect(
           })
           return yield* complete(input, selected, [], conceptSearch, recalled, conceptEmbedded)
         }
-        const initial = select(info, input, [], undefined, recalled.files, embedded.matches)
+        const [embedded, exact] = yield* Effect.all(
+          [
+            query || staticSelection?.grounded
+              ? embeddings.search(input.query).pipe(
+                  Effect.timeout(EMBEDDING_LOOKUP_TIMEOUT),
+                  Effect.catchCause((cause) =>
+                    Effect.logWarning("repository embedding lookup unavailable", {
+                      directory: location.directory,
+                      cause: Cause.pretty(cause),
+                    }).pipe(Effect.as(emptyEmbedding)),
+                  ),
+                )
+              : Effect.succeed(emptyEmbedding),
+            query
+              ? discoverExact(query).pipe(
+                  Effect.timeout(EXACT_SEARCH_TIMEOUT),
+                  Effect.catchCause((cause) =>
+                    trace({
+                      level: "warning",
+                      stage: "exact",
+                      message: `Literal identifier search failed: ${Cause.pretty(cause).split("\n")[0] || "Unknown error"}`,
+                    }).pipe(Effect.as([] as ReadonlyArray<Match>)),
+                  ),
+                )
+              : Effect.succeed([] as ReadonlyArray<Match>),
+          ],
+          { concurrency: 2 },
+        )
+        if (embedded.model || embedded.indexedChunks) {
+          yield* trace({
+            level: embedded.matches.length ? "info" : "warning",
+            stage: "embedding",
+            message: `${embedded.matches.length} matches from ${embedded.indexedChunks} chunks across ${embedded.indexedFiles} files${embedded.model ? `; ${embedded.model}` : ""}`,
+          })
+        }
+        if (query) {
+          yield* trace({
+            level: exact.length ? "info" : "warning",
+            stage: "exact",
+            message: `${exact.length} literal matches for ${query} across ${new Set(exact.map((match) => String(match.entry.path))).size} files`,
+          })
+        }
+        const initial = select(info, input, [], undefined, recalled.files, embedded.matches, feedbackHint, exact)
         if (!query) {
           yield* trace({
             level: "info",
             stage: "context",
             message: `Static context ready: ${initial?.files.length ?? 0} files; no exact identifier detected`,
           })
-          return yield* complete(input, initial, [], undefined, recalled, embedded)
+          return yield* complete(input, initial, [], undefined, recalled, embedded, exact)
         }
         if (!RepositorySemantic.available()) {
           yield* trace({
@@ -625,7 +687,7 @@ const layer = Layer.effect(
             stage: "context",
             message: `Static context ready: ${initial?.files.length ?? 0} files; LSP provider unavailable`,
           })
-          return yield* complete(input, initial, [], undefined, recalled, embedded)
+          return yield* complete(input, initial, [], undefined, recalled, embedded, exact)
         }
         const cached = lookups.get(query)
         const started = Date.now()
@@ -673,7 +735,7 @@ const layer = Layer.effect(
             stage: "context",
             message: `LSP unavailable; static fallback ready with ${initial?.files.length ?? 0} files`,
           })
-          return yield* complete(input, initial, [], undefined, recalled, embedded)
+          return yield* complete(input, initial, [], undefined, recalled, embedded, exact)
         }
         yield* Effect.logInfo("repository context semantic lookup completed", {
           directory: location.directory,
@@ -687,18 +749,20 @@ const layer = Layer.effect(
           stage: "lsp",
           message: `Lookup completed in ${Date.now() - started}ms: ${lookup.symbols.length} symbols, ${lookup.edges.length} links; ${lookup.servers.join(", ") || "no server"}`,
         })
-        const selected = select(info, input, [lookup], undefined, recalled.files, embedded.matches)
+        const selected = select(info, input, [lookup], undefined, recalled.files, embedded.matches, feedbackHint, exact)
         yield* trace({
           level: "info",
           stage: "context",
           message: `Semantic context ready: ${selected?.files.length ?? 0} files`,
         })
-        return yield* complete(input, selected, [lookup], undefined, recalled, embedded)
+        return yield* complete(input, selected, [lookup], undefined, recalled, embedded, exact)
       }),
       diagnostics,
       configureDiagnostics,
       trace,
       remember: memory.rememberSummary,
+      recallMemory: memory.recall,
+      rememberConversation: memory.rememberConversation,
     })
   }),
 )
@@ -710,6 +774,7 @@ export const node = makeLocationNode({
     RepositoryMap.node,
     RepositoryMemory.node,
     RepositoryEmbeddings.node,
+    RepositoryRetrievalFeedback.node,
     Location.node,
     Ripgrep.node,
     FSUtil.node,
@@ -723,6 +788,8 @@ export function select(
   conceptSearch?: ConceptSearch,
   recalled: ReadonlyArray<string> = [],
   embedded: ReadonlyArray<RepositoryEmbeddings.Match> = [],
+  feedback: RepositoryRetrievalFeedback.Hint = { positive: [], negative: [] },
+  exact: ReadonlyArray<Match> = [],
 ): Selection | undefined {
   if (info.status === "unavailable" || info.files === 0) return undefined
   const concepts = conceptSearch?.concepts ?? []
@@ -744,7 +811,16 @@ export function select(
     ).values(),
   )
   const scores = new Map<string, number>()
-  const add = (file: string, score: number) => scores.set(file, (scores.get(file) ?? 0) + score)
+  const reasons = new Map<string, RepositoryRetrievalFeedback.Reason[]>()
+  const add = (
+    file: string,
+    score: number,
+    stage: RepositoryRetrievalFeedback.Stage = "lexical",
+    detail = "Query terms match repository metadata",
+  ) => {
+    scores.set(file, (scores.get(file) ?? 0) + score)
+    reasons.set(file, [...(reasons.get(file) ?? []), { stage, detail, weight: score }])
+  }
   const candidates = new Set([
     ...allSymbols.map((symbol) => symbol.path),
     ...info.landmarks.map((landmark) => landmark.path),
@@ -752,47 +828,88 @@ export function select(
     ...info.modules.flatMap((module) => module.entrypoints),
     ...(conceptSearch?.hits.map((hit) => hit.path) ?? []),
     ...embedded.map((match) => match.path),
+    ...exact.map((match) => String(match.entry.path)),
   ])
   input.files?.map(normalizeAttachment).forEach((file) => {
     const match = Array.from(candidates).find((candidate) => file === candidate || file.endsWith(`/${candidate}`))
-    if (match) add(match, 100)
+    if (match) add(match, 100, "attachment", "File was attached explicitly by the user")
   })
   recalled.forEach((file, index) => {
-    if (candidates.has(file)) add(file, Math.max(8, 24 - index * 2))
+    if (candidates.has(file))
+      add(file, Math.max(8, 24 - index * 2), "memory", "Previously useful for a similar repository query")
   })
-  embedded.forEach((match, index) => add(match.path, Math.max(20, 44 - index * 3 + Math.round(match.score * 12))))
+  embedded.forEach((match, index) =>
+    add(
+      match.path,
+      Math.max(20, 44 - index * 3 + Math.round(match.score * 12)),
+      "embedding",
+      `Embedding similarity ${match.score.toFixed(3)} at ${match.path}:${match.start}-${match.end}`,
+    ),
+  )
+  exact.forEach((match, index) =>
+    add(
+      String(match.entry.path),
+      Math.max(52, 96 - index * 2),
+      "exact",
+      `Literal identifier occurrence at ${match.entry.path}:${match.line}`,
+    ),
+  )
+  feedback.positive.forEach((file) => add(file, 32, "memory", "Marked as used for a similar retrieval"))
+  feedback.negative.forEach((file) => add(file, -80, "memory", "Marked as irrelevant for a similar retrieval"))
 
   const hitsByFile = new Map<string, ConceptHit[]>()
   conceptSearch?.hits.forEach((hit) => hitsByFile.set(hit.path, [...(hitsByFile.get(hit.path) ?? []), hit]))
   const evidenceFiles = conceptSearch ? evidenceSeeds(info, hitsByFile, 3) : []
   hitsByFile.forEach((hits, file) => {
     const matched = new Set(hits.flatMap((hit) => hit.concepts))
-    add(file, conceptHitScore(hits))
-    if (matched.size > 1) add(file, matched.size * 5)
+    add(
+      file,
+      conceptHitScore(hits),
+      "concept",
+      `Grounded ${matched.size} project concept${matched.size === 1 ? "" : "s"} from ${hits.length} lexical match${hits.length === 1 ? "" : "es"}`,
+    )
+    if (matched.size > 1)
+      add(file, matched.size * 5, "concept", "Connects multiple concepts from the user request")
   })
-  evidenceFiles.forEach((file, index) => add(file, 80 - index * 5))
+  evidenceFiles.forEach((file, index) =>
+    add(file, 80 - index * 5, "analogy", "Existing implementation grounded by literal project vocabulary"),
+  )
 
   allSymbols.forEach((symbol) => {
     const name = searchable(symbol.name)
     const path = searchable(symbol.path)
     const confidence = symbol.source === "lsp" ? 4 : 0
     tokens.forEach((token) => {
-      if (name === token) add(symbol.path, 24 + confidence)
-      if (name.includes(token)) add(symbol.path, 12 + confidence)
-      if (path.includes(token)) add(symbol.path, 4)
+      if (name === token)
+        add(
+          symbol.path,
+          24 + confidence,
+          symbol.source === "lsp" ? "lsp" : "exact",
+          `Exact ${symbol.source.toUpperCase()} symbol match: ${symbol.name}`,
+        )
+      if (name.includes(token))
+        add(
+          symbol.path,
+          12 + confidence,
+          symbol.source === "lsp" ? "lsp" : "lexical",
+          `Partial symbol match: ${symbol.name}`,
+        )
+      if (path.includes(token)) add(symbol.path, 4, "lexical", `Path contains query term: ${token}`)
     })
   })
   info.landmarks.forEach((landmark) => {
     const value = searchable(`${landmark.kind} ${landmark.path}`)
     tokens.forEach((token) => {
-      if (value.includes(token)) add(landmark.path, 6)
+      if (value.includes(token)) add(landmark.path, 6, "lexical", `Repository landmark matches: ${landmark.kind}`)
     })
   })
   info.modules.forEach((module) => {
     const value = searchable(`${module.name ?? ""} ${module.path}`)
     const score = tokens.reduce((total, token) => total + (value.includes(token) ? 3 : 0), 0)
     if (!score) return
-    module.entrypoints.forEach((file) => add(file, score + 2))
+    module.entrypoints.forEach((file) =>
+      add(file, score + 2, "lexical", `Module entrypoint matches ${module.name ?? module.path}`),
+    )
   })
 
   const seeds = Array.from(scores)
@@ -801,19 +918,23 @@ export function select(
     .slice(0, MAX_FILES)
   expandGraph(allEdges, new Set(seeds.map(([file]) => file)), add)
 
-  const grounded = scores.size > 0
+  const grounded = Array.from(scores.values()).some((score) => score > 0)
   if (!grounded) {
     if (!semanticQuery(input.query, info)) return undefined
-    info.landmarks.slice(0, MAX_FILES).forEach((landmark) => add(landmark.path, 1))
+    info.landmarks
+      .slice(0, MAX_FILES)
+      .forEach((landmark) => add(landmark.path, 1, "lexical", `Low-confidence ${landmark.kind} landmark`))
     info.modules
       .flatMap((module) => module.entrypoints)
       .slice(0, MAX_FILES)
-      .forEach((file) => add(file, 1))
+      .forEach((file) => add(file, 1, "lexical", "Low-confidence module entrypoint"))
   }
 
-  const ranked = Array.from(scores)
-    .toSorted((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
-    .map(([file]) => file)
+  const rankedCandidates = Array.from(scores)
+    .filter(([, score]) => score > 0)
+    .map(([file, score]) => ({ file, score }))
+    .toSorted((left, right) => right.score - left.score || left.file.localeCompare(right.file))
+  const ranked = diverseCandidates(rankedCandidates, info, MAX_FILES).map((item) => item.file)
   const slice = conceptSearch ? topologySlice(ranked, info) : []
   const files = Array.from(
     new Set([...evidenceFiles, ...slice.flatMap((item) => item.files.slice(0, 1)), ...ranked]),
@@ -829,7 +950,44 @@ export function select(
     .filter((file) => (hitsByFile.get(file) ?? []).some((hit) => hit.source === "literal"))
     .slice(0, 4)
   if (files.length === 0 && symbols.length === 0 && modules.length === 0) return undefined
-  const selection = { grounded, files, symbols, modules, concepts, analogues, slice, snippets: [], memory: [] }
+  const evidence = files.map((file) => {
+    const source = reasons.get(file) ?? []
+    const score = scores.get(file) ?? 0
+    const stages = new Set(source.map((reason) => reason.stage))
+    const classification: RepositoryRetrievalFeedback.Classification =
+      stages.has("exact") ||
+      stages.has("lsp") ||
+      stages.has("lexical") ||
+      stages.has("concept") ||
+      stages.has("graph") ||
+      stages.has("attachment")
+        ? "fact"
+        : stages.has("analogy")
+          ? "analogy"
+          : "assumption"
+    return {
+      path: file,
+      score,
+      confidence: confidence(score, stages),
+      classification,
+      reasons: source
+        .toSorted((left, right) => right.weight - left.weight || left.stage.localeCompare(right.stage))
+        .slice(0, 6),
+    } satisfies RepositoryRetrievalFeedback.File
+  })
+  const selection = {
+    grounded,
+    files,
+    symbols,
+    modules,
+    concepts,
+    analogues,
+    slice,
+    snippets: [],
+    memory: [],
+    evidence,
+    confidence: evidence.length ? evidence.reduce((total, item) => total + item.confidence, 0) / evidence.length : 0,
+  }
   return { ...selection, text: render(selection, lookups, conceptSearch, input.budget) }
 }
 
@@ -844,6 +1002,20 @@ function render(
     '<repository_context source="query-router">',
     "Likely relevant files for the current request:",
     ...selection.files.map((file) => `- ${file}`),
+    ...(selection.evidence.length
+      ? [
+          "",
+          `Retrieval confidence: ${(selection.confidence * 100).toFixed(1)}%`,
+          "Selection evidence (fact = observed repository evidence; assumption = semantic hint; analogy = similar existing implementation):",
+          ...selection.evidence.map(
+            (item) =>
+              `- [${item.classification}] ${item.path} — ${(item.confidence * 100).toFixed(1)}%; ${item.reasons
+                .slice(0, 3)
+                .map((reason) => `${reason.stage}: ${reason.detail}`)
+                .join("; ")}`,
+          ),
+        ]
+      : []),
     ...(selection.memory.length
       ? [
           "",
@@ -1209,7 +1381,7 @@ function conceptHitScore(hits: ReadonlyArray<ConceptHit>) {
 function expandGraph(
   edges: ReadonlyArray<RepositoryMap.FileEdge>,
   seeds: ReadonlySet<string>,
-  add: (file: string, score: number) => void,
+  add: (file: string, score: number, stage: RepositoryRetrievalFeedback.Stage, detail: string) => void,
 ) {
   const visited = new Set(seeds)
   Array.from({ length: 4 }).reduce<ReadonlySet<string>>((frontier, _, depth) => {
@@ -1221,13 +1393,58 @@ function expandGraph(
         ...(frontier.has(edge.to) ? [edge.from] : []),
       ].filter((file) => !visited.has(file))
       candidates.forEach((file) => {
-        add(file, Math.max(1, 7 - depth + confidence + Math.min(edge.references, 3)))
+        add(
+          file,
+          Math.max(1, 7 - depth + confidence + Math.min(edge.references, 3)),
+          "graph",
+          `Observed ${edge.kind} relationship ${edge.from} → ${edge.to}`,
+        )
         visited.add(file)
         next.add(file)
       })
     })
     return next
   }, seeds)
+}
+
+export function diverseCandidates(
+  candidates: ReadonlyArray<{ readonly file: string; readonly score: number }>,
+  info: RepositoryMap.Info,
+  limit: number,
+) {
+  return Array.from({ length: Math.min(limit, candidates.length) }).reduce<
+    ReadonlyArray<{ readonly file: string; readonly score: number }>
+  >((selected) => {
+    const areas = Map.groupBy(selected, (item) => repositoryArea(item.file, info))
+    const roots = Map.groupBy(selected, (item) => item.file.split("/")[0] ?? ".")
+    const next = candidates
+      .filter((candidate) => !selected.some((item) => item.file === candidate.file))
+      .map((candidate) => {
+        const area = repositoryArea(candidate.file, info)
+        const root = candidate.file.split("/")[0] ?? "."
+        return {
+          candidate,
+          adjusted:
+            candidate.score -
+            (areas.get(area)?.length ?? 0) * 14 -
+            (roots.get(root)?.length ?? 0) * 4,
+        }
+      })
+      .toSorted(
+        (left, right) =>
+          right.adjusted - left.adjusted ||
+          right.candidate.score - left.candidate.score ||
+          left.candidate.file.localeCompare(right.candidate.file),
+      )[0]?.candidate
+    return next ? [...selected, next] : selected
+  }, [])
+}
+
+function confidence(score: number, stages: ReadonlySet<RepositoryRetrievalFeedback.Stage>) {
+  const corroboration = Math.max(0, stages.size - 1) * 0.06
+  const direct = stages.has("attachment") || stages.has("exact") || stages.has("lsp") ? 0.12 : 0
+  const assumption = stages.size === 1 && (stages.has("embedding") || stages.has("memory")) ? -0.12 : 0
+  return Math.max(0.05, Math.min(0.99, 1 - Math.exp(-Math.max(0, score) / 42) + corroboration + direct + assumption))
 }
 
 function topologySlice(files: ReadonlyArray<string>, info: RepositoryMap.Info) {

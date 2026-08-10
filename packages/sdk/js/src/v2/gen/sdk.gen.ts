@@ -159,6 +159,8 @@ import type {
   ProviderRuntimeResourcesResponses,
   ProviderRuntimeRouterErrors,
   ProviderRuntimeRouterResponses,
+  ProviderRuntimeTurnErrors,
+  ProviderRuntimeTurnResponses,
   PtyConnectErrors,
   PtyConnectResponses,
   PtyConnectTokenErrors,
@@ -185,6 +187,9 @@ import type {
   QuestionV2Reply,
   RepositoryMapDiagnosticsConfig,
   RepositoryMapKnowledgeScope,
+  RepositoryMapMemoryConsolidationApply,
+  RepositoryMapMemoryLifecycleUpdate,
+  RepositoryMapRetrievalFeedback,
   SessionAbortErrors,
   SessionAbortResponses,
   SessionChildrenErrors,
@@ -205,6 +210,8 @@ import type {
   SessionGetResponses,
   SessionInitErrors,
   SessionInitResponses,
+  SessionInspectErrors,
+  SessionInspectResponses,
   SessionListErrors,
   SessionListResponses,
   SessionLogErrors,
@@ -345,20 +352,28 @@ import type {
   V2QuestionRequestListResponses,
   V2ReferenceListErrors,
   V2ReferenceListResponses,
+  V2RepositoryMapApplyMemoryConsolidationErrors,
+  V2RepositoryMapApplyMemoryConsolidationResponses,
   V2RepositoryMapClearKnowledgeErrors,
   V2RepositoryMapClearKnowledgeResponses,
   V2RepositoryMapConfigureDiagnosticsErrors,
   V2RepositoryMapConfigureDiagnosticsResponses,
   V2RepositoryMapDiagnosticsErrors,
   V2RepositoryMapDiagnosticsResponses,
+  V2RepositoryMapFeedbackRetrievalErrors,
+  V2RepositoryMapFeedbackRetrievalResponses,
   V2RepositoryMapGetErrors,
   V2RepositoryMapGetResponses,
   V2RepositoryMapKnowledgeErrors,
   V2RepositoryMapKnowledgeResponses,
+  V2RepositoryMapPreviewMemoryConsolidationErrors,
+  V2RepositoryMapPreviewMemoryConsolidationResponses,
   V2RepositoryMapRefreshErrors,
   V2RepositoryMapRefreshResponses,
   V2RepositoryMapRemoveKnowledgeErrors,
   V2RepositoryMapRemoveKnowledgeResponses,
+  V2RepositoryMapUpdateMemoryErrors,
+  V2RepositoryMapUpdateMemoryResponses,
   V2SessionActiveErrors,
   V2SessionActiveResponses,
   V2SessionCompactErrors,
@@ -3360,6 +3375,36 @@ export class Runtime extends HeyApiClient {
       ...params,
     })
   }
+
+  /**
+   * Inspect the active agent turn
+   *
+   * Report the durable request phase, pinned model, recovery generation, and isolated classifier, RAG, memory, verification, critic, provider, tool, and compaction budgets.
+   */
+  public turn<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<ProviderRuntimeTurnResponses, ProviderRuntimeTurnErrors, ThrowOnError>({
+      url: "/provider/runtime/turn",
+      ...options,
+      ...params,
+    })
+  }
 }
 
 export class Oauth extends HeyApiClient {
@@ -3801,6 +3846,38 @@ export class Session2 extends HeyApiClient {
     )
     return (options?.client ?? this.client).get<SessionLogResponses, SessionLogErrors, ThrowOnError>({
       url: "/session/{sessionID}/log",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Inspect latest session turn
+   *
+   * Retrieve a bounded diagnostic timeline for the latest user request without exposing full prompts or tool outputs.
+   */
+  public inspect<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<SessionInspectResponses, SessionInspectErrors, ThrowOnError>({
+      url: "/session/{sessionID}/inspect",
       ...options,
       ...params,
     })
@@ -7404,6 +7481,162 @@ export class RepositoryMap extends HeyApiClient {
       url: "/api/repository-map/knowledge/{scope}/{id}",
       ...options,
       ...params,
+    })
+  }
+
+  /**
+   * Update a memory lifecycle
+   *
+   * Pin, expire, or resolve a conflicted location-scoped memory item.
+   */
+  public updateMemory<ThrowOnError extends boolean = false>(
+    parameters: {
+      id: string
+      location?: {
+        directory?: string
+        workspace?: string
+      }
+      repositoryMapMemoryLifecycleUpdate: RepositoryMapMemoryLifecycleUpdate
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "id" },
+            { in: "query", key: "location" },
+            { key: "repositoryMapMemoryLifecycleUpdate", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).patch<
+      V2RepositoryMapUpdateMemoryResponses,
+      V2RepositoryMapUpdateMemoryErrors,
+      ThrowOnError
+    >({
+      url: "/api/repository-map/knowledge/memory/{id}",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Preview memory consolidation
+   *
+   * Build a deterministic, non-mutating preview for duplicate removal, conflict resolution, confidence maintenance, and archival.
+   */
+  public previewMemoryConsolidation<ThrowOnError extends boolean = false>(
+    parameters?: {
+      location?: {
+        directory?: string
+        workspace?: string
+      }
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "query", key: "location" }] }])
+    return (options?.client ?? this.client).get<
+      V2RepositoryMapPreviewMemoryConsolidationResponses,
+      V2RepositoryMapPreviewMemoryConsolidationErrors,
+      ThrowOnError
+    >({
+      url: "/api/repository-map/knowledge/memory/consolidation",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Apply memory consolidation
+   *
+   * Apply a previously reviewed consolidation preview only when its fingerprint still matches the memory store.
+   */
+  public applyMemoryConsolidation<ThrowOnError extends boolean = false>(
+    parameters: {
+      location?: {
+        directory?: string
+        workspace?: string
+      }
+      repositoryMapMemoryConsolidationApply: RepositoryMapMemoryConsolidationApply
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "location" },
+            { key: "repositoryMapMemoryConsolidationApply", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      V2RepositoryMapApplyMemoryConsolidationResponses,
+      V2RepositoryMapApplyMemoryConsolidationErrors,
+      ThrowOnError
+    >({
+      url: "/api/repository-map/knowledge/memory/consolidation",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Record repository retrieval feedback
+   *
+   * Mark a selected repository file as used, irrelevant, or unreviewed so future retrievals can learn from explicit feedback.
+   */
+  public feedbackRetrieval<ThrowOnError extends boolean = false>(
+    parameters: {
+      id: string
+      location?: {
+        directory?: string
+        workspace?: string
+      }
+      repositoryMapRetrievalFeedback: RepositoryMapRetrievalFeedback
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "id" },
+            { in: "query", key: "location" },
+            { key: "repositoryMapRetrievalFeedback", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).patch<
+      V2RepositoryMapFeedbackRetrievalResponses,
+      V2RepositoryMapFeedbackRetrievalErrors,
+      ThrowOnError
+    >({
+      url: "/api/repository-map/knowledge/retrieval/{id}",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
     })
   }
 

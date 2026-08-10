@@ -68,6 +68,10 @@ const getBase = (appId: string): Configuration => ({
   mac: {
     category: "public.app-category.developer-tools",
     icon: `resources/icons/icon.${customIcons ? "png" : "icns"}`,
+    extendInfo: {
+      NSMicrophoneUsageDescription: "OpenCode Customs uses the microphone for the voice agent.",
+      NSSpeechRecognitionUsageDescription: "OpenCode Customs uses speech recognition for the voice agent.",
+    },
     hardenedRuntime: true,
     gatekeeperAssess: false,
     entitlements: "resources/entitlements.plist",

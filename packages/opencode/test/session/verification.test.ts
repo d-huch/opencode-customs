@@ -4,6 +4,7 @@ import { ModelV2 } from "@opencode-ai/core/model"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { MessageID, PartID, SessionID } from "@/session/schema"
 import { SessionVerification } from "@/session/verification"
+import type { ChangeRisk } from "@opencode-ai/core/change-risk"
 
 const sessionID = SessionID.make("ses_verification")
 const model = { providerID: ProviderV2.ID.make("test"), modelID: ModelV2.ID.make("model") }
@@ -43,7 +44,9 @@ function assistant(input: {
   id: string
   parentID: string
   files?: string[]
+  owned?: boolean
   verification?: { passed: boolean; files: string[]; attempt: number }
+  risk?: ChangeRisk.Assessment
 }): SessionV1.WithParts {
   const messageID = MessageID.make(input.id)
   return {
@@ -63,6 +66,29 @@ function assistant(input: {
       finish: "stop",
     },
     parts: [
+      ...(input.files?.length && input.owned !== false
+        ? [
+            {
+              id: PartID.make(`prt_${input.id}_mutation`),
+              messageID,
+              sessionID,
+              type: "tool" as const,
+              tool: "apply_patch",
+              callID: `${input.id}_mutation_call`,
+              state: {
+                status: "completed" as const,
+                input: {},
+                title: "Applied patch",
+                output: "done",
+                metadata: {
+                  files: input.files.map((file) => ({ relativePath: file })),
+                  ...(input.risk ? { planner: { risk: input.risk } } : {}),
+                },
+                time: { start: 1, end: 2 },
+              },
+            },
+          ]
+        : []),
       ...(input.files?.length
         ? [
             {
@@ -124,8 +150,86 @@ describe("SessionVerification", () => {
       files: ["src/a.ts", "src/b.ts"],
       attempt: 1,
       maxAttempts: 3,
+      matrix: {
+        depth: "focused",
+        files: ["src/a.ts", "src/b.ts"],
+        categories: ["backend_logic"],
+        checks: [
+          {
+            kind: "git_diff_inspection",
+            requirement: "required",
+            files: ["src/a.ts", "src/b.ts"],
+            reasons: ["Every mutation needs a final inspection for unintended or malformed changes."],
+          },
+          {
+            kind: "unit_test",
+            requirement: "required",
+            files: ["src/a.ts", "src/b.ts"],
+            reasons: ["Executable logic needs the narrowest unit test covering the changed behavior."],
+          },
+          {
+            kind: "typecheck",
+            requirement: "conditional",
+            files: ["src/a.ts", "src/b.ts"],
+            reasons: ["Static type validation is relevant when the affected package provides it."],
+          },
+        ],
+        rationale:
+          "Selected 3 minimal check types for backend_logic artifacts at focused depth; unrelated test suites are excluded.",
+      },
     })
     if (decision.type === "verify") expect(SessionVerification.prompt(decision)).toContain("src/a.ts")
+  })
+
+  test("selects extended checks without embedding the separate critic pass", () => {
+    const risk = {
+      level: "high",
+      score: 7,
+      categories: ["permissions_auth"],
+      files: ["src/permissions/access.ts"],
+      reasons: ["Authorization artifacts are affected."],
+      policy: {
+        plan: "required",
+        maxFiles: 10,
+        verification: "extended",
+        critic: true,
+        confirmation: true,
+        autoApply: false,
+      },
+    } satisfies ChangeRisk.Assessment
+    const decision = SessionVerification.inspect({
+      messages: [
+        user("msg_01", "Change access rules"),
+        assistant({
+          id: "msg_02",
+          parentID: "msg_01",
+          files: ["src/permissions/access.ts"],
+          risk,
+        }),
+      ],
+      directory: "/project",
+      repairAttempts: 2,
+    })
+
+    expect(decision.type).toBe("verify")
+    if (decision.type !== "verify") return
+    expect(decision.risk).toEqual(risk)
+    expect(SessionVerification.prompt(decision)).not.toContain("critic pass")
+    expect(SessionVerification.prompt(decision)).toContain("Required verification depth: extended")
+    expect(SessionVerification.prompt(decision)).toContain("feature_test [required]")
+  })
+
+  test("ignores a workspace patch not produced by the current request", () => {
+    expect(
+      SessionVerification.inspect({
+        messages: [
+          user("msg_01", "Explain this project"),
+          assistant({ id: "msg_02", parentID: "msg_01", files: ["src/external.ts"], owned: false }),
+        ],
+        directory: "/project",
+        repairAttempts: 2,
+      }),
+    ).toEqual({ type: "none" })
   })
 
   test("keeps verification active after only a trusted continuation remains projected", () => {
@@ -139,7 +243,7 @@ describe("SessionVerification", () => {
         directory: "/project",
         repairAttempts: 2,
       }),
-    ).toEqual({ type: "verify", files: ["src/a.ts"], attempt: 2, maxAttempts: 3 })
+    ).toMatchObject({ type: "verify", files: ["src/a.ts"], attempt: 2, maxAttempts: 3 })
   })
 
   test("accepts passed evidence that covers the current change", () => {

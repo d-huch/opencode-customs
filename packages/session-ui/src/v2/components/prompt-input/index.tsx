@@ -39,6 +39,7 @@ export type PromptInputV2Props = {
   class?: string
   modelControl?: JSX.Element
   contextControl?: JSX.Element
+  actionControl?: JSX.Element
 }
 
 export function PromptInputV2(props: PromptInputV2Props) {
@@ -235,6 +236,7 @@ export function PromptInputV2(props: PromptInputV2Props) {
             </Show>
             {props.contextControl}
           </div>
+          {props.actionControl}
           <PromptInputV2SubmitButton
             mode={state.mode}
             stopping={view.submit.stopping()}

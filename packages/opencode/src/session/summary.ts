@@ -6,6 +6,7 @@ import { Snapshot } from "@/snapshot"
 import { Session } from "./session"
 import { SessionID, MessageID } from "./schema"
 import { Config } from "@/config/config"
+import { SessionMutation } from "./mutation"
 
 function unquoteGitPath(input: string) {
   if (!input.startsWith('"')) return input
@@ -82,7 +83,13 @@ const layer = Layer.effect(
     const computeDiff = Effect.fn("SessionSummary.computeDiff")(function* (input: { messages: SessionV1.WithParts[] }) {
       let from: string | undefined
       let to: string | undefined
+      let root: string | undefined
+      const owned = new Set<string>()
       for (const item of input.messages) {
+        if (item.info.role === "assistant") {
+          root ??= item.info.path.root
+          for (const file of SessionMutation.messageFiles(item, item.info.path.root)) owned.add(file)
+        }
         if (!from) {
           for (const part of item.parts) {
             if (part.type === "step-start" && part.snapshot) {
@@ -95,8 +102,12 @@ const layer = Layer.effect(
           if (part.type === "step-finish" && part.snapshot) to = part.snapshot
         }
       }
-      if (from && to) return yield* snapshot.diffFull(from, to)
-      return []
+      if (!from || !to || !owned.size || !root) return []
+      const directory = root
+      const diffs = yield* snapshot.diffFull(from, to)
+      return diffs.filter(
+        (diff) => typeof diff.file === "string" && owned.has(SessionMutation.normalize(directory, diff.file)),
+      )
     })
 
     const summarize = Effect.fn("SessionSummary.summarize")(function* (input: {

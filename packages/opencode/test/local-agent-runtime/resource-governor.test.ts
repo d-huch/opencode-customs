@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import {
   evaluateMemoryPressure,
   isLocalModelCrash,
+  minimumManagedContext,
   parseMacAvailableMemory,
   rejectForPressure,
   safeContextBudget,
@@ -32,6 +33,13 @@ function memory(availableBytes: number, processRssBytes = 512 * 1024 ** 2): Memo
 }
 
 describe("Local Agent Runtime resource governor", () => {
+  test("keeps automatically managed model context at 8192 when the model supports it", () => {
+    expect(minimumManagedContext(4_096)).toBe(8_192)
+    expect(minimumManagedContext(4_096, 32_768)).toBe(8_192)
+    expect(minimumManagedContext(16_384, 32_768)).toBe(16_384)
+    expect(minimumManagedContext(4_096, 4_096)).toBe(4_096)
+  })
+
   test("counts macOS file cache as available without counting inactive anonymous memory", () => {
     expect(
       parseMacAvailableMemory(`Mach Virtual Memory Statistics: (page size of 16384 bytes)

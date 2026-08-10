@@ -395,6 +395,7 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
       })
       if (event.type === "server.connected" || event.type === "global.disposed") {
         if (recent) return
+        if (event.type === "server.connected") void session.reconnect()
         for (const directory of Object.keys(children.children)) {
           if (!children.active(directory)) continue
           queue.push(directory)

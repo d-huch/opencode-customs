@@ -19,6 +19,17 @@ export interface SoundSettings {
   errors: string
 }
 
+export interface VoiceSettings {
+  enabled: boolean
+  autoSubmit: boolean
+  speakResponses: boolean
+  handsFree: boolean
+  ttsMode: "quality" | "fast"
+  ttsEndpoint: string
+  ttsModel: string
+  ttsVoice: string
+}
+
 export interface Settings {
   general: {
     autoSave: boolean
@@ -51,6 +62,7 @@ export interface Settings {
   }
   notifications: NotificationSettings
   sounds: SoundSettings
+  voice: VoiceSettings
 }
 
 export const monoDefault = "System Mono"
@@ -209,11 +221,23 @@ const defaultSettings: Settings = {
     errorsEnabled: true,
     errors: "nope-03",
   },
+  voice: {
+    enabled: true,
+    autoSubmit: true,
+    speakResponses: true,
+    handsFree: false,
+    ttsMode: "quality",
+    ttsEndpoint: "http://127.0.0.1:8880/v1/audio/speech",
+    ttsModel: "silero-v5-ukrainian",
+    ttsVoice: "kateryna",
+  },
 }
 
 function withFallback<T>(read: () => T | undefined, fallback: T) {
   return createMemo(() => read() ?? fallback)
 }
+
+const qualityTTSVoices = ["kateryna", "lada", "mykyta", "oleksa", "tetiana"]
 
 export const { use: useSettings, provider: SettingsProvider } = createSimpleContext({
   name: "Settings",
@@ -514,6 +538,58 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         errors: withFallback(() => store.sounds?.errors, defaultSettings.sounds.errors),
         setErrors(value: string) {
           setStore("sounds", "errors", value)
+        },
+      },
+      voice: {
+        enabled: withFallback(() => store.voice?.enabled, defaultSettings.voice.enabled),
+        setEnabled(value: boolean) {
+          setStore("voice", "enabled", value)
+        },
+        autoSubmit: withFallback(() => store.voice?.autoSubmit, defaultSettings.voice.autoSubmit),
+        setAutoSubmit(value: boolean) {
+          setStore("voice", "autoSubmit", value)
+        },
+        speakResponses: withFallback(() => store.voice?.speakResponses, defaultSettings.voice.speakResponses),
+        setSpeakResponses(value: boolean) {
+          setStore("voice", "speakResponses", value)
+        },
+        handsFree: withFallback(() => store.voice?.handsFree, defaultSettings.voice.handsFree),
+        setHandsFree(value: boolean) {
+          setStore("voice", "handsFree", value)
+        },
+        ttsMode: withFallback(() => store.voice?.ttsMode, defaultSettings.voice.ttsMode),
+        setTTSMode(value: "quality" | "fast") {
+          setStore("voice", "ttsMode", value)
+          setStore("voice", "ttsModel", value === "quality" ? "silero-v5-ukrainian" : "piper-ukrainian")
+          if (value === "fast") setStore("voice", "ttsVoice", "ukrainian_tts")
+          if (value === "quality" && !qualityTTSVoices.includes(store.voice?.ttsVoice ?? "")) {
+            setStore("voice", "ttsVoice", "kateryna")
+          }
+        },
+        ttsEndpoint: withFallback(() => store.voice?.ttsEndpoint, defaultSettings.voice.ttsEndpoint),
+        setTTSEndpoint(value: string) {
+          setStore("voice", "ttsEndpoint", value)
+        },
+        ttsModel: createMemo(() => {
+          const value = store.voice?.ttsModel
+          if (!value || value.startsWith("facebook/")) {
+            return (store.voice?.ttsMode ?? defaultSettings.voice.ttsMode) === "quality"
+              ? "silero-v5-ukrainian"
+              : "piper-ukrainian"
+          }
+          return value
+        }),
+        setTTSModel(value: string) {
+          setStore("voice", "ttsModel", value)
+        },
+        ttsVoice: createMemo(() => {
+          const value = store.voice?.ttsVoice
+          const mode = store.voice?.ttsMode ?? defaultSettings.voice.ttsMode
+          if (mode === "fast") return "ukrainian_tts"
+          return value && qualityTTSVoices.includes(value) ? value : defaultSettings.voice.ttsVoice
+        }),
+        setTTSVoice(value: string) {
+          setStore("voice", "ttsVoice", value)
         },
       },
     }

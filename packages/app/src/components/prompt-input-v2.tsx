@@ -6,7 +6,7 @@ import { Icon } from "@opencode-ai/ui/v2/icon"
 import { KeybindV2 } from "@opencode-ai/ui/v2/keybind-v2"
 import { TooltipV2 } from "@opencode-ai/ui/v2/tooltip-v2"
 import type { Prompt, ReferenceInfo } from "@opencode-ai/sdk/v2/client"
-import { createEffect, createMemo, on, Show } from "solid-js"
+import { createEffect, createMemo, createSignal, on, Show } from "solid-js"
 import { ModelSelectorPopoverV2 } from "@/components/dialog-select-model"
 import { DialogSelectModelUnpaidV2 } from "@/components/dialog-select-model-unpaid-v2"
 import type { PromptInputProps } from "@/components/prompt-input/contracts"
@@ -19,6 +19,7 @@ import { useComments } from "@/context/comments"
 import { useCommand } from "@/context/command"
 import { useLanguage } from "@/context/language"
 import { useLayout } from "@/context/layout"
+import { modelVariantOptions } from "@/context/model-variant"
 import { usePermission } from "@/context/permission"
 import { type ImageAttachmentPart, usePrompt } from "@/context/prompt"
 import { usePlatform } from "@/context/platform"
@@ -27,6 +28,11 @@ import { useSync } from "@/context/sync"
 import { createSessionTabs } from "@/pages/session/helpers"
 import { showToast } from "@/utils/toast"
 import { SessionContextUsage } from "@/components/session-context-usage"
+import {
+  VoiceAgentChatStatus,
+  VoiceAgentControl,
+  type VoiceAgentStatus,
+} from "@/components/voice-agent-control"
 import { PromptInputV2, type PromptInputV2Suggestion } from "@opencode-ai/session-ui/v2/prompt-input"
 import {
   createPromptInputV2Controller,
@@ -44,22 +50,39 @@ export type PromptInputV2ComposerProps = {
 export type PromptInputV2ControllerProps = Omit<PromptInputProps, "class" | "edit" | "onEditLoaded" | "submission">
 export type PromptInputV2ComposerController = PromptInputV2Interaction & {
   readonly model: PromptInputProps["controls"]["model"]
+  readonly sessionID: () => string | undefined
+  readonly working: () => boolean
 }
 
 export function PromptInputV2Composer(props: PromptInputV2ComposerProps) {
   const dialog = useDialog()
   const command = useCommand()
   const language = useLanguage()
+  const [voiceStatus, setVoiceStatus] = createSignal<VoiceAgentStatus>()
 
   useCommands(props)
   useEditHandler(props)
 
   return (
     <div class="flex flex-col gap-3">
+      <VoiceAgentChatStatus status={voiceStatus()} />
       <PromptInputV2
         controller={props.controller}
         class={props.class}
         contextControl={<SessionContextUsage variant="compact" />}
+        actionControl={
+          <VoiceAgentControl
+            appearance="v2"
+            sessionID={props.controller.sessionID}
+            working={props.controller.working}
+            onTranscript={(text) =>
+              props.controller.addPart({ type: "text", content: text, start: 0, end: text.length })
+            }
+            onSubmit={props.controller.submit}
+            onInterrupt={props.controller.view.submit.onStop}
+            onStatusChange={setVoiceStatus}
+          />
+        }
         modelControl={
           <PromptInputV2ModelControl
             loading={props.controller.model.loading}
@@ -381,7 +404,7 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
       keybind: command.keybindParts(item.id),
     })),
   )
-  const variants = createMemo(() => ["default", ...props.controls.model.selection.variant.list()])
+  const variants = createMemo(() => modelVariantOptions(props.controls.model.selection.variant.list()))
   const controller = createPromptInputV2Controller({
     store: () => prompt.capture().store,
     state: interaction,
@@ -467,6 +490,8 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
     },
   })
   Object.defineProperty(controller, "model", { get: () => props.controls.model })
+  Object.defineProperty(controller, "sessionID", { get: () => () => props.controls.session.id })
+  Object.defineProperty(controller, "working", { get: () => working })
   return controller as PromptInputV2ComposerController
 }
 

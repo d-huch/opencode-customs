@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process"
 import { stat } from "node:fs/promises"
 import { basename } from "node:path"
-import { app, BrowserWindow, Notification, clipboard, dialog, ipcMain, shell } from "electron"
+import { app, BrowserWindow, Notification, clipboard, dialog, ipcMain, shell, systemPreferences } from "electron"
 import type { IpcMainEvent, IpcMainInvokeEvent } from "electron"
 import type { DesktopMenuAction } from "@opencode-ai/app/desktop-menu"
 
@@ -13,6 +13,8 @@ import { getStore, removeStoreFileIfEmpty } from "./store"
 import { getPinchZoomEnabled, getWindowID, setPinchZoomEnabled, setTitlebar, updateTitlebar } from "./windows"
 import type { UpdaterController } from "./updater-controller"
 import { createUpdaterSubscriptions } from "./updater-subscriptions"
+import { createNativeVoiceController } from "./native-voice"
+import { synthesizeLocalSpeech, type LocalTTSInput } from "./local-tts"
 
 const pickerFilters = (ext?: string[]) => {
   if (!ext || ext.length === 0) return undefined
@@ -46,7 +48,11 @@ type Deps = {
 
 export function registerIpcHandlers(deps: Deps) {
   const updaterSubscriptions = createUpdaterSubscriptions()
+  const nativeVoice = createNativeVoiceController()
+  const localSpeech = new Map<number, AbortController>()
   app.once("will-quit", updaterSubscriptions.clear)
+  app.once("will-quit", () => nativeVoice.stopAll())
+  app.once("will-quit", () => localSpeech.forEach((request) => request.abort()))
 
   ipcMain.handle("kill-sidecar", () => deps.killSidecar())
   ipcMain.handle("await-initialization", () => deps.awaitInitialization())
@@ -208,6 +214,30 @@ export function registerIpcHandlers(deps: Deps) {
     const buffer = image.toPNG().buffer
     const size = image.getSize()
     return { buffer, width: size.width, height: size.height }
+  })
+  ipcMain.handle("request-microphone-access", async () => {
+    if (process.platform !== "darwin") return "granted"
+    const status = systemPreferences.getMediaAccessStatus("microphone")
+    if (status !== "not-determined") return status
+    const granted = await systemPreferences.askForMediaAccess("microphone")
+    if (granted) return "granted"
+    return systemPreferences.getMediaAccessStatus("microphone")
+  })
+  ipcMain.handle("recognize-speech", (event: IpcMainInvokeEvent, locale: string) =>
+    nativeVoice.recognize(event.sender, locale),
+  )
+  ipcMain.handle("stop-speech-recognition", (event: IpcMainInvokeEvent) => nativeVoice.stop(event.sender.id))
+  ipcMain.handle("synthesize-local-speech", async (event: IpcMainInvokeEvent, input: LocalTTSInput) => {
+    const request = new AbortController()
+    localSpeech.set(event.sender.id, request)
+    return synthesizeLocalSpeech(input, request.signal).finally(() => {
+      if (localSpeech.get(event.sender.id) !== request) return
+      localSpeech.delete(event.sender.id)
+    })
+  })
+  ipcMain.handle("cancel-local-speech", (event: IpcMainInvokeEvent) => {
+    localSpeech.get(event.sender.id)?.abort()
+    localSpeech.delete(event.sender.id)
   })
 
   ipcMain.on("show-notification", (_event: IpcMainEvent, title: string, body?: string) => {

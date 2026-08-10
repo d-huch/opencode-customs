@@ -5136,3 +5136,48 @@ describe("ProviderTransform.providerOptions - ai-gateway-provider", () => {
     expect(result).toEqual({ openaiCompatible: { reasoningEffort: "high" } })
   })
 })
+
+describe("ProviderTransform.providerOptions - LM Studio reasoning toggle", () => {
+  const model = {
+    id: "lmstudio/local-reasoning-model",
+    providerID: "lmstudio",
+    api: {
+      id: "local-reasoning-model",
+      url: "http://127.0.0.1:1234/v1",
+      npm: "@ai-sdk/openai-compatible",
+    },
+    capabilities: {
+      temperature: true,
+      reasoning: true,
+      attachment: false,
+      toolcall: true,
+      input: { text: true, audio: false, image: false, video: false, pdf: false },
+      output: { text: true, audio: false, image: false, video: false, pdf: false },
+      interleaved: false,
+    },
+    cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+    limit: { context: 8_192, output: 2_048 },
+    status: "active",
+    options: {},
+    headers: {},
+    release_date: "2026-01-01",
+  } as any
+
+  test("maps native off to the OpenAI-compatible none value", () => {
+    expect(ProviderTransform.providerOptions(model, { reasoningEffort: "off" })).toEqual({
+      lmstudio: { reasoningEffort: "none" },
+    })
+  })
+
+  test("maps native on to a supported enabled effort", () => {
+    expect(ProviderTransform.providerOptions(model, { reasoningEffort: "on" })).toEqual({
+      lmstudio: { reasoningEffort: "high" },
+    })
+  })
+
+  test("preserves already compatible reasoning efforts", () => {
+    expect(ProviderTransform.providerOptions(model, { reasoningEffort: "low" })).toEqual({
+      lmstudio: { reasoningEffort: "low" },
+    })
+  })
+})

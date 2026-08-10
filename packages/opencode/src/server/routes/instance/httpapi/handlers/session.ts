@@ -15,6 +15,8 @@ import { SessionStatus } from "@/session/status"
 import { SessionSummary } from "@/session/summary"
 import { Todo } from "@/session/todo"
 import { SessionLog } from "@/local-agent-runtime/session-log"
+import { Database } from "@opencode-ai/core/database/database"
+import { SessionExecutionCheckpoint } from "@opencode-ai/core/session/execution-checkpoint"
 import { MessageID, PartID, SessionID } from "@/session/schema"
 import { NamedError } from "@opencode-ai/core/util/error"
 import { Cause, Effect, Option, Schema, Scope } from "effect"
@@ -60,6 +62,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     const todoSvc = yield* Todo.Service
     const summary = yield* SessionSummary.Service
     const events = yield* EventV2Bridge.Service
+    const database = yield* Database.Service
     const scope = yield* Scope.Scope
 
     const list = Effect.fn("SessionHttpApi.list")(function* (ctx: { query: typeof ListQuery.Type }) {
@@ -91,6 +94,21 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     const log = Effect.fn("SessionHttpApi.log")(function* (ctx: { params: { sessionID: SessionID } }) {
       yield* requireSession(ctx.params.sessionID)
       return yield* Effect.promise(() => SessionLog.location(ctx.params.sessionID))
+    })
+
+    const inspect = Effect.fn("SessionHttpApi.inspect")(function* (ctx: { params: { sessionID: SessionID } }) {
+      yield* requireSession(ctx.params.sessionID)
+      const checkpoint = yield* SessionExecutionCheckpoint.load(database.db, ctx.params.sessionID)
+      return yield* Effect.promise(() =>
+        SessionLog.inspect(ctx.params.sessionID, {
+          executionID: checkpoint?.execution_id,
+          requestMessageID: checkpoint?.request_message_id,
+          pipeline: checkpoint?.pipeline_state,
+          providerID: checkpoint?.selected_provider_id,
+          modelID: checkpoint?.selected_model_id,
+          instanceID: checkpoint?.selected_instance_id,
+        }),
+      )
     })
 
     const children = Effect.fn("SessionHttpApi.children")(function* (ctx: { params: { sessionID: SessionID } }) {
@@ -348,12 +366,32 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
               latestAssistant.info.time.completed = Date.now()
               yield* session.updateMessage(latestAssistant.info)
             }
-            yield* statusSvc.set(ctx.params.sessionID, { type: "idle" })
+            if (!latestAssistant && latestUser?.info.role === "user") {
+              const instance = yield* InstanceState.context
+              const now = Date.now()
+              yield* session.updateMessage({
+                id: MessageID.ascending(),
+                parentID: latestUser.info.id,
+                role: "assistant",
+                mode: latestUser.info.agent,
+                agent: latestUser.info.agent,
+                variant: latestUser.info.model.variant,
+                path: { cwd: instance.directory, root: instance.worktree },
+                cost: 0,
+                tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+                modelID: latestUser.info.model.modelID,
+                providerID: latestUser.info.model.providerID,
+                time: { created: now, completed: now },
+                sessionID: ctx.params.sessionID,
+                finish: "error",
+                error,
+              })
+            }
             yield* events.publish(Session.Event.Error, {
               sessionID: ctx.params.sessionID,
               error,
             })
-          }),
+          }).pipe(Effect.ensuring(statusSvc.set(ctx.params.sessionID, { type: "idle" }))),
         ),
         Effect.forkIn(scope, { startImmediately: true }),
       )
@@ -447,6 +485,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       .handle("status", status)
       .handle("get", get)
       .handle("log", log)
+      .handle("inspect", inspect)
       .handle("children", children)
       .handle("todo", todo)
       .handle("diff", diff)

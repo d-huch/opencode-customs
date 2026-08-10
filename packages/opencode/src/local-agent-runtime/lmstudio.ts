@@ -36,6 +36,7 @@ export const LmStudioProbe = Schema.Struct({
         tools: Schema.Boolean,
         vision: Schema.Boolean,
         reasoning: Schema.Boolean,
+        reasoningOptions: Schema.optionalKey(Schema.Array(Schema.String)),
         embeddings: Schema.Boolean,
       }),
       visionCapabilitySource: Schema.optionalKey(VisionCapabilitySource),
@@ -47,6 +48,7 @@ export type LmStudioProbe = typeof LmStudioProbe.Type
 export type LmStudioModel = LmStudioProbe["models"][number]
 
 const cache = new Map<string, { expires: number; value: Promise<LmStudioProbe> }>()
+const requestCache = new WeakMap<LmStudioRequest, Map<string, { expires: number; value: Promise<LmStudioProbe> }>>()
 
 export function probeLmStudio(input: {
   baseURL: unknown
@@ -55,17 +57,29 @@ export function probeLmStudio(input: {
   timeoutMs?: number
   cacheMs?: number
   refresh?: boolean
+  onCache?: (status: "hit" | "miss" | "bypass") => void
 }) {
   const endpoints = endpointsFor(input.baseURL)
-  if (!endpoints) return Promise.resolve(unconfigured())
-  if (input.request || input.refresh) return executeProbe(endpoints, input)
+  if (!endpoints) {
+    input.onCache?.("bypass")
+    return Promise.resolve(unconfigured())
+  }
+  if (input.refresh) {
+    input.onCache?.("bypass")
+    return executeProbe(endpoints, input)
+  }
 
   const key = `${endpoints.baseURL}\0${typeof input.apiKey === "string" ? input.apiKey : ""}`
-  const hit = cache.get(key)
-  if (hit && hit.expires > Date.now()) return hit.value
+  const bucket = input.request ? requestProbeCache(input.request) : cache
+  const hit = bucket.get(key)
+  if (hit && hit.expires > Date.now()) {
+    input.onCache?.("hit")
+    return hit.value
+  }
 
+  input.onCache?.("miss")
   const value = executeProbe(endpoints, input)
-  cache.set(key, { expires: Date.now() + (input.cacheMs ?? 5_000), value })
+  bucket.set(key, { expires: Date.now() + (input.cacheMs ?? 30_000), value })
   return value
 }
 
@@ -97,7 +111,7 @@ export async function loadLmStudioModel(input: {
   if (!response.ok) throw new Error(managementError("load", response))
   if (!isRecord(response.body) || typeof response.body.instance_id !== "string")
     throw new Error("LM Studio loaded the model but returned no instance identifier")
-  clearProbeCache(endpoints.baseURL)
+  clearProbeCache(endpoints.baseURL, input.request)
   return {
     modelID: input.modelID,
     instanceID: response.body.instance_id,
@@ -129,7 +143,7 @@ export async function unloadLmStudioModel(input: {
     },
   )
   if (!response.ok) throw new Error(managementError("unload", response))
-  clearProbeCache(endpoints.baseURL)
+  clearProbeCache(endpoints.baseURL, input.request)
   return { instanceID: input.instanceID }
 }
 
@@ -230,6 +244,9 @@ function parseNativeModels(body: unknown): LmStudioModel[] {
       .sort((a, b) => a - b)[0]
     const capabilities = isRecord(value.capabilities) ? value.capabilities : undefined
     const reasoning = capabilities && isRecord(capabilities.reasoning) ? capabilities.reasoning : undefined
+    const reasoningOptions = Array.isArray(reasoning?.allowed_options)
+      ? reasoning.allowed_options.filter((option): option is string => typeof option === "string")
+      : []
     const type =
       value.type === "llm" || value.type === "vlm" ? "llm" : value.type === "embedding" ? value.type : "unknown"
     const supported = positiveInt(value.max_context_length)
@@ -251,7 +268,8 @@ function parseNativeModels(body: unknown): LmStudioModel[] {
         capabilities: {
           tools: capabilities?.trained_for_tool_use === true,
           vision: vision.supported,
-          reasoning: Array.isArray(reasoning?.allowed_options) && reasoning.allowed_options.length > 0,
+          reasoning: reasoningOptions.length > 0,
+          ...(reasoningOptions.length > 0 ? { reasoningOptions } : {}),
           embeddings: type === "embedding",
         },
       },
@@ -345,8 +363,18 @@ function managementError(action: "load" | "unload", response: { status?: number;
   return `LM Studio model ${action} failed${response.status ? ` (HTTP ${response.status})` : ""}${detail ? `: ${detail}` : response.error ? `: ${response.error}` : ""}`
 }
 
-function clearProbeCache(baseURL: string) {
-  for (const key of cache.keys()) if (key.startsWith(`${baseURL}\0`)) cache.delete(key)
+function requestProbeCache(request: LmStudioRequest) {
+  const existing = requestCache.get(request)
+  if (existing) return existing
+  const created = new Map<string, { expires: number; value: Promise<LmStudioProbe> }>()
+  requestCache.set(request, created)
+  return created
+}
+
+function clearProbeCache(baseURL: string, request?: LmStudioRequest) {
+  const bucket = request ? requestCache.get(request) : cache
+  if (!bucket) return
+  for (const key of bucket.keys()) if (key.startsWith(`${baseURL}\0`)) bucket.delete(key)
 }
 
 function positiveInt(value: unknown) {

@@ -25,6 +25,7 @@ import { Reference } from "@opencode-ai/core/reference"
 import { MCP } from "@/mcp"
 import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { RepositoryContextRouter } from "@opencode-ai/core/repository-context-router"
+import { RepositoryMemory } from "@opencode-ai/core/repository-memory"
 
 export function provider(model: Provider.Model) {
   if (model.limit?.context > 0 && model.limit.context <= 8_192) return [PROMPT_COMPACT]
@@ -56,6 +57,11 @@ export interface Interface {
   ) => Effect.Effect<RepositoryContextRouter.Selection | undefined>
   readonly repositoryTrace: (input: RepositoryContextRouter.TraceInput) => Effect.Effect<void>
   readonly repositoryRemember: (summary: string) => Effect.Effect<void>
+  readonly repositoryMemory: (input: {
+    readonly query: string
+    readonly sessionID?: string
+  }) => Effect.Effect<RepositoryMemory.Recall>
+  readonly repositoryRememberConversation: (input: string | RepositoryMemory.ConversationInput) => Effect.Effect<void>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SystemPrompt") {}
@@ -82,7 +88,6 @@ const layer = Layer.effect(
             `  Workspace root folder: ${ctx.worktree}`,
             `  Is directory a git repo: ${ctx.project.vcs === "git" ? "yes" : "no"}`,
             `  Platform: ${process.platform}`,
-            `  Today's date: ${new Date().toDateString()}`,
             `</env>`,
           ].join("\n"),
           references.length === 0
@@ -173,6 +178,24 @@ const layer = Layer.effect(
       repositoryRemember: Effect.fn("SystemPrompt.repositoryRemember")(function* (summary) {
         const ctx = yield* InstanceState.context
         yield* RepositoryContextRouter.Service.use((router) => router.remember(summary)).pipe(
+          Effect.provide(locations.get(Location.Ref.make({ directory: AbsolutePath.make(ctx.directory) }))),
+          Effect.catchCause(() => Effect.void),
+        )
+      }),
+
+      repositoryMemory: Effect.fn("SystemPrompt.repositoryMemory")(function* (input) {
+        const ctx = yield* InstanceState.context
+        return yield* RepositoryContextRouter.Service.use((router) =>
+          router.recallMemory(input.query, { sessionID: input.sessionID }),
+        ).pipe(
+          Effect.provide(locations.get(Location.Ref.make({ directory: AbsolutePath.make(ctx.directory) }))),
+          Effect.catchCause(() => Effect.succeed({ files: [], notes: [], matches: 0, uses: [] })),
+        )
+      }),
+
+      repositoryRememberConversation: Effect.fn("SystemPrompt.repositoryRememberConversation")(function* (input) {
+        const ctx = yield* InstanceState.context
+        yield* RepositoryContextRouter.Service.use((router) => router.rememberConversation(input)).pipe(
           Effect.provide(locations.get(Location.Ref.make({ directory: AbsolutePath.make(ctx.directory) }))),
           Effect.catchCause(() => Effect.void),
         )

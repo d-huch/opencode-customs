@@ -5,6 +5,8 @@ import { filter, firstBy, flat, groupBy, mapValues, pipe, uniqueBy, values } fro
 import { createSimpleContext } from "@opencode-ai/ui/context"
 import { useProviders } from "@/hooks/use-providers"
 import { Persist, persisted } from "@/utils/persist"
+import { useServerSDK } from "./server-sdk"
+import { loadedModelDefault } from "./loaded-model-default"
 
 export type ModelKey = { providerID: string; modelID: string }
 
@@ -27,6 +29,7 @@ export const { use: useModels, provider: ModelsProvider } = createSimpleContext(
   gate: false,
   init: (props: { directory?: Accessor<string | undefined> } = {}) => {
     const providers = useProviders(props.directory)
+    const serverSDK = useServerSDK()
 
     const [store, setStore, _, ready] = persisted(
       Persist.global("model", ["model.v1"]),
@@ -103,6 +106,14 @@ export const { use: useModels, provider: ModelsProvider } = createSimpleContext(
 
     const find = (key: ModelKey) => list().find((m) => m.id === key.modelID && m.provider.id === key.providerID)
 
+    const [lmStudio, { refetch: refreshLmStudio }] = createResource(
+      () => (providers.connected().some((provider) => provider.id === "lmstudio") ? serverSDK() : undefined),
+      (context) => context.client.provider.lmstudio.probe().then((result) => result.data),
+    )
+
+    const loaded = () =>
+      loadedModelDefault(lmStudio(), providers.all().get("lmstudio")?.models, (model) => !!find(model))
+
     function update(model: ModelKey, state: Visibility) {
       const index = store.user.findIndex((x) => x.modelID === model.modelID && x.providerID === model.providerID)
       if (index >= 0) {
@@ -160,6 +171,10 @@ export const { use: useModels, provider: ModelsProvider } = createSimpleContext(
       find,
       visible,
       setVisibility,
+      loaded: {
+        current: loaded,
+        refresh: refreshLmStudio,
+      },
       recent: {
         list: () => recentModels()!,
         push,

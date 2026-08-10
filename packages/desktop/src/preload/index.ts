@@ -98,6 +98,21 @@ const api: ElectronAPI = {
   openPath: (path, app) => ipcRenderer.invoke("open-path", path, app),
   revealPath: (path) => ipcRenderer.invoke("reveal-path", path),
   readClipboardImage: () => ipcRenderer.invoke("read-clipboard-image"),
+  requestMicrophoneAccess: () => ipcRenderer.invoke("request-microphone-access"),
+  recognizeSpeech: (locale) => ipcRenderer.invoke("recognize-speech", locale),
+  stopSpeechRecognition: () => ipcRenderer.invoke("stop-speech-recognition"),
+  onSpeechRecognitionLevel: (cb) => {
+    const handler = (_: unknown, level: number) => cb(level)
+    ipcRenderer.on("speech-recognition-level", handler)
+    return () => ipcRenderer.removeListener("speech-recognition-level", handler)
+  },
+  onSpeechRecognitionEvent: (cb) => {
+    const handler = (_: unknown, event: Parameters<typeof cb>[0]) => cb(event)
+    ipcRenderer.on("speech-recognition-event", handler)
+    return () => ipcRenderer.removeListener("speech-recognition-event", handler)
+  },
+  synthesizeLocalSpeech: (input) => ipcRenderer.invoke("synthesize-local-speech", input),
+  cancelLocalSpeech: () => ipcRenderer.invoke("cancel-local-speech"),
   showNotification: (title, body) => ipcRenderer.send("show-notification", title, body),
   getWindowFocused: () => ipcRenderer.invoke("get-window-focused"),
   setWindowFocus: () => ipcRenderer.invoke("set-window-focus"),

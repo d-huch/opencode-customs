@@ -4,6 +4,7 @@ import path from "path"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { isRecord } from "@/util/record"
 import { MessageV2 } from "./message-v2"
+import { SessionMutation } from "./mutation"
 
 export const TOOL_ID = "evidence"
 
@@ -156,10 +157,14 @@ function currentTurn(messages: readonly SessionV1.WithParts[]) {
 }
 
 function changedRepository(messages: readonly SessionV1.WithParts[]) {
-  return messages.some(
-    (message) =>
-      message.info.role === "assistant" && message.parts.some((part) => part.type === "patch" && part.files.length > 0),
-  )
+  return messages.some((message) => {
+    if (message.info.role !== "assistant") return false
+    const root = message.info.path.root
+    const owned = new Set(SessionMutation.messageFiles(message, root))
+    return message.parts.some(
+      (part) => part.type === "patch" && SessionMutation.filter(root, part.files, owned).length > 0,
+    )
+  })
 }
 
 function completedResearch(messages: readonly SessionV1.WithParts[]) {

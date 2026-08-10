@@ -23,6 +23,11 @@ import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { isRecord } from "@/util/record"
 import { RuntimeFlags } from "@/effect/runtime-flags"
+import { SessionToolPlanner } from "./tool-planner"
+import { SessionLog } from "@/local-agent-runtime/session-log"
+import { ChangeRisk } from "@opencode-ai/core/change-risk"
+import { SessionExecutionCheckpoint } from "@opencode-ai/core/session/execution-checkpoint"
+import { Database } from "@opencode-ai/core/database/database"
 
 const MCP_RESOURCE_TOOLS = {
   list: "list_mcp_resources",
@@ -42,7 +47,10 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
   agent: Agent.Info
   model: Provider.Model
   session: Session.Info
-  processor: Pick<SessionProcessor.Handle, "message" | "updateToolCall" | "completeToolCall" | "beginToolCall">
+  processor: Pick<
+    SessionProcessor.Handle,
+    "message" | "checkpoint" | "updateToolCall" | "completeToolCall" | "beginToolCall"
+  >
   bypassAgentCheck: boolean
   messages: SessionV1.WithParts[]
   promptOps: TaskPromptOps
@@ -55,6 +63,13 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
   const mcp = yield* MCP.Service
   const truncate = yield* Truncate.Service
   const flags = yield* RuntimeFlags.Service
+  const database = yield* Database.Service
+  const capabilities = new Map<string, Tool.Execution>()
+  const planner = SessionToolPlanner.create({
+    root: input.session.directory,
+    sessionID: input.session.id,
+    requestID: MessageV2.latestUserRequest(input.messages)?.info.id,
+  })
 
   const context = (args: Record<string, unknown>, options: ToolExecutionOptions): Tool.Context => ({
     sessionID: input.session.id,
@@ -96,6 +111,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
     permission: input.session.permission,
   })) {
     const schema = ProviderTransform.schema(input.model, ToolJsonSchema.fromTool(item))
+    capabilities.set(item.id, item.execution ?? { access: "write" })
     tools[item.id] = tool({
       description: item.description,
       inputSchema: jsonSchema(schema),
@@ -138,6 +154,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
     (client) => !!client.getServerCapabilities()?.resources,
   )
   if (hasMcpResourceServer) {
+    capabilities.set(MCP_RESOURCE_TOOLS.list, { access: "read", cache: true })
     tools[MCP_RESOURCE_TOOLS.list] = tool({
       description:
         "Lists resources provided by connected MCP servers. Resources provide context such as files, database schemas, or application-specific information.",
@@ -221,6 +238,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
       },
     })
 
+    capabilities.set(MCP_RESOURCE_TOOLS.listTemplates, { access: "read", cache: true })
     tools[MCP_RESOURCE_TOOLS.listTemplates] = tool({
       description:
         "Lists resource templates provided by connected MCP servers. Resource templates are parameterized resources that can be read after filling in their URI template.",
@@ -305,6 +323,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
       },
     })
 
+    capabilities.set(MCP_RESOURCE_TOOLS.read, { access: "read", cache: true })
     tools[MCP_RESOURCE_TOOLS.read] = tool({
       description:
         "Read a specific resource from an MCP server using the server name and resource URI. The URI is an MCP identifier and does not need to be a file URL.",
@@ -389,7 +408,57 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
     })
   }
 
-  if (flags.experimentalCodeMode) return tools
+  const beginToolCall = (callID: string, tool: string, args: unknown) =>
+    run.promise(input.processor.beginToolCall(callID, tool, args))
+  const authorizeRisk = (callID: string, toolID: string, args: unknown, declared: boolean) =>
+    run.promise(
+      Effect.gen(function* () {
+        const assessment = ChangeRisk.classify({
+          tool: toolID,
+          args,
+          root: input.session.directory,
+          declared,
+        })
+        yield* input.processor.updateToolCall(callID, (part) => {
+          if (part.state.status !== "running") return part
+          return {
+            ...part,
+            state: {
+              ...part.state,
+              metadata: { ...part.state.metadata, risk: assessment },
+            },
+          }
+        })
+        if (input.processor.checkpoint)
+          yield* SessionExecutionCheckpoint.setRiskAssessment(database.db, input.processor.checkpoint, assessment)
+        yield* Effect.promise(() =>
+          SessionLog.write({
+            sessionID: input.session.id,
+            type: "change.risk",
+            messageID: input.processor.message.id,
+            executionID: input.processor.checkpoint?.executionID,
+            data: { tool: toolID, callID, ...assessment },
+          }),
+        )
+        if (!assessment.policy.confirmation) return assessment
+        const patterns = assessment.categories.map((category) => `${assessment.level}:${category}`)
+        yield* permission.ask({
+          sessionID: input.session.id,
+          permission: "change_risk",
+          patterns,
+          always: patterns,
+          metadata: assessment,
+          tool: { messageID: input.processor.message.id, callID },
+          ruleset: Permission.merge(input.agent.permission, input.session.permission ?? []).filter(
+            (rule) => rule.permission === "change_risk" || (rule.permission === "*" && rule.action === "deny"),
+          ),
+        })
+        return assessment
+      }),
+    )
+
+  if (flags.experimentalCodeMode)
+    return planTools(tools, capabilities, planner, input.session.id, beginToolCall, authorizeRisk)
 
   for (const [key, entry] of Object.entries(yield* mcp.tools())) {
     const item = McpCatalog.convertTool(entry.def, entry.client, entry.timeout)
@@ -399,6 +468,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
     const schema = yield* Effect.promise(() => Promise.resolve(asSchema(item.inputSchema).jsonSchema))
     const transformed = ProviderTransform.schema(input.model, { ...schema, properties: schema.properties ?? {} })
     item.inputSchema = jsonSchema(transformed)
+    capabilities.set(key, { access: "write" })
     item.execute = (args, opts) =>
       run.promise(
         Effect.gen(function* () {
@@ -494,8 +564,80 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
     tools[key] = item
   }
 
-  return tools
+  return planTools(tools, capabilities, planner, input.session.id, beginToolCall, authorizeRisk)
 })
+
+function planTools(
+  tools: Record<string, AITool>,
+  capabilities: ReadonlyMap<string, Tool.Execution>,
+  planner: ReturnType<typeof SessionToolPlanner.create>,
+  sessionID: string,
+  beginToolCall: (callID: string, tool: string, args: unknown) => Promise<void>,
+  authorizeRisk: (
+    callID: string,
+    tool: string,
+    args: unknown,
+    declared: boolean,
+  ) => Promise<ChangeRisk.Assessment>,
+) {
+  return Object.fromEntries(
+    Object.entries(tools).map(([id, item]) => {
+      const execute = item.execute
+      if (!execute) return [id, item]
+      const planned = {
+        ...item,
+        execute: async (args: unknown, options: ToolExecutionOptions) => {
+          await beginToolCall(options.toolCallId, id, args)
+          const capability = capabilities.get(id) ?? { access: "write" as const }
+          const risk =
+            capability.access === "write"
+              ? await authorizeRisk(options.toolCallId, id, args, capabilities.has(id))
+              : undefined
+          const result = await planner.run({
+            tool: id,
+            args,
+            capability,
+            risk,
+            execute: async () => {
+              const value = await execute(args, options)
+              if (
+                !isRecord(value) ||
+                typeof value.title !== "string" ||
+                typeof value.output !== "string" ||
+                !isRecord(value.metadata)
+              )
+                throw new Error(`Tool '${id}' returned an invalid execution result`)
+              return {
+                ...value,
+                title: value.title,
+                metadata: value.metadata,
+                output: value.output,
+                attachments: Array.isArray(value.attachments) ? value.attachments : undefined,
+              }
+            },
+          })
+          void SessionLog.write({
+            sessionID,
+            type: "tool.plan",
+            data: {
+              tool: id,
+              callID: options.toolCallId,
+              ...result.metadata,
+            },
+          })
+          return {
+            ...result.value,
+            metadata: {
+              ...result.value.metadata,
+              planner: result.metadata,
+            },
+          }
+        },
+      }
+      return [id, planned as AITool]
+    }),
+  )
+}
 
 function toRecord(value: unknown) {
   if (isRecord(value)) return value

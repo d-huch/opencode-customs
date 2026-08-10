@@ -9,6 +9,7 @@ import { MessageV2 } from "./message-v2"
 import { SessionID, MessageID, PartID } from "./schema"
 import { SessionRunState } from "./run-state"
 import { SessionSummary } from "./summary"
+import { SessionMutation } from "./mutation"
 
 export const RevertInput = Schema.Struct({
   sessionID: SessionID,
@@ -45,10 +46,15 @@ const layer = Layer.effect(
       const patches: Snapshot.Patch[] = []
       for (const msg of all) {
         if (msg.info.role === "user") lastUser = msg.info
+        const root = msg.info.role === "assistant" ? msg.info.path.root : undefined
+        const owned = root ? new Set(SessionMutation.messageFiles(msg, root)) : undefined
         const remaining = []
         for (const part of msg.parts) {
           if (rev) {
-            if (part.type === "patch") patches.push(part)
+            if (part.type === "patch" && root && owned) {
+              const files = SessionMutation.filter(root, part.files, owned)
+              if (files.length) patches.push({ ...part, files })
+            }
             continue
           }
 

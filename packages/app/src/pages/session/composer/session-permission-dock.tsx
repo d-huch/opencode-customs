@@ -11,6 +11,7 @@ export function SessionPermissionDock(props: {
   onDecide: (response: "once" | "always" | "reject") => void
 }) {
   const language = useLanguage()
+  const risk = () => riskMetadata(props.request.permission, props.request.metadata)
 
   const toolDescription = () => {
     const key = `settings.permissions.tool.${props.request.permission}.description`
@@ -59,7 +60,40 @@ export function SessionPermissionDock(props: {
         </div>
       </Show>
 
-      <Show when={props.request.patterns.length > 0}>
+      <Show when={risk()}>
+        {(assessment) => (
+          <>
+            <div data-slot="permission-row">
+              <span data-slot="permission-spacer" aria-hidden="true" />
+              <div data-slot="permission-hint">
+                {language.t("permission.risk.level")}: <strong>{assessment().level.toUpperCase()}</strong>
+                {" · "}
+                {language.t("permission.risk.plan")}: {assessment().plan}
+                {" · "}
+                {language.t("permission.risk.verification")}: {assessment().verification}
+                {" · "}
+                {language.t("permission.risk.critic")}:{" "}
+                {assessment().critic
+                  ? language.t("permission.risk.required")
+                  : language.t("permission.risk.notRequired")}
+              </div>
+            </div>
+            <Show when={assessment().files.length > 0}>
+              <div data-slot="permission-row">
+                <span data-slot="permission-spacer" aria-hidden="true" />
+                <div data-slot="permission-patterns">
+                  <span class="text-12-regular text-text-weak">{language.t("permission.risk.files")}</span>
+                  <For each={assessment().files}>
+                    {(file) => <code class="text-12-regular text-text-base break-all">{file}</code>}
+                  </For>
+                </div>
+              </div>
+            </Show>
+          </>
+        )}
+      </Show>
+
+      <Show when={props.request.permission !== "change_risk" && props.request.patterns.length > 0}>
         <div data-slot="permission-row">
           <span data-slot="permission-spacer" aria-hidden="true" />
           <div data-slot="permission-patterns">
@@ -71,4 +105,18 @@ export function SessionPermissionDock(props: {
       </Show>
     </DockPrompt>
   )
+}
+
+function riskMetadata(permission: string, metadata: Record<string, unknown>) {
+  if (permission !== "change_risk") return
+  if (!["high", "critical"].includes(String(metadata.level))) return
+  if (!metadata.policy || typeof metadata.policy !== "object" || Array.isArray(metadata.policy)) return
+  const policy = metadata.policy as Record<string, unknown>
+  return {
+    level: String(metadata.level),
+    plan: String(policy.plan ?? "required"),
+    verification: String(policy.verification ?? "extended"),
+    critic: policy.critic === true,
+    files: Array.isArray(metadata.files) ? metadata.files.filter((file): file is string => typeof file === "string") : [],
+  }
 }

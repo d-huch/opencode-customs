@@ -8,6 +8,7 @@ import { Watcher } from "@opencode-ai/core/filesystem/watcher"
 import { Location } from "@opencode-ai/core/location"
 import { RepositoryContextRouter } from "@opencode-ai/core/repository-context-router"
 import { RepositoryMap } from "@opencode-ai/core/repository-map"
+import { RepositoryRetrievalFeedback } from "@opencode-ai/core/repository-retrieval-feedback"
 import { RepositorySemantic } from "@opencode-ai/core/repository-semantic"
 import { Ripgrep } from "@opencode-ai/core/ripgrep"
 import { AbsolutePath, RelativePath } from "@opencode-ai/core/schema"
@@ -18,7 +19,13 @@ import { testEffect } from "./lib/effect"
 
 const repositoryFiles = ["src/index.ts", "src/routes/session.ts", "src/components/sidebar.tsx"]
 const repositoryLayer = AppNodeBuilder.build(
-  LayerNode.group([RepositoryMap.node, RepositoryContextRouter.node, SystemContextRegistry.node, EventV2.node]),
+  LayerNode.group([
+    RepositoryMap.node,
+    RepositoryRetrievalFeedback.node,
+    RepositoryContextRouter.node,
+    SystemContextRegistry.node,
+    EventV2.node,
+  ]),
   [
     [
       Location.node,
@@ -305,6 +312,114 @@ describe("RepositoryMap", () => {
     expect(embedded?.files[0]).toBe("src/session/runner.ts")
   })
 
+  test("reranks exact retrieval evidence and explains its confidence", () => {
+    const map = RepositoryMap.analyze({
+      files: ["src/controller.ts", "src/service.ts", "src/other.ts"],
+      edges: [{ from: "src/controller.ts", to: "src/service.ts", kind: "call", references: 2 }],
+    })
+    const exact = [
+      FileSystem.Match.make({
+        entry: FileSystem.Entry.make({ path: RelativePath.make("src/controller.ts"), type: "file" }),
+        line: 14,
+        offset: 0,
+        text: "ensureSoldierScopeAccess(person)",
+        submatches: [],
+      }),
+    ]
+    const result = RepositoryContextRouter.select(
+      map,
+      { query: "ensureSoldierScopeAccess" },
+      [],
+      undefined,
+      [],
+      [],
+      { positive: [], negative: [] },
+      exact,
+    )
+
+    expect(result?.files[0]).toBe("src/controller.ts")
+    expect(result?.files).toContain("src/service.ts")
+    expect(result?.confidence).toBeGreaterThan(0.5)
+    expect(result?.evidence[0]?.confidence).toBeGreaterThan(0.9)
+    expect(result?.evidence[0]).toEqual(
+      expect.objectContaining({
+        path: "src/controller.ts",
+        classification: "fact",
+      }),
+    )
+    expect(result?.evidence[0]?.reasons).toContainEqual(
+      expect.objectContaining({ stage: "exact", detail: expect.stringContaining("src/controller.ts:14") }),
+    )
+    expect(result?.text).toContain("Selection evidence")
+    expect(result?.text).toContain("[fact] src/controller.ts")
+  })
+
+  test("applies negative feedback and prevents one directory from dominating the final slice", () => {
+    const map = RepositoryMap.analyze({
+      files: [
+        "src/feature/a.ts",
+        "src/feature/b.ts",
+        "src/feature/c.ts",
+        "src/feature/d.ts",
+        "src/routes.ts",
+        "tests/feature.test.ts",
+      ],
+    })
+    const ranked = RepositoryContextRouter.diverseCandidates(
+      [
+        { file: "src/feature/a.ts", score: 100 },
+        { file: "src/feature/b.ts", score: 99 },
+        { file: "src/feature/c.ts", score: 98 },
+        { file: "src/feature/d.ts", score: 97 },
+        { file: "src/routes.ts", score: 94 },
+        { file: "tests/feature.test.ts", score: 92 },
+      ],
+      map,
+      4,
+    )
+    const selected = RepositoryContextRouter.select(
+      map,
+      { query: "feature" },
+      [],
+      undefined,
+      [],
+      [
+        { path: "src/feature/a.ts", start: 1, end: 2, score: 0.99 },
+        { path: "src/routes.ts", start: 1, end: 2, score: 0.8 },
+      ],
+      { positive: [], negative: ["src/feature/a.ts"] },
+    )
+
+    expect(ranked.slice(0, 3).map((item) => item.file)).toEqual(
+      expect.arrayContaining(["src/feature/a.ts", "src/routes.ts", "tests/feature.test.ts"]),
+    )
+    expect(selected?.files[0]).toBe("src/routes.ts")
+    expect(selected?.files).not.toContain("src/feature/a.ts")
+  })
+
+  test("extracts bounded source windows from at most five selected files", () => {
+    const files = Array.from({ length: 7 }, (_, index) => `src/file-${index}.ts`)
+    const contents = new Map(
+      files.map((file, index) => [
+        file,
+        Array.from({ length: 80 }, (_, line) =>
+          line === 40 ? `const targetIdentifier${index} = true` : `const filler${line} = "${"x".repeat(80)}"`,
+        ).join("\n"),
+      ]),
+    )
+    const snippets = RepositoryContextRouter.retrieveSnippets({
+      query: "targetIdentifier",
+      files,
+      symbols: [],
+      hits: [],
+      contents,
+    })
+
+    expect(snippets).toHaveLength(5)
+    expect(snippets.every((snippet) => snippet.text.length <= 1_200)).toBe(true)
+    expect(snippets.every((snippet) => snippet.start <= 41 && snippet.end >= 41)).toBe(true)
+  })
+
   it.effect("learns project vocabulary and routes an abstract request through a topology slice", () =>
     Effect.gen(function* () {
       const router = yield* RepositoryContextRouter.Service
@@ -348,6 +463,36 @@ describe("RepositoryMap", () => {
         "concept",
         "context",
       ])
+    }),
+  )
+
+  it.effect("stores retrieval feedback and reports Recall@5/10", () =>
+    Effect.gen(function* () {
+      const router = yield* RepositoryContextRouter.Service
+      const feedback = yield* RepositoryRetrievalFeedback.Service
+      yield* feedback.clear()
+      const result = yield* router.route({
+        query: "Додай новий журнал у меню з усіма солдатами та їх статусом",
+      })
+      const id = result?.retrievalID
+      const used = result?.files[0]
+      const rejected = result?.files[1]
+      expect(id).toBeTruthy()
+      expect(used).toBeTruthy()
+      expect(rejected).toBeTruthy()
+      if (!id || !used || !rejected) return
+
+      expect(yield* feedback.feedback(id, { path: used, relevance: "used" })).toBe(1)
+      expect(yield* feedback.feedback(id, { path: rejected, relevance: "rejected" })).toBe(1)
+      const snapshot = yield* feedback.inspect()
+      const hint = yield* feedback.recall("журнал меню солдатами статусом")
+
+      expect(snapshot.total).toBe(1)
+      expect(snapshot.recallAt5).toBe(1)
+      expect(snapshot.recallAt10).toBe(1)
+      expect(hint.positive).toContain(used)
+      expect(hint.negative).toContain(rejected)
+      yield* feedback.clear()
     }),
   )
 
@@ -568,6 +713,7 @@ describe("RepositoryMap", () => {
           expect((yield* router.diagnostics()).entries.map((entry) => entry.stage)).toEqual([
             "prompt",
             "map",
+            "exact",
             "lsp",
             "lsp",
             "context",

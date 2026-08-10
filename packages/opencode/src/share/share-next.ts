@@ -7,6 +7,7 @@ import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } fr
 import { Account } from "@/account/account"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { InstanceState } from "@/effect/instance-state"
+import { InstanceRef } from "@/effect/instance-ref"
 import { Provider } from "@/provider/provider"
 
 import { Session } from "@/session/session"
@@ -170,6 +171,7 @@ const layer = Layer.effect(
           events.listen((event) => {
             if (event.type !== def.type || event.location?.directory !== _ctx.directory) return Effect.void
             return fn(event.data as EventV2.Data<D>).pipe(
+              Effect.provideService(InstanceRef, _ctx),
               Effect.catchCause((cause) =>
                 Effect.logError("share subscriber failed", { type: def.type, cause: cause }),
               ),

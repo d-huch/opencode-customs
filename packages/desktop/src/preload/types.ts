@@ -29,6 +29,20 @@ export type UpdaterAPI = {
 }
 
 export type LinuxDisplayBackend = "wayland" | "auto"
+export type MicrophoneAccess = "granted" | "denied" | "restricted" | "not-determined" | "unknown"
+export type SpeechRecognitionEvent = {
+  type: "listening" | "partial" | "final" | "retrying" | "error"
+  text?: string
+  error?: string
+}
+export type LocalTTSInput = {
+  endpoint: string
+  model: string
+  voice: string
+  mode: "quality" | "fast"
+  speed?: number
+  text: string
+}
 export type TitlebarTheme = {
   mode: "light" | "dark"
   scheme?: "system" | "light" | "dark"
@@ -89,6 +103,17 @@ export type ElectronAPI = {
   openPath: (path: string, app?: string) => Promise<void>
   revealPath: (path: string) => Promise<boolean>
   readClipboardImage: () => Promise<{ buffer: ArrayBuffer; width: number; height: number } | null>
+  requestMicrophoneAccess: () => Promise<MicrophoneAccess>
+  recognizeSpeech: (locale: string) => Promise<string>
+  stopSpeechRecognition: () => Promise<void>
+  onSpeechRecognitionLevel: (cb: (level: number) => void) => () => void
+  onSpeechRecognitionEvent: (cb: (event: SpeechRecognitionEvent) => void) => () => void
+  synthesizeLocalSpeech: (input: LocalTTSInput) => Promise<{
+    audio: ArrayBuffer
+    contentType: string
+    metrics: { cache: string; prepareMs: number; synthesisMs: number; totalMs: number }
+  }>
+  cancelLocalSpeech: () => Promise<void>
   showNotification: (title: string, body?: string) => void
   getWindowFocused: () => Promise<boolean>
   setWindowFocus: () => Promise<void>

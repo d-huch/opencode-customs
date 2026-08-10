@@ -1,9 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "c8be9362-574c-4dc4-9710-b5d7961c6b83",
+  "id": "cb8ea7b5-6186-43b2-8834-ec73636b8fc0",
   "prevIds": [
-    "a11d57d8-dfc6-4731-967d-53fa55fb48ee"
+    "f203708c-3e2b-4b57-bb11-0da90413072d"
   ],
   "ddl": [
     {
@@ -977,6 +977,16 @@
       "table": "session_execution_checkpoint"
     },
     {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "'classify'",
+      "generated": null,
+      "name": "phase",
+      "entityType": "columns",
+      "table": "session_execution_checkpoint"
+    },
+    {
       "type": "integer",
       "notNull": true,
       "autoincrement": false,
@@ -987,12 +997,82 @@
       "table": "session_execution_checkpoint"
     },
     {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "request_message_id",
+      "entityType": "columns",
+      "table": "session_execution_checkpoint"
+    },
+    {
       "type": "integer",
       "notNull": true,
       "autoincrement": false,
       "default": "0",
       "generated": null,
       "name": "evidence_attempts",
+      "entityType": "columns",
+      "table": "session_execution_checkpoint"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "classifier_turns",
+      "entityType": "columns",
+      "table": "session_execution_checkpoint"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "rag_retrievals",
+      "entityType": "columns",
+      "table": "session_execution_checkpoint"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "memory_retrievals",
+      "entityType": "columns",
+      "table": "session_execution_checkpoint"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "memory_writes",
+      "entityType": "columns",
+      "table": "session_execution_checkpoint"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "verification_turns",
+      "entityType": "columns",
+      "table": "session_execution_checkpoint"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "critic_turns",
       "entityType": "columns",
       "table": "session_execution_checkpoint"
     },
@@ -1043,6 +1123,96 @@
       "default": null,
       "generated": null,
       "name": "model_route",
+      "entityType": "columns",
+      "table": "session_execution_checkpoint"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "risk_assessment",
+      "entityType": "columns",
+      "table": "session_execution_checkpoint"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "verification_plan",
+      "entityType": "columns",
+      "table": "session_execution_checkpoint"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "critic_pass",
+      "entityType": "columns",
+      "table": "session_execution_checkpoint"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "selected_provider_id",
+      "entityType": "columns",
+      "table": "session_execution_checkpoint"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "selected_model_id",
+      "entityType": "columns",
+      "table": "session_execution_checkpoint"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "selected_instance_id",
+      "entityType": "columns",
+      "table": "session_execution_checkpoint"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "repository_context",
+      "entityType": "columns",
+      "table": "session_execution_checkpoint"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "memory_context",
+      "entityType": "columns",
+      "table": "session_execution_checkpoint"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "'[]'",
+      "generated": null,
+      "name": "pipeline_state",
       "entityType": "columns",
       "table": "session_execution_checkpoint"
     },

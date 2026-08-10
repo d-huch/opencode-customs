@@ -11,8 +11,25 @@ import { ProviderV2 } from "@opencode-ai/core/provider"
 import { LmStudioProbe } from "@/local-agent-runtime/lmstudio"
 import { ResourceGovernorSnapshot } from "@/local-agent-runtime/resource-governor"
 import { ModelCapabilityRouter } from "@opencode-ai/core/model-capability-router"
+import { SessionExecutionCheckpoint } from "@opencode-ai/core/session/execution-checkpoint"
+import { SessionExecutionBudget } from "@/session/execution-budget"
 
 const root = "/provider"
+
+export const AgentTurnRuntime = Schema.Struct({
+  turn: Schema.NullOr(SessionExecutionCheckpoint.Snapshot),
+  limits: Schema.Struct({
+    classifierTurns: Schema.Number,
+    ragRetrievals: Schema.Number,
+    memoryRetrievals: Schema.Number,
+    memoryWrites: Schema.Number,
+    verificationTurns: Schema.Number,
+    criticTurns: Schema.Number,
+    providerTurns: Schema.Number,
+    toolCalls: Schema.Number,
+    compactions: Schema.Number,
+  }),
+})
 
 const ProviderAuthErrorName = Schema.Union([
   Schema.Literal("BadRequest"),
@@ -79,6 +96,17 @@ export const ProviderApi = HttpApi.make("provider")
             summary: "Inspect model capability routing",
             description:
               "Report capability-based model role selections, scoring reasons, context limits, resource pressure, and the latest guarded LM Studio model handoff.",
+          }),
+        ),
+        HttpApiEndpoint.get("agentTurn", `${root}/runtime/turn`, {
+          query: WorkspaceRoutingQuery,
+          success: described(AgentTurnRuntime, "Latest durable Agent Turn Orchestrator state"),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "provider.runtime.turn",
+            summary: "Inspect the active agent turn",
+            description:
+              "Report the durable request phase, pinned model, recovery generation, and isolated classifier, RAG, memory, verification, critic, provider, tool, and compaction budgets.",
           }),
         ),
         HttpApiEndpoint.get("auth", `${root}/auth`, {

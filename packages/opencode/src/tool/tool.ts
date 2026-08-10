@@ -52,6 +52,12 @@ export interface ExecuteResult<M extends Metadata = Metadata> {
   attachments?: Omit<SessionV1.FilePart, "id" | "sessionID" | "messageID">[]
 }
 
+export type Execution = {
+  readonly access: "read" | "write" | "control"
+  readonly cache?: boolean
+  readonly completesEvidence?: boolean
+}
+
 export interface Def<
   Parameters extends Schema.Decoder<unknown> = Schema.Decoder<unknown>,
   M extends Metadata = Metadata,
@@ -60,6 +66,7 @@ export interface Def<
   description: string
   parameters: Parameters
   jsonSchema?: JSONSchema7
+  execution?: Execution
   execute(args: Schema.Schema.Type<Parameters>, ctx: Context): Effect.Effect<ExecuteResult<M>>
   formatValidationError?(error: unknown): string
 }

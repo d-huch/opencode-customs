@@ -18,6 +18,12 @@ type OpenAttachmentPickerOptions = {
 type SaveFilePickerOptions = { title?: string; defaultPath?: string }
 type PlatformName = "web" | "desktop"
 type DesktopOS = "macos" | "windows" | "linux"
+export type MicrophoneAccess = "granted" | "denied" | "restricted" | "not-determined" | "unknown"
+export type SpeechRecognitionEvent = {
+  type: "listening" | "partial" | "final" | "retrying" | "error"
+  text?: string
+  error?: string
+}
 
 export type FatalRendererErrorLog = {
   error: string
@@ -111,6 +117,37 @@ type PlatformBase = {
 
   /** Read image from clipboard (desktop only) */
   readClipboardImage?(): Promise<File | null>
+
+  /** Ask the operating system for microphone access (desktop only) */
+  requestMicrophoneAccess?(): Promise<MicrophoneAccess>
+
+  /** Recognize one spoken utterance using the operating system speech service (desktop only) */
+  recognizeSpeech?(locale: string): Promise<string>
+
+  /** Stop an active operating system speech recognition request (desktop only) */
+  stopSpeechRecognition?(): Promise<void>
+
+  /** Subscribe to the normalized live microphone level reported by native recognition. */
+  onSpeechRecognitionLevel?(callback: (level: number) => void): () => void
+
+  /** Subscribe to partial and final native speech recognition results. */
+  onSpeechRecognitionEvent?(callback: (event: SpeechRecognitionEvent) => void): () => void
+
+  /** Synthesize speech through a user-managed local OpenAI-compatible TTS endpoint. */
+  synthesizeLocalSpeech?(input: {
+    endpoint: string
+    model: string
+    voice: string
+    mode: "quality" | "fast"
+    speed?: number
+    text: string
+  }): Promise<{
+    audio: Blob
+    metrics: { cache: string; prepareMs: number; synthesisMs: number; totalMs: number }
+  }>
+
+  /** Cancel an in-flight local TTS request. */
+  cancelLocalSpeech?(): Promise<void>
 
   /** Export collected diagnostic logs (desktop only) */
   exportDebugLogs?(): Promise<string>

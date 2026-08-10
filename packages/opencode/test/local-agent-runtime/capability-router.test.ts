@@ -91,6 +91,88 @@ describe("LM Studio capability router", () => {
 
     expect(CapabilityRouter.latest(config)?.selections.some((selection) => selection.role === "fallback")).toBe(false)
   })
+
+  test("honors automatic route blocks without overriding an explicit coding model", async () => {
+    const config = {
+      provider: {
+        lmstudio: {
+          options: { baseURL: "http://router-blocked.test/v1" },
+          models: {
+            manual: { id: "manual", auto_route: false },
+            vision: { id: "blocked-vision", auto_route: false },
+          },
+        },
+      },
+    } satisfies ConfigV1.Info
+    const plan = await CapabilityRouter.route({
+      config,
+      preferredModelID: "manual",
+      requestShape: { textCharacters: 1_000, files: 0, images: 1, tools: 1 },
+      probe: {
+        provider: "lmstudio",
+        status: "ready",
+        baseURL: "http://router-blocked.test",
+        checkedAt: 1,
+        latencyMs: 1,
+        api: { native: true, openai: true, chatCompletions: true, responses: true, embeddings: false },
+        models: [
+          model("manual", "llm", 16 * 1024 ** 3, { tools: true, reasoning: true }),
+          model("blocked-vision", "llm", 10 * 1024 ** 3, { tools: true, vision: true, reasoning: true }),
+          model("allowed-vision", "llm", 8 * 1024 ** 3, { tools: true, vision: true }),
+        ],
+      },
+    })
+
+    expect(CapabilityRouter.selection(plan, "coding")?.modelID).toBe("manual")
+    expect(CapabilityRouter.selection(plan, "vision")?.modelID).toBe("allowed-vision")
+    expect(CapabilityRouter.allowsAutomaticRoute(config, "manual")).toBe(false)
+    expect(CapabilityRouter.allowsAutomaticRoute(config, "allowed-vision")).toBe(true)
+  })
+
+  test("invalidates the visible route when automatic routing policy changes", async () => {
+    const config = {
+      provider: { lmstudio: { options: { baseURL: "http://router-policy.test/v1" } } },
+    } satisfies ConfigV1.Info
+    await CapabilityRouter.route({
+      config,
+      preferredModelID: "model",
+      requestShape: { textCharacters: 100, files: 0, images: 0, tools: 1 },
+      probe: {
+        provider: "lmstudio",
+        status: "ready",
+        baseURL: "http://router-policy.test",
+        checkedAt: 1,
+        latencyMs: 1,
+        api: { native: true, openai: true, chatCompletions: true, responses: true, embeddings: false },
+        models: [model("model", "llm", 8 * 1024 ** 3, { tools: true })],
+      },
+    })
+    const blocked = {
+      provider: {
+        lmstudio: {
+          options: { baseURL: "http://router-policy.test/v1" },
+          models: { model: { auto_route: false } },
+        },
+      },
+    } satisfies ConfigV1.Info
+
+    expect(CapabilityRouter.latest(config)).toBeDefined()
+    expect(CapabilityRouter.latest(blocked)).toBeUndefined()
+  })
+
+  test("exposes a provider-wide routing switch without disabling embedding eligibility", () => {
+    const config = {
+      provider: {
+        lmstudio: {
+          auto_route: false,
+          models: { embedding: { auto_route: true } },
+        },
+      },
+    } satisfies ConfigV1.Info
+
+    expect(CapabilityRouter.automaticRoutingEnabled(config)).toBe(false)
+    expect(CapabilityRouter.allowsAutomaticRoute(config, "embedding")).toBe(true)
+  })
 })
 
 function model(

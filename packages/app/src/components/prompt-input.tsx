@@ -26,6 +26,7 @@ import {
   FileAttachmentPart,
 } from "@/context/prompt"
 import { useLayout } from "@/context/layout"
+import { modelVariantOptions } from "@/context/model-variant"
 import { useSDK } from "@/context/sdk"
 import { useSync } from "@/context/sync"
 import { useComments } from "@/context/comments"
@@ -83,6 +84,11 @@ import { showToast } from "@/utils/toast"
 import { ImagePreview } from "@opencode-ai/ui/image-preview"
 import type { ReferenceInfo } from "@opencode-ai/sdk/v2/client"
 import { SessionContextUsage } from "@/components/session-context-usage"
+import {
+  VoiceAgentChatStatus,
+  VoiceAgentControl,
+  type VoiceAgentStatus,
+} from "@/components/voice-agent-control"
 
 export { createPromptInputHistory }
 export type { PromptInputControls, PromptInputHistory, PromptInputProps, PromptInputState, PromptInputSubmission }
@@ -128,6 +134,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const permission = usePermission()
   const language = useLanguage()
   const platform = usePlatform()
+  const [voiceStatus, setVoiceStatus] = createSignal<VoiceAgentStatus>()
   const tabs = () => props.controls.session.tabs
   let editorRef!: HTMLDivElement
   let fileInputRef: HTMLInputElement | undefined
@@ -1190,8 +1197,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     />
   )
 
-  const variants = createMemo(() => ["default", ...props.controls.model.selection.variant.list()])
-  // Check provider variants directly: `variants` also includes the UI-only default option.
+  const variants = createMemo(() => modelVariantOptions(props.controls.model.selection.variant.list()))
+  // Check provider variants directly: `variants` may also include the UI-only default option.
   const showVariantControl = createMemo(() => props.controls.model.selection.variant.list().length > 0)
   const accepting = createMemo(() => {
     const id = props.controls.session.id
@@ -1460,6 +1467,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
         newLayoutDesigns={false}
         t={(key) => language.t(key as Parameters<typeof language.t>[0])}
       />
+      <VoiceAgentChatStatus status={voiceStatus()} />
       <DockShellForm
         onSubmit={handleSubmit}
         classList={{
@@ -1575,6 +1583,15 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
             />
 
             <div class="flex items-center gap-1 pointer-events-auto">
+              <VoiceAgentControl
+                appearance="legacy"
+                sessionID={() => props.controls.session.id}
+                working={working}
+                onTranscript={(text) => addPart({ type: "text", content: text, start: 0, end: text.length })}
+                onSubmit={() => void handleSubmit(new Event("submit"))}
+                onInterrupt={() => void abort()}
+                onStatusChange={setVoiceStatus}
+              />
               <Tooltip placement="top" inactive={!working() && blank()} value={tip()}>
                 <IconButton
                   data-action="prompt-submit"

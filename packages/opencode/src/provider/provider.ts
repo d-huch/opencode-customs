@@ -31,7 +31,13 @@ import { ModelV2 } from "@opencode-ai/core/model"
 import { ModelStatus } from "./model-status"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderError } from "./error"
-import { findLmStudioModel, lmStudioContextLimits, probeLmStudio } from "./lmstudio"
+import {
+  findLmStudioModel,
+  lmStudioContextLimits,
+  lmStudioDiscoveredChatModels,
+  lmStudioReasoningVariants,
+  probeLmStudio,
+} from "./lmstudio"
 import { RepositoryEmbeddings } from "@opencode-ai/core/repository-embeddings"
 import { lmStudioEmbeddingProvider } from "@/local-agent-runtime/embeddings"
 
@@ -39,8 +45,9 @@ const OPENAI_HEADER_TIMEOUT_DEFAULT = 10_000
 // A missing model limit is unknown capacity, not unlimited capacity. Conservative
 // defaults keep custom/local providers from admitting prompts that can exhaust the
 // host before the provider has a chance to return a context-length error.
-const UNKNOWN_CONTEXT_LIMIT = 4_096
+const UNKNOWN_CONTEXT_LIMIT = ModelV2.MIN_CONTEXT_LIMIT
 const UNKNOWN_OUTPUT_LIMIT = 512
+const LMSTUDIO_OUTPUT_LIMIT = 4_096
 
 function wrapSSE(res: Response, ms: number, ctl: AbortController) {
   if (typeof ms !== "number" || ms <= 0) return res
@@ -1099,6 +1106,30 @@ export function defaultModelIDs<T extends { models: Record<string, { id: string 
   return mapValues(providers, (item) => sort(Object.values(item.models))[0].id)
 }
 
+export function loadedLmStudioDefaultModelID<
+  T extends { models: Record<string, { id: string; api: { id: string } }> },
+>(provider: T, probe: Awaited<ReturnType<typeof probeLmStudio>>) {
+  return Object.values(provider.models).find((item) => {
+    const local = findLmStudioModel(probe, item.api.id) ?? findLmStudioModel(probe, item.id)
+    return local?.loaded === true && local.type === "llm"
+  })?.id
+}
+
+export async function runtimeDefaultModelIDs(
+  providers: Record<string, Info>,
+  input: { baseURL: unknown; apiKey: unknown },
+) {
+  const defaults = defaultModelIDs(providers)
+  const provider = providers.lmstudio
+  if (!provider) return defaults
+
+  delete defaults.lmstudio
+  const probe = await probeLmStudio(input)
+  const modelID = loadedLmStudioDefaultModelID(provider, probe)
+  if (modelID) defaults.lmstudio = modelID
+  return defaults
+}
+
 export class ModelNotFoundError extends Schema.TaggedErrorClass<ModelNotFoundError>()("ProviderModelNotFoundError", {
   providerID: ProviderV2.ID,
   modelID: ModelV2.ID,
@@ -1447,8 +1478,16 @@ const layer = Layer.effect(
                 )
               : undefined
           const discoveredContextLimits = lmStudioContextLimits(lmStudioProbe)
+          const configuredModels = provider.models ?? {}
+          const providerModels =
+            providerID === "lmstudio"
+              ? {
+                  ...lmStudioDiscoveredChatModels(lmStudioProbe, configuredModels),
+                  ...configuredModels,
+                }
+              : configuredModels
 
-          for (const [modelID, model] of Object.entries(provider.models ?? {})) {
+          for (const [modelID, model] of Object.entries(providerModels)) {
             const existingModel = parsed.models[model.id ?? modelID]
             const apiID = model.id ?? existingModel?.api.id ?? modelID
             const localModel = findLmStudioModel(lmStudioProbe, apiID) ?? findLmStudioModel(lmStudioProbe, modelID)
@@ -1463,16 +1502,29 @@ const layer = Layer.effect(
               if (model.id && model.id !== modelID) return modelID
               return existingModel?.name ?? modelID
             })
-            const contextLimit =
+            const discoveredContextLimit =
               model.limit?.context ||
               discoveredContextLimits[apiID] ||
               discoveredContextLimits[modelID] ||
               existingModel?.limit?.context ||
               UNKNOWN_CONTEXT_LIMIT
+            const contextLimit =
+              providerID === "lmstudio" && model.preserve_context !== true
+                ? Math.max(
+                    discoveredContextLimit,
+                    Math.min(
+                      ModelV2.MIN_CONTEXT_LIMIT,
+                      localModel?.context.supported ?? ModelV2.MIN_CONTEXT_LIMIT,
+                    ),
+                  )
+                : discoveredContextLimit
             const outputLimit =
               model.limit?.output ||
               existingModel?.limit?.output ||
-              Math.min(UNKNOWN_OUTPUT_LIMIT, Math.floor(contextLimit / 4))
+              Math.min(
+                providerID === "lmstudio" ? LMSTUDIO_OUTPUT_LIMIT : UNKNOWN_OUTPUT_LIMIT,
+                Math.floor(contextLimit / 4),
+              )
             const parsedModel: Model = {
               id: ModelV2.ID.make(modelID),
               api: {
@@ -1544,10 +1596,12 @@ const layer = Layer.effect(
               release_date: model.release_date ?? existingModel?.release_date ?? "",
               variants: {},
             }
+            const detectedReasoningVariants = lmStudioReasoningVariants(localModel?.capabilities.reasoning === true)
             const variants =
-              existingModel?.api.npm === parsedModel.api.npm
+              detectedReasoningVariants ??
+              (existingModel?.api.npm === parsedModel.api.npm
                 ? (existingModel.variants ?? ProviderTransform.variants(parsedModel))
-                : ProviderTransform.variants(parsedModel)
+                : ProviderTransform.variants(parsedModel))
             const merged = mergeDeep(variants, model.variants ?? {})
             parsedModel.variants = mapValues(
               pickBy(merged, (v) => !v.disabled),

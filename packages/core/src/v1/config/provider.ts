@@ -54,6 +54,12 @@ export const Model = Schema.Struct({
     }),
   ),
   experimental: Schema.optional(Schema.Boolean),
+  preserve_context: Schema.optional(Schema.Boolean).annotate({
+    description: "Keep the LM Studio context configured outside OpenCode instead of applying an automatic context size",
+  }),
+  auto_route: Schema.optional(Schema.Boolean).annotate({
+    description: "Allow the Local Agent Runtime to select this model automatically for capability-based routing",
+  }),
   status: Schema.optional(ModelStatus),
   provider: Schema.optional(
     Schema.Struct({ npm: Schema.optional(Schema.String), api: Schema.optional(Schema.String) }),
@@ -79,6 +85,10 @@ export const Info = Schema.Struct({
   env: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
   id: Schema.optional(Schema.String),
   npm: Schema.optional(Schema.String),
+  auto_route: Schema.optional(Schema.Boolean).annotate({
+    description:
+      "Allow the Local Agent Runtime to switch between this provider's models automatically (default: true)",
+  }),
   whitelist: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
   blacklist: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
   options: Schema.optional(

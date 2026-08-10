@@ -112,6 +112,49 @@ function basePart(messageID: string, id: string) {
 }
 
 describe("session.message-v2.toModelMessage", () => {
+  test("drops the orphaned request when an exact retry follows a failed model activation", async () => {
+    const firstID = "msg_first"
+    const failedID = "msg_failed"
+    const retryID = "msg_retry"
+    const error = {
+      name: "UnknownError",
+      data: { message: "Model activation failed" },
+    } as NonNullable<SessionV1.Assistant["error"]>
+    const input: SessionV1.WithParts[] = [
+      {
+        info: userInfo(firstID),
+        parts: [
+          {
+            ...basePart(firstID, "prt_first"),
+            type: "text",
+            text: "Скільки Віталік їздив учора?",
+          },
+        ],
+      },
+      {
+        info: assistantInfo(failedID, firstID, error),
+        parts: [],
+      },
+      {
+        info: userInfo(retryID),
+        parts: [
+          {
+            ...basePart(retryID, "prt_retry"),
+            type: "text",
+            text: "Скільки Віталік їздив учора?",
+          },
+        ],
+      },
+    ]
+
+    expect(await MessageV2.toModelMessages(input, model)).toStrictEqual([
+      {
+        role: "user",
+        content: [{ type: "text", text: "Скільки Віталік їздив учора?" }],
+      },
+    ])
+  })
+
   test("filters out messages with no parts", async () => {
     const input: SessionV1.WithParts[] = [
       {

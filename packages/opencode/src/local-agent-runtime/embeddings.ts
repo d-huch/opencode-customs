@@ -24,7 +24,12 @@ export function lmStudioEmbeddingProvider(
         const probe = yield* Effect.promise(() =>
           probeLmStudio({ baseURL, apiKey: provider?.options?.apiKey, request }),
         )
-        const candidates = probe.models.filter((model) => model.type === "embedding" && model.loaded)
+        const candidates = probe.models.filter(
+          (model) =>
+            model.type === "embedding" &&
+            model.loaded &&
+            (preferred !== undefined || CapabilityRouter.allowsAutomaticRoute(config, model.id)),
+        )
         const plan = yield* Effect.promise(() =>
           CapabilityRouter.route({
             config,

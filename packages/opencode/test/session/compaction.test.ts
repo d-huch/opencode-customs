@@ -1094,6 +1094,51 @@ describe("session.compaction.process", () => {
     }),
   )
 
+  it.instance(
+    "preserves the active request across nested compaction",
+    Effect.gen(function* () {
+      const ssn = yield* SessionNs.Service
+      const session = yield* ssn.create({})
+      const original = yield* createUserMessage(session.id, "Яка різниця між M1 Pro та M5 Max?")
+      yield* SessionCompaction.use.create({ sessionID: session.id, agent: "build", model: ref, auto: true })
+      const firstMessages = yield* ssn.messages({ sessionID: session.id })
+      const firstParent = firstMessages.at(-1)?.info.id
+      expect(firstParent).toBeTruthy()
+      yield* SessionCompaction.use.process({
+        parentID: firstParent!,
+        messages: firstMessages,
+        sessionID: session.id,
+        auto: true,
+      })
+
+      yield* SessionCompaction.use.create({ sessionID: session.id, agent: "build", model: ref, auto: true })
+      const secondMessages = (yield* ssn.messages({ sessionID: session.id })).filter(
+        (message) => message.info.id !== original.id,
+      )
+      const secondParent = secondMessages.at(-1)?.info.id
+      expect(secondParent).toBeTruthy()
+      expect(MessageV2.latestUserRequest(secondMessages)).toBeUndefined()
+      expect(MessageV2.userRequestText(MessageV2.activeUserRequest(secondMessages))).toBe(
+        "Яка різниця між M1 Pro та M5 Max?",
+      )
+
+      yield* SessionCompaction.use.process({
+        parentID: secondParent!,
+        messages: secondMessages,
+        sessionID: session.id,
+        auto: true,
+      })
+
+      const all = yield* ssn.messages({ sessionID: session.id })
+      const continuation = all.at(-1)?.parts.find((part): part is SessionV1.TextPart => part.type === "text")
+      expect(continuation).toMatchObject({
+        synthetic: true,
+        metadata: { compaction_continue: true },
+        text: "Яка різниця між M1 Pro та M5 Max?",
+      })
+    }),
+  )
+
   itCompaction.instance(
     "persists tail_start_id for retained recent turns",
     Effect.gen(function* () {

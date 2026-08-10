@@ -1,5 +1,6 @@
 import os from "os"
 import { spawnSync } from "node:child_process"
+import { ModelV2 } from "@opencode-ai/core/model"
 import { Schema } from "effect"
 import { findLmStudioModel, probeLmStudio } from "./lmstudio"
 
@@ -10,7 +11,7 @@ const DEFAULT_PRESSURE_PERCENT = 12
 const DEFAULT_CRITICAL_PERCENT = 6
 const DEFAULT_MIN_FREE_BYTES = 2 * GIB
 const DEFAULT_CRITICAL_FREE_BYTES = 1 * GIB
-const UNLOADED_MODEL_CONTEXT = 8_192
+const UNLOADED_MODEL_CONTEXT = ModelV2.MIN_CONTEXT_LIMIT
 const MAX_UNLOADED_MODEL_CONTEXT = 16_384
 const MODEL_CRASH_COOLDOWN_MS = 10_000
 const MODEL_CRASH_RECOVERY_MS = 2 * 60_000
@@ -205,13 +206,14 @@ export async function contextBudget(input: {
       : undefined
   const model = findLmStudioModel(probe, input.modelID)
   const runtimeContext = model?.context.active
+  const requestedContext = minimumManagedContext(input.requestedContext, model?.context.supported)
   const unloadedContext = Math.min(
-    input.requestedContext,
-    model?.context.supported ?? input.requestedContext,
+    requestedContext,
+    model?.context.supported ?? requestedContext,
     model ? MAX_UNLOADED_MODEL_CONTEXT : UNLOADED_MODEL_CONTEXT,
   )
   const decision = safeContextBudget({
-    requestedContext: input.requestedContext,
+    requestedContext,
     outputTokens: input.outputTokens,
     runtimeContext: runtimeContext ?? unloadedContext,
     status: current.status,
@@ -240,6 +242,10 @@ export async function contextBudget(input: {
     reason,
   }
   return decision
+}
+
+export function minimumManagedContext(requested: number, supported?: number) {
+  return Math.max(requested, Math.min(ModelV2.MIN_CONTEXT_LIMIT, supported ?? ModelV2.MIN_CONTEXT_LIMIT))
 }
 
 export async function acquireModel(input: {

@@ -1254,6 +1254,34 @@ it.instance(
 )
 
 it.instance(
+  "LM Studio models reserve enough output for reasoning and a visible answer",
+  Effect.gen(function* () {
+    const providers = yield* list
+    const model = providers[ProviderV2.ID.make("lmstudio")].models["local-model"]
+    expect(model.limit.context).toBe(4_096)
+    expect(model.limit.output).toBe(1_024)
+  }),
+  {
+    config: {
+      provider: {
+        lmstudio: {
+          name: "LM Studio",
+          npm: "@ai-sdk/openai-compatible",
+          env: [],
+          models: {
+            "local-model": {
+              name: "Local Model",
+              tool_call: true,
+            },
+          },
+          options: {},
+        },
+      },
+    },
+  },
+)
+
+it.instance(
   "provider options are deeply merged",
   Effect.gen(function* () {
     yield* set("ANTHROPIC_API_KEY", "test-api-key")

@@ -78,12 +78,162 @@ export const SessionLogLocation = Schema.Struct({
   path: Schema.String,
   exists: Schema.Boolean,
 })
+const LatencyPhase = Schema.Literals([
+  "admission",
+  "classifier",
+  "rag",
+  "memory",
+  "capability_probe",
+  "model_activation",
+  "context_compilation",
+  "prompt_processing",
+  "generation",
+  "tool_execution",
+  "verification",
+  "background_bookkeeping",
+])
+const LatencyStatus = Schema.Literals([
+  "pending",
+  "running",
+  "completed",
+  "skipped",
+  "timed_out",
+  "cancelled",
+  "failed",
+])
+const CacheStatus = Schema.Literals(["hit", "miss", "bypass", "unknown"])
+const ContextSource = Schema.Literals([
+  "stable_system_prefix",
+  "dynamic_system_tail",
+  "tool_schemas",
+  "current_user_prompt",
+  "recent_dialogue",
+  "checkpoint_summary",
+  "memory",
+  "repository_evidence",
+  "tool_results",
+])
+export const SessionTurnInspection = Schema.Struct({
+  path: Schema.String,
+  exists: Schema.Boolean,
+  requestMessageID: Schema.optional(Schema.String),
+  startedAt: Schema.optional(Schema.String),
+  completedAt: Schema.optional(Schema.String),
+  durationMs: Schema.optional(Schema.Number),
+  events: Schema.Array(
+    Schema.Struct({
+      timestamp: Schema.String,
+      type: Schema.String,
+      stage: Schema.Literals(["prompt", "classify", "recall", "model", "tool", "compaction", "recovery", "error"]),
+      status: Schema.Literals(["info", "error"]),
+      messageID: Schema.optional(Schema.String),
+      executionID: Schema.optional(Schema.String),
+      detail: Schema.optional(Schema.String),
+    }),
+  ),
+  stats: Schema.Struct({
+    events: Schema.Number,
+    modelRequests: Schema.Number,
+    toolCalls: Schema.Number,
+    toolErrors: Schema.Number,
+    compactions: Schema.Number,
+    errors: Schema.Number,
+  }),
+  latency: Schema.Struct({
+    phases: Schema.Array(
+      Schema.Struct({
+        phase: LatencyPhase,
+        status: LatencyStatus,
+        startedAt: Schema.optional(Schema.String),
+        completedAt: Schema.optional(Schema.String),
+        durationMs: Schema.optional(Schema.Number),
+        blocking: Schema.Boolean,
+        cache: CacheStatus,
+        detail: Schema.optional(Schema.String),
+      }),
+    ),
+    criticalPathMs: Schema.Number,
+    backgroundMs: Schema.Number,
+    parallelSavingsMs: Schema.Number,
+    potentialSavingsMs: Schema.Number,
+    blocker: Schema.optional(
+      Schema.Struct({
+        phase: LatencyPhase,
+        durationMs: Schema.Number,
+        detail: Schema.optional(Schema.String),
+      }),
+    ),
+    parallel: Schema.Array(
+      Schema.Struct({
+        phases: Schema.Array(LatencyPhase),
+        overlapMs: Schema.Number,
+      }),
+    ),
+    model: Schema.optional(
+      Schema.Struct({
+        providerID: Schema.optional(Schema.String),
+        modelID: Schema.optional(Schema.String),
+        instanceID: Schema.optional(Schema.String),
+        context: Schema.optional(Schema.Number),
+        reasoningEffort: Schema.optional(Schema.String),
+      }),
+    ),
+    providerCache: CacheStatus,
+    promptCache: Schema.Struct({
+      readTokens: Schema.Number,
+      writeTokens: Schema.Number,
+      inputTokens: Schema.Number,
+      promptTokens: Schema.Number,
+      reusePercent: Schema.Number,
+      prefixHash: Schema.optional(Schema.String),
+      prefixPreserved: Schema.optional(Schema.Boolean),
+      compactionPreserved: Schema.optional(Schema.Boolean),
+    }),
+  }),
+  context: Schema.optional(
+    Schema.Struct({
+      version: Schema.Literal(1),
+      estimator: Schema.Literal("canonical_serialized_conservative"),
+      tokens: Schema.Number,
+      limit: Schema.Number,
+      usage: Schema.Number,
+      compressed: Schema.Boolean,
+      overflow: Schema.Boolean,
+      cache: Schema.Struct({
+        prefixHash: Schema.String,
+        prefixTokens: Schema.Number,
+        dynamicTokens: Schema.Number,
+      }),
+      fragments: Schema.Array(
+        Schema.Struct({
+          source: ContextSource,
+          provenance: Schema.Array(Schema.String),
+          tokens: Schema.Number,
+          budget: Schema.Number,
+          included: Schema.Boolean,
+          truncated: Schema.Boolean,
+          deduplicated: Schema.Number,
+          preview: Schema.String,
+        }),
+      ),
+      tools: Schema.Array(
+        Schema.Struct({
+          name: Schema.String,
+          tokens: Schema.Number,
+          required: Schema.Boolean,
+          included: Schema.Boolean,
+        }),
+      ),
+    }),
+  ),
+})
 
 export const SessionPaths = {
   list: root,
   status: `${root}/status`,
   get: `${root}/:sessionID`,
   log: `${root}/:sessionID/log`,
+  inspect: `${root}/:sessionID/inspect`,
   children: `${root}/:sessionID/children`,
   todo: `${root}/:sessionID/todo`,
   diff: `${root}/:sessionID/diff`,
@@ -156,6 +306,19 @@ export const SessionApi = HttpApi.make("session")
             identifier: "session.log",
             summary: "Get session log location",
             description: "Retrieve the local diagnostic log path and whether the file currently exists.",
+          }),
+        ),
+        HttpApiEndpoint.get("inspect", SessionPaths.inspect, {
+          params: { sessionID: SessionID },
+          query: WorkspaceRoutingQuery,
+          success: described(SessionTurnInspection, "Inspect latest session turn"),
+          error: [HttpApiError.BadRequest, ApiNotFoundError],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "session.inspect",
+            summary: "Inspect latest session turn",
+            description:
+              "Retrieve a bounded diagnostic timeline for the latest user request without exposing full prompts or tool outputs.",
           }),
         ),
         HttpApiEndpoint.get("children", SessionPaths.children, {

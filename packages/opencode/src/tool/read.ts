@@ -379,6 +379,7 @@ export const ReadTool = Tool.define<
     return {
       description: DESCRIPTION,
       parameters: Parameters,
+      execution: { access: "read", cache: true } as const,
       execute: (params: Schema.Schema.Type<typeof Parameters>, ctx: Tool.Context<Metadata>) =>
         run(params, ctx).pipe(Effect.orDie),
     }

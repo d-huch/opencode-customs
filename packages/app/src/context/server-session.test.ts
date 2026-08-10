@@ -178,6 +178,37 @@ describe("server session", () => {
     expect(ctx.store.data.message.root).toEqual([])
   })
 
+  test("reloads pinned session content after the event stream reconnects", async () => {
+    const user = userMessage("message-1")
+    const assistant = assistantMessage("message-2", user.id)
+    const part = textPart(assistant.id, { text: "Recovered answer" })
+    const client = messageClient(
+      response([{ info: user, parts: [] }]),
+      response([
+        { info: user, parts: [] },
+        { info: assistant, parts: [part] },
+      ]),
+    )
+    const store = createServerSession(client)
+    store.pin("child")
+
+    await store.sync("child")
+    await store.reconnect()
+
+    expect(client.requests).toHaveLength(2)
+    expect(store.data.message.child).toEqual([user, assistant])
+    expect(store.data.part[assistant.id]).toEqual([part])
+  })
+
+  test("does not reload inactive sessions after the event stream reconnects", async () => {
+    const client = messageClient(response())
+    const store = createServerSession(client)
+
+    await store.reconnect()
+
+    expect(client.requests).toHaveLength(0)
+  })
+
   test("backfills an assistant-only initial page through its user root", async () => {
     const user = userMessage("message-1")
     const assistants = [assistantMessage("message-2", user.id), assistantMessage("message-3", user.id)]

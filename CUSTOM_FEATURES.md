@@ -127,19 +127,71 @@ already loaded, the entire vector path stays inactive and consumes no LM Studio 
 Retrieved source is treated as untrusted project data and remains a navigation aid; the agent must inspect current files
 before editing. Embedding line anchors improve the bounded source windows but do not bypass the Research Evidence Loop.
 
-## Durable project memory
+## Cross-session and cross-project Memory V2
 
-Each project has a small local memory file under the OpenCode cache directory. It stores two kinds of entries:
+OpenCode keeps bounded managed-memory files under its cache directory. Memory is shared deliberately through five
+explicit scopes:
+
+- `global` stores identity, language, and general preferences.
+- `cross-project` stores universal working rules that are valid independently of one repository.
+- `project` stores facts and decisions observed in one repository.
+- `session` stores temporary work for one session and expires automatically.
+- `pattern` stores a verified reusable solution that may be proposed only as an analogy.
+
+Project entries are also copied into a shared project catalogue. Opening an older project lazily migrates its existing
+location-scoped memory into that catalogue. In the originating repository, a project entry remains a fact. In any other
+repository it is classified and rendered as an analogy, receives a ranking penalty, and cannot contribute source-file
+paths to the current repository prompt. A pattern is always an analogy. This preserves useful cross-project experience
+without turning one repository's implementation into false evidence about another.
+
+Each record follows the managed lifecycle `candidate -> verified -> durable`, or transitions to `rejected`, `expired`,
+or `archived`.
+Automatic classifier admissions below the verification threshold remain candidates and are excluded from recall.
+Verified entries become durable after repeated successful use with sufficient confidence, or can be promoted manually.
+Rejected and expired entries remain visible for a bounded retention period so incorrect admissions can be debugged and
+restored instead of disappearing silently.
+
+Every stored record carries its source, origin project, scope, confidence, creation and verification timestamps, TTL,
+fact-or-analogy classification, conflict list, last recall reason, and a bounded usage history. The store contains three
+kinds of entries:
 
 - Successful query-to-file routes, so a related future task can start from previously useful project areas.
 - Stable bullets from normalized compaction summaries: objective, important details, completed work, and verified relevant
   files. Transient **Active**, **Blocked**, and **Next Move** sections are not persisted as durable memory.
+- High-confidence user-provided identity details, preferences, standing constraints, decisions, and deliberately taught
+  facts selected by the same language-neutral routing pass. The user does not need to write a special “remember”
+  command. The classifier receives the immediately preceding assistant message as bounded dialogue context, allowing it
+  to understand a terse direct answer without storing arbitrary short replies. Tasks, questions, requests to inspect or
+  change code, guesses, secrets, credentials, tool output, assistant inferences, and transient work state are rejected.
+  Admission uses the interactive model already selected for the turn; classifier failure is fail-closed and never
+  activates a hidden fallback model.
 
-Recall is query-specific. Exact lexical and path matches remain authoritative; when the current embedding model matches
-vectors stored with memory entries, semantic matches are merged without displacing lexical results. At most eight
-matching memory records contribute file ranking, while at most four distinct notes and 1,200 note characters can be
-rendered. The store keeps no more than 96 entries per project and expires entries after 90 days. Memory never replaces
-source verification and does not copy the full conversation back into the model request.
+Exact lexical and path matches remain authoritative; when the current embedding model matches vectors stored with memory
+entries, semantic matches are merged without displacing lexical results. Unrelated recent memories are not injected as a
+fallback: every recalled record must match the current query lexically or semantically. At most eight memory records
+contribute file ranking, while at most four distinct notes and 1,200 note characters can be rendered. The active bounded
+store keeps no more than 96 unpinned entries. Ordinary records stop participating in recall after 90 days without
+evidence but remain available for an explicit consolidation preview instead of disappearing silently. Session records
+expire after one day by default. Pinned records survive age pruning and cannot be silently replaced by the automatic classifier.
+Automatic conversation records include a category, scope, stable semantic topic, confidence, correction flag,
+classifier source, source message, origin project, lifecycle, and classification. An explicit high-confidence
+correction reuses its semantic topic and replaces an unpinned value. A lower-confidence or pinned-value correction
+becomes a visible conflict instead of silently choosing one. Obvious private keys, bearer-like tokens, and credentials
+embedded in URLs are rejected again at the storage boundary. Memory never replaces source verification and does not copy
+the full conversation back into the model request.
+
+Every successful recall updates bounded provenance metadata: the matching request, timestamp, consuming project,
+fact-or-analogy classification, count, and whether the match was lexical or semantic. Maintenance runs opportunistically
+during writes, inspection, and recall, transitioning explicitly expired records and removing old lifecycle tombstones
+without a resident background worker.
+
+Memory consolidation is an explicit two-phase operation. A deterministic preview identifies equivalent records within
+the same memory boundary, conflicts with a safe provenance winner, stale fact confidence, repeatedly confirmed reusable
+rules, and old unused records. Ambiguous conflicts remain unresolved. Applying the preview requires its exact
+fingerprint and generation time; if any memory changed, the operation fails stale and returns a fresh preview. Duplicate
+records are merged, stale facts lose confidence, independently reconfirmed cross-project rules and patterns gain
+confidence, and unused records move to `archived`. Pinned records are never modified, archived, or removed by
+consolidation. The desktop always shows the complete preview before enabling the apply action.
 
 Embedding RAG and semantic memory can be tuned in `opencode.json` or `opencode.jsonc`:
 
@@ -148,6 +200,8 @@ Embedding RAG and semantic memory can be tuned in `opencode.json` or `opencode.j
   "rag": {
     "embeddings": true,
     "memory": true,
+    // automatic (default), explicit, or off
+    "memory_admission": "automatic",
     // Optional. Otherwise the first already-loaded LM Studio embedding model is used.
     "model": "your-embedding-model-id",
     "max_files": 256,
@@ -158,6 +212,8 @@ Embedding RAG and semantic memory can be tuned in `opencode.json` or `opencode.j
 ```
 
 Set `embeddings` to `false` to keep only graph/LSP/lexical RAG, or `memory` to `false` to keep durable memory lexical.
+Set `memory_admission` to `explicit` to require a remember request, or `off` to stop adding new conversation memories
+without deleting existing records.
 
 ## Desktop Map panel
 
@@ -246,6 +302,11 @@ Failures that happen after an asynchronous prompt has been accepted are persiste
 and return the session to `idle`. The desktop therefore shows the error in the timeline instead of leaving a blank
 assistant record that looks like an ignored message.
 
+The global desktop event stream uses a typed heartbeat that refreshes the client watchdog without entering normal UI
+reducers. If the stream still reconnects, the desktop force-reloads pinned and non-idle sessions from persisted history.
+This reconciles assistant text and terminal state that may have been committed while the live subscription was between
+connections, without polling every inactive session.
+
 The latest active user request is also bound directly to the provider turn after compaction. When the original message
 has left the fitted projection, only runtime-authored continuation records for compaction, research evidence, or
 verification may supply that binding; arbitrary synthetic text is ignored. The exact active request is reused for RAG,
@@ -265,13 +326,101 @@ The defaults can be tuned for development with `OPENCODE_LOCAL_AGENT_MAX_MODEL_C
 
 Agent execution now persists a session-scoped checkpoint in SQLite instead of relying only on an in-memory loop. Each
 generation records its runtime (`v1` or `v2`), execution identity, owner process, provider step, assistant message, and
-the current phase: `preparing`, `streaming`, `settling_tools`, `verifying`, `repairing`, `verified`, or `continuing`.
-Completion, interruption, and failure are terminal states with timestamps and an optional error.
+execution state: `preparing`, `streaming`, `settling_tools`, `verifying`, `repairing`, `verified`, `reviewing`,
+`reviewed`, or `continuing`.
+Completion, interruption, and failure are terminal states with timestamps and an optional error. The checkpoint also
+stores the higher-level turn phase: `classify`, `recall`, `execute`, `verify`, `critic`, `complete`, or `failed`.
 
-The same generation-fenced checkpoint owns the per-request execution counters. A request may use at most 32 provider
-turns, 64 tool calls, and 12 context compactions. Compaction is deliberately not limited to one pass: long local-model
-requests may compact repeatedly, but they still terminate at the durable total budget. Counter increments are atomic,
-survive crash recovery, and reject writes from stale generations.
+The same generation-fenced checkpoint owns the per-request execution counters. A request may use at most 12 main
+provider turns, 32 tool calls, and 12 context compactions. Classifier, repository RAG, memory recall, and memory admission
+each have an independent one-call budget; verification has a three-turn budget and the separate critic has a one-attempt
+budget. Compaction is deliberately not limited to one pass: long local-model requests may compact repeatedly, but they
+still terminate at the durable total budget.
+Counter increments are atomic, survive crash recovery, and reject writes from stale generations.
+
+### Local Agent Runtime: unified Request Pipeline Scheduler
+
+Every genuine user request follows one explicit, durable pipeline:
+
+1. **Prompt admission** binds the promoted user message to the current generation.
+2. **Classification** determines conversation-only, repository, or external scope and may propose durable memory.
+3. **Repository recall** performs at most one bounded retrieval only for repository-scoped work.
+4. **Memory recall** retrieves query-relevant durable facts with a bounded deadline.
+5. **Model readiness** resolves, activates, and pins the interactive model.
+6. **Context compilation** assembles the permitted tools, cached recall, system context, and fitted history.
+7. **Execution** performs the provider turn.
+8. **Verification** runs only the repository-native checks required by policy.
+9. **Memory admission** persists an eligible high-confidence fact once the answer has completed.
+10. **Completion** closes the request boundary.
+
+Each phase has `pending`, `running`, `completed`, `skipped`, `timed_out`, `cancelled`, or `failed` state in the
+generation-fenced SQLite checkpoint. An exact repeated claim joins the existing preparation instead of duplicating it.
+When a newer user message becomes active, its claim aborts the older preparation and stale generation writes are
+rejected. Optional memory recall has a 1.5-second deadline and degrades to an empty result without delaying the
+interactive turn.
+
+Classifier traffic is isolated from the main provider-response queue. It cannot consume a queued coding response or
+silently become the interactive assistant. Conversation-only and external requests skip repository RAG. Git/session
+change summarization starts only for repository-scoped work. Classification, repository recall, and memory recall are
+stored and reused across tool continuations, compactions, and crash recovery instead of being recomputed on every
+provider turn.
+
+The scheduler overlaps independent work without changing its decisions or budgets. Durable memory recall starts while
+image preparation and model activation continue; repository routing waits for classification because its necessity
+depends on that result. Repository internals still parallelize map loading, learned-concept discovery, and embedding
+retrieval. Successful exact classifier decisions use a two-minute, 64-entry cache keyed by model, request, dialogue
+context, admission policy, and provider options; conservative or failed classifications are never cached. Memory-use
+accounting and compaction-memory persistence remain non-critical background work, while automatic conversation-memory
+admission is completed durably before the request boundary closes.
+
+### Local Agent Runtime: deterministic Context Compiler
+
+Every provider turn passes through one deterministic Context Compiler after routing and recall. The compiler separates
+the stable provider/agent prefix, alphabetically serialized tool schemas, active user prompt, bounded recent dialogue,
+latest checkpoint summary, relevant durable memory, repository evidence, only the current provider turn's tool
+results, and a request-specific dynamic system tail. Language binding, freshness, evidence, structured-output rules,
+user overrides, and the date needed for external freshness checks live in that tail instead of invalidating the
+cacheable prefix. Historical
+tool calls and results are structurally removed from dialogue replay, so an old tool cannot become required or be sent
+again merely because it appeared earlier in the session. Transient Objective, Active, Blocked, and Next Move sections
+are removed from checkpoint summaries before they can steer a newer user request.
+
+Each source has an independent token budget and provenance label. Exact duplicate system fragments are removed, tools
+are selected within their budget and then always serialized by name, and the complete outgoing request is estimated
+from one canonical serialization with conservative provider headroom. The stable environment no longer contains a
+changing timestamp. If the aggregate still exceeds the governed model input limit, the compiler sheds old dialogue,
+repository evidence, memory, checkpoint state, and optional tools in a stable order while preserving the active
+request and required tool schemas.
+
+The per-session JSONL log records a bounded `context.compiled` event. Turn Inspector renders that same compiler result:
+total tokens, safe limit, source budgets, included provenance, deduplication, truncation, the final tool list, cacheable
+prefix tokens, dynamic-tail tokens, and a privacy-safe prefix fingerprint.
+Preview text is bounded and removes credentials, authorization values, API keys, access tokens, passwords, secrets,
+and base64 payloads. The working prompt sent to the provider is not redacted; only the diagnostic preview is.
+
+Every completed provider step stores uncached input and prompt-cache read/write tokens in the existing
+`execution.finished` record. Turn Inspector derives total prompt tokens and reuse percentage from those persisted
+values, then compares prefix fingerprints across consecutive turns and across compaction inside one request. It
+therefore reports both the cache result returned by LM Studio and whether OpenCode preserved the cacheable prefix
+before the request reached the provider.
+
+LM Studio capability probes also reuse their existing short-lived cache before model activation. A forced fresh probe
+still verifies every newly loaded instance. These changes remove repeated local I/O and provider round trips while
+preserving checkpoint fencing, visible activation failures, configured compaction allowances, and the rule that an
+interactive request is never redirected to a hidden fallback model.
+
+The compatible model selected for the interactive request is pinned in the checkpoint before execution. All provider
+continuations for that request use the same provider, catalog model, and native LM Studio instance. If activation or
+inference fails, the turn fails visibly; no smaller or utility model receives the request as a hidden fallback.
+
+When a queued or steered user input is promoted while a drain is already active, the checkpoint starts a new request
+boundary atomically. Phase, cached retrievals, pinned model, route, assistant identity, and every per-request counter are
+reset together. Earlier execution cannot write into the new boundary because generation and request-message fencing are
+checked on every update.
+
+`GET /provider/runtime/turn` returns the latest turn phase, pinned model, generation, recovery count, and all consumed
+budgets. The desktop **Runtime** panel polls this endpoint and presents the same information without deriving state from
+compactable transcript text.
 
 After the OpenCode server process exits unexpectedly, a new process claims only checkpoints whose previous owner is no
 longer alive. The V2 runtime discovers these abandoned generations during startup. The legacy desktop runtime discovers
@@ -318,6 +467,22 @@ panel localizes those reason codes and displays the selected roles, model names,
 sizes, candidate count, and current Resource Governor state. The latest route is also available through the JavaScript
 SDK as `provider.runtime.router()` at `GET /provider/runtime/router`.
 
+LM Studio capability discovery is coalesced into one shared snapshot for 30 seconds. Parallel consumers such as the
+Runtime panel, provider catalog, Resource Governor, embedding discovery, and model router reuse the same in-flight
+request instead of independently polling both LM Studio model-list APIs. An OpenCode-managed model load or unload
+invalidates the matching snapshot immediately, and readiness verification after a load remains explicitly uncached.
+
+The **Runtime** panel lists every model returned by LM Studio, including models that are available but not currently
+loaded. **Automatically switch models** is enabled by default and can be disabled for the entire LM Studio provider.
+When disabled, foreground and compaction requests remain on the model explicitly selected in the chat. The switcher
+performs no capability probe, load, unload, or automatic model substitution for those requests. Dedicated embedding
+retrieval remains independent because it never becomes the interactive assistant.
+
+**Allow automatic routing** can also be disabled per model while provider-wide routing is enabled. A blocked model is
+excluded from automatic `embedding`, `utility`, and `vision` role selection and from automatic embedding discovery.
+Blocking does not unload the model, interrupt an active request, hide it from the composer, or replace an explicitly
+selected coding model. This keeps routing policy visible and deterministic while preserving manual control.
+
 The embedding role is used immediately by the bounded RAG index when a compatible model is already loaded. Embedding
 indexing remains background-only and never auto-loads a model. Coding and vision provider turns can also consider
 downloaded but unloaded candidates while host pressure is healthy or pressured; critical pressure limits the route to
@@ -334,6 +499,11 @@ given the new instance identifier only after LM Studio reports that exact instan
 are fail-closed: when the selected coding or vision model is incompatible, cannot fit in memory, fails to load, or fails
 its readiness probe, the request stops with a visible error. It is never handed to another model automatically. A
 previous instance may remain loaded as rollback state, but it does not receive the failed request.
+
+Each loaded model in the desktop **Runtime** panel has a **Do not adjust context automatically** switch. When enabled,
+OpenCode omits `context_length` from future LM Studio load requests for that model and accepts the context reported by
+the newly loaded instance. The setting is stored per native model identifier in OpenCode configuration, survives app
+restarts, and does not disable prompt fitting or the Resource Governor's protection against oversized requests.
 
 OpenCode tracks model-request ownership in the Resource Governor. It never unloads an instance that another local
 request is using, and it never automatically unloads an instance that was loaded outside OpenCode. Once a replacement
@@ -483,6 +653,11 @@ to report that verification is unavailable rather than fill exact facts from mem
 a utility model or an automatic fallback model. The built-in web-search tool is available to LM Studio sessions in both
 Build and Planning modes; changing the agent mode does not change the request scope.
 
+External search is offered to the model without forcing provider-level `tool_choice=required`. This avoids incompatible
+LM Studio templates emitting raw JSON or silently dropping the call. An invalid or unparseable classifier response is
+fail-local: it cannot activate hidden web or workspace tools, and the bounded provider turn finishes without an automatic
+search loop.
+
 The response-language contract remains a system instruction. It is not appended to user content, preventing a local
 model from quoting an internal language reminder as though the user had written it.
 
@@ -496,6 +671,11 @@ the session timeline.
 Custom providers do not always publish model limits. OpenCode Customs treats missing capacity as unknown rather than
 unlimited. A custom model without catalog or user-supplied limits receives a conservative 4,096-token context budget and
 a 512-token output budget. Explicit positive model limits still take precedence.
+
+Configured LM Studio chat models without an explicit output limit reserve one quarter of their effective context, capped
+at 4,096 tokens, so reasoning cannot silently consume the entire visible-answer budget. Native LM Studio reasoning
+options such as `on` and `off` replace incompatible generic effort presets. A length-limited turn that produces only
+hidden reasoning now ends with a visible session error, and an exact retry does not resend the orphaned failed request.
 
 Before provider execution, prompt admission estimates the complete serialized request, including system instructions,
 conversation history, routed repository context, and tool schemas. Small-context models use a compact, stack-neutral
@@ -545,30 +725,55 @@ Format references: [Build plugins](https://learn.chatgpt.com/docs/build-plugins)
 
 ## Repository-map API
 
-### RAG and memory viewer
+### Second-generation RAG and memory viewer
 
 The desktop **Map** panel opens a dedicated **RAG & Memory** viewer for the current project location. The viewer queries
 the real embedding index and durable repository-memory stores rather than maintaining a second UI-only database. Search
 is performed server-side and each request returns at most 200 matching records. Embedding vectors are never serialized
 to the desktop UI; RAG rows expose source paths, line anchors, hashes, timestamps, model metadata, and vector dimensions,
-while memory rows expose their verified text, terms, source files, kind, timestamp, and embedding metadata.
+while memory rows expose their text, terms, source files, kind, admission category, scope, origin project, semantic
+topic, confidence, source message, lifecycle state, fact-or-analogy classification, conflicts, TTL, creation and
+verification timestamps, recall provenance, bounded usage history, and embedding metadata.
 
-Individual records can be deleted after confirmation. Each store can also be cleared independently after a second
-confirmation that includes the current record count. Every operation remains location-scoped, so it affects only the
-project currently selected in the desktop client. Clearing the RAG store does not silently start new background work;
-use **Reindex** in the Map panel when a fresh semantic index is wanted.
+Repository retrieval is a deterministic multi-stage pipeline: exact identifier search, project-learned lexical and
+concept search, embedding recall, LSP/symbol lookup, graph expansion, reranking, directory-diverse selection, and bounded
+source extraction. It can also find existing analogous implementations. Every selected file records its score,
+confidence, stage-specific reasons, and an explicit `fact`, `assumption`, or `analogy` classification. Diversity penalties
+prevent one directory or repository area from consuming the entire context budget.
+
+The **Retrieval** tab exposes the durable history and aggregate Recall@5 and Recall@10. A user can mark an entry as
+actually used or irrelevant; future similar queries receive a positive or negative path hint. Feedback changes ranking
+only after ordinary repository evidence has produced candidates, so it cannot invent a file or replace current source
+inspection. Clearing retrieval history removes these learned ranking hints without deleting the structural map,
+embedding index, or conversation memory.
+
+Conversation memories can be verified, promoted to durable, rejected, restored, pinned, unpinned, given a 30-day
+expiration, restored to no expiration, or selected to resolve a recorded conflict. Individual records can be deleted
+after confirmation. Each store can also be cleared independently after a second confirmation that includes the current
+record count. RAG remains location-scoped. Global and cross-project memory are intentionally shared, while project
+memory from other locations is visible and recallable only through the analogy boundary described above. Clearing the
+RAG store does not silently start new background work; use **Reindex** in the Map panel when a fresh semantic index is
+wanted.
+
+The **Memory** tab also provides **Preview consolidation**. The preview lists every proposed merge, conflict decision,
+confidence change, archival action, pinned record count, and unresolved conflict before any mutation occurs. Applying a
+stale preview is rejected rather than replayed against newer memory.
 
 The desktop UI uses the location-aware V2 server API:
 
-| Method   | Path                                         | Purpose                                             |
-| -------- | -------------------------------------------- | --------------------------------------------------- |
-| `GET`    | `/api/repository-map`                        | Return the current map, building it when necessary. |
-| `POST`   | `/api/repository-map/refresh`                | Rebuild the structural map.                         |
-| `GET`    | `/api/repository-map/diagnostics`            | Read live diagnostic state and recent entries.      |
-| `POST`   | `/api/repository-map/diagnostics`            | Enable, disable, or clear diagnostics.              |
-| `GET`    | `/api/repository-map/knowledge`              | Search bounded RAG and memory metadata.             |
-| `DELETE` | `/api/repository-map/knowledge/{scope}/{id}` | Delete one `rag` or `memory` record.                |
-| `DELETE` | `/api/repository-map/knowledge/{scope}`      | Clear one location-scoped knowledge store.          |
+| Method   | Path                                                 | Purpose                                                           |
+| -------- | ---------------------------------------------------- | ----------------------------------------------------------------- |
+| `GET`    | `/api/repository-map`                                | Return the current map, building it when necessary.               |
+| `POST`   | `/api/repository-map/refresh`                        | Rebuild the structural map.                                       |
+| `GET`    | `/api/repository-map/diagnostics`                    | Read live diagnostic state and recent entries.                    |
+| `POST`   | `/api/repository-map/diagnostics`                    | Enable, disable, or clear diagnostics.                            |
+| `GET`    | `/api/repository-map/knowledge`                      | Search bounded RAG and memory metadata.                           |
+| `DELETE` | `/api/repository-map/knowledge/{scope}/{id}`         | Delete one `rag` or `memory` record.                              |
+| `PATCH`  | `/api/repository-map/knowledge/memory/{id}`          | Verify, promote, reject, restore, pin, expire, or resolve memory. |
+| `GET`    | `/api/repository-map/knowledge/memory/consolidation` | Preview deterministic memory consolidation.                       |
+| `POST`   | `/api/repository-map/knowledge/memory/consolidation` | Apply the preview if its fingerprint remains current.             |
+| `PATCH`  | `/api/repository-map/knowledge/retrieval/{id}`       | Mark one selected path used, irrelevant, or clear.                |
+| `DELETE` | `/api/repository-map/knowledge/{scope}`              | Clear one location-scoped knowledge store.                        |
 
 All endpoints accept the standard location query used by the V2 API. Generated Promise, Effect, and JavaScript SDK
 clients expose the same operations through `repositoryMap`.
@@ -593,6 +798,182 @@ button refreshes the file state before revealing it in Finder or the platform fi
 log produces an explicit message instead of a silent failure. Remote server sessions do not expose a host filesystem
 link in the desktop UI.
 
+The same tab includes **Turn Inspector**, which reads at most the latest 200 JSONL events beginning with the newest
+genuine user prompt. Its Latency and Critical Path view measures admission, classification, repository RAG, memory
+recall, LM Studio capability probing, model activation, context compilation, prompt processing, generation, tool
+execution, verification, and non-blocking bookkeeping. A wall-clock timeline identifies the longest blocking phase,
+operations that overlapped, time already saved through parallelism, cache hits and misses, and an upper-bound estimate
+for avoidable cache-miss latency. It also shows the selected model, context limit, reasoning effort, and provider prompt
+cache state. Prompt-cache diagnostics include read/write token counts, reuse percentage, stable-prefix preservation,
+and compaction preservation. Nested tool execution is not counted twice when it overlaps a model generation interval.
+
+The inspector exposes only bounded summaries plus the redacted Context Compiler preview; unrestricted prompts,
+repository context, tool arguments, and tool output are never returned by this endpoint. Phase state comes from the
+generation-fenced SQLite checkpoint and timestamped JSONL events, so a running, failed, recovered, or completed turn
+can be inspected with the same schema. The typed
+`GET /session/{sessionID}/inspect` endpoint returns the same latest-turn view for external diagnostics.
+
+Before a tool reaches execution, a firewall verifies that its name exists in the current request and that its input is a
+complete JSON object. Conservative syntax repair may preserve an already-emitted value, but it never invents missing
+content. A malformed serialized tool envelope now fails the provider turn instead of being rendered as chat text, and
+invalid input is never redirected through a hidden `invalid` tool. Three identical calls are terminated as a visible
+tool error without a permission prompt or automatic retry.
+
+### Tool Planner and bounded parallel execution
+
+Every executable tool is scheduled through a process-global, workspace-scoped planner only after input validation and
+durable tool-call budget admission accept the call. The existing processor call is idempotent, so provider event replay
+cannot consume the budget twice. Built-in tools declare one of three access modes: read, write, or control.
+Independent read and search calls may run concurrently, while writes wait for active reads and the previous write.
+Reads submitted after a write wait for its completion. Unknown plugin and MCP tools default to write access so an
+undeclared side effect cannot be parallelized accidentally.
+
+The planner assigns a monotonically increasing node to every call and records its dependency nodes, chosen concurrency,
+cache state, and early-stop reason in the per-session JSONL log as `tool.plan`. Read concurrency adapts to live Resource
+Governor pressure and available CPU capacity: healthy machines allow a small bounded fan-out, pressure reduces it, and
+critical pressure serializes reads.
+
+Safe read-only results are cached for 60 seconds within the originating session. Equivalent arguments are serialized
+deterministically, concurrent duplicates share one in-flight execution, and later provider turns can reuse the bounded
+result. Results with attachments are not cached. Every write attempt advances the workspace generation and clears
+cached and in-flight reads, including a write that fails after a possible partial side effect. External filesystem
+changes remain bounded by the short TTL.
+
+When the evidence tool accepts a complete finding, the request-level planner state survives provider continuations and
+turn compaction. Later search calls for that same genuine request complete as explicitly skipped instead of consuming
+another tool execution. A new user request receives a fresh evidence state. This optimization does not replace or
+weaken durable provider-turn, tool-call, compaction, or evidence-attempt budgets.
+
+### Change Risk Classifier
+
+Every mutation admitted by the V1 desktop agent passes through a deterministic risk classifier after durable tool-call
+budget and firewall admission but before the Tool Planner executes it. Classification uses the affected artifact paths,
+workspace scope, file count, destructive intent, and whether the tool supplied trusted mutation metadata. It does not
+depend on user-language keywords, model names, frameworks, or project-specific vocabulary.
+
+The classifier recognizes documentation, local UI, backend logic, database, permissions and authentication, build and
+runtime configuration, public API and protocol contracts, dependency resolution, and changes that cross independently
+deployable workspace packages. Unknown plugin or MCP mutations fail closed as high risk when they do not declare trusted
+capabilities.
+
+| Risk       | Plan        | Scope budget | Verification | Critic | Extra confirmation | Automatic apply |
+| ---------- | ----------- | ------------ | ------------ | ------ | ------------------ | --------------- |
+| `low`      | Optional    | 3 files      | Focused      | No     | No                 | Yes             |
+| `medium`   | Recommended | 6 files      | Focused      | No     | No                 | Yes             |
+| `high`     | Required    | 10 files     | Extended     | Yes    | Yes                | No              |
+| `critical` | Required    | 20 files     | Full         | Yes    | Yes                | No              |
+
+The extra high/critical approval uses the dedicated `change_risk` permission and cannot be bypassed by a generic
+wildcard allow rule. Existing explicit deny rules remain authoritative. The approval describes the detected categories,
+target files, score, reasons, required plan, verification depth, and critic requirement so the user sees the actual
+boundary before any mutation begins.
+
+The highest assessment for the current request is stored in the generation-fenced SQLite execution checkpoint, attached
+to tool-planner metadata, and written to the per-session JSONL log as `change.risk`. A stale process cannot overwrite a
+newer generation. Verification reads the completed mutation metadata and requests the policy's required depth. The
+separate post-verification Critic Pass described below owns review execution; the risk policy records when that review
+is additionally required by the change boundary.
+
+### Verification Matrix
+
+The V1 desktop verification loop converts the changed artifact set and highest Change Risk assessment into a
+deterministic minimum verification plan. The matrix chooses check types rather than hard-coded commands, languages, or
+frameworks. The agent maps only those types to focused repository-native commands:
+
+| Change signal | Minimum selected verification |
+| ------------- | ----------------------------- |
+| Every mutation | Git diff inspection |
+| Documentation | Focused formatter when available |
+| Local UI | Component test and conditional screenshot comparison |
+| Backend logic | Focused unit test and conditional typecheck |
+| Database | Migration validation and focused feature test |
+| Permissions/auth | Focused allow/deny unit and feature tests |
+| Build/config | Affected build target and conditional config lint |
+| Public API | Contract generation/validation and typecheck |
+| Dependencies | Affected build target and conditional manifest lint |
+| Multi-package | Cross-boundary typecheck and the smallest composing build |
+
+Overlapping categories are deduplicated, so a single command may cover multiple selected types. Required checks that
+cannot run leave the change explicitly unverified. Conditional checks may be omitted only with a concrete availability
+reason. The verification tool rejects unrelated check types, records the reason for every selected type, and includes
+the executed commands, omissions, missing checks, LSP diagnostics, and result in its bounded metadata and output. The
+agent is instructed to summarize which checks ran and why in the final response.
+
+The complete plan is written to the generation-fenced SQLite checkpoint as `verification_plan`, emitted to the
+per-session JSONL log as `verification.matrix`, and attached to the synthetic verification continuation. Recovery and
+compaction therefore preserve the same verification boundary instead of allowing a later provider turn to broaden or
+weaken it. A new genuine user request clears the previous plan.
+
+### Evidence-based Critic Pass
+
+After a request changes files and the Verification Matrix passes, OpenCode Customs runs one separate evidence-based
+review by default. This is not another execution loop. The reviewer receives a new compact context containing only:
+
+- the original genuine user task;
+- the request-scoped patch and changed-file allowlist;
+- compact verification results;
+- known omissions, truncation, and other explicit limitations.
+
+Conversation history, old tool calls, repository RAG, cross-session memory, plans from older requests, MCP tools, and
+editing tools are excluded from this context. The only available control tool accepts either a clean result or concrete
+findings. Every finding must identify a changed file, the best available line number, a specific consequence, and direct
+evidence from the supplied patch or verification output. Findings outside the current request's changed-file allowlist
+are rejected.
+
+The request's already selected strong model is reused by default. An alternate model is used only when
+`verification.reviewer_agent` explicitly names an agent configured for the reviewer role; no hidden utility or fallback
+model is selected. The reviewer cannot write files, run commands, request more repository context, or recursively start
+another review.
+
+The single attempt is consumed through the durable `critic_turns` budget. Its pending or completed `critic_pass` record,
+model identity, changed files, findings, error, and `critic_review` pipeline phase are stored in the generation-fenced
+SQLite checkpoint. Recovery preserves the consumed attempt and never repeats a completed review. A stale process cannot
+replace a newer result, and a new genuine user request clears the previous critic boundary. If the reviewer does not
+submit a valid result, the pass ends visibly as failed without an automatic retry or self-review loop.
+
+## Evaluation Harness
+
+OpenCode Customs includes a repeatable agent Evaluation Harness under `evals/`. The standard
+`evals/agent-reliability.json` suite covers natural conversation, memory across sessions and projects, exact-symbol and
+abstract feature search, unfamiliar Laravel/Vue, Unity/C#, Node, and Python repositories, local and cross-module edits,
+screenshot-to-code analysis, malformed or repeated tool calls, durable recovery, resource pressure, and unavailable
+models. Small checked-in fixture projects provide known files and dependency flows, so repository search quality is
+measured against stable ground truth instead of whichever application happens to be open.
+
+Each run records deterministic answer assertions, expected-file discovery, RAG Recall@5 and Recall@10 from the actual
+ordered files selected for repository context, provider turns, tool calls, compactions, token usage, per-phase time,
+verification status, process errors, repeated output, and repeated-tool loops. Raw JSON output, stderr, and per-session
+JSONL diagnostics are kept beside the report for later debugging.
+
+Run one scenario repeatedly while tuning the agent:
+
+```bash
+cd packages/opencode
+bun src/index.ts eval run ../../evals/agent-reliability.json \
+  --revision baseline \
+  --scenario exact-symbol \
+  --output ../../eval-results/baseline.json
+```
+
+Run the same scenario after a change and compare the reports:
+
+```bash
+bun src/index.ts eval run ../../evals/agent-reliability.json \
+  --revision candidate \
+  --scenario exact-symbol \
+  --output ../../eval-results/candidate.json
+
+bun src/index.ts eval compare \
+  ../../eval-results/baseline.json \
+  ../../eval-results/candidate.json \
+  --fail-on-regression
+```
+
+Omit `--scenario` to run every scenario whose required environment is available. Recovery and resource-pressure cases
+use `OPENCODE_EVAL_RECOVERY_REPO` and `OPENCODE_EVAL_RESOURCE_REPO`, so fault experiments do not run against an arbitrary
+working repository. `--binary`, `--model`, and `--agent` can pin the executable and runtime being compared. The report
+schema is versioned, and `eval score` can score a recorded trial without contacting a model.
+
 ## Custom desktop branding
 
 The custom icon source and generated PNG assets live in `packages/desktop/icons/customs`. The `customs` icon channel is
@@ -608,6 +989,65 @@ OPENCODE_CHANNEL=dev OPENCODE_ICON_CHANNEL=customs CSC_IDENTITY_AUTO_DISCOVERY=f
 
 The unpacked macOS application is created at `dist/mac-arm64/OpenCode Customs.app`. The bundle icon and runtime Dock icon
 are packaged separately so Finder and the running application use the same branding.
+
+## Desktop voice agent
+
+OpenCode Customs can turn the desktop composer into a push-to-talk or hands-free voice interface. The microphone control
+is available in both composer generations. Final recognition results are inserted as ordinary prompt text and, when
+automatic submission is enabled, are sent through the same request scheduler used by typed input. The voice layer does
+not bypass admission, memory, repository retrieval, model selection, tools, durable checkpoints, or verification, and it
+does not select a hidden fallback model.
+
+Partial recognition results are streamed to the composer. The native recognizer applies adaptive endpointing: a
+punctuated utterance closes quickly, a very short utterance gets a longer pause, and ordinary speech uses a bounded
+silence window. Final recognition results still enter the normal durable request pipeline.
+
+As assistant text streams, the first complete sentence or a bounded clause is sent through the desktop IPC bridge to the
+independent OpenAI-compatible backend in `services/ukrainian-tts`. Quality mode uses Silero V5 CIS Extended for
+Ukrainian, a contextual `stress-uk` accentor, a pronunciation dictionary, and a dedicated Silero English model. Complete
+English passages use that English model. Short Latin fragments inside predominantly Ukrainian text are first resolved by
+the pronunciation dictionary and then adapted to Ukrainian phonetics when no explicit pronunciation exists. Fast mode
+applies the same short-fragment adaptation before Ukrainian Piper ONNX synthesis. Preparing the next clause while the
+current one plays reduces time to first audio. New assistant replies are spoken for typed prompts as well as voice-submitted
+prompts. Repeated synthesis and accent results are cached without placing WAV or base64 data in model context. Markdown
+presentation and fenced code are removed from the spoken form without modifying the stored response.
+
+Hands-free mode can also run recognition while a synthesized sentence is playing. Recognition is armed after a short
+playback guard interval. Transcripts that overlap any text already spoken in the current response are treated as speaker
+echo, and short incidental fragments are ignored. A stable, distinct utterance cancels the active audio request and
+playback, interrupts an unfinished model turn, and immediately becomes the next user prompt. The recognizer then resumes
+after the response without another button press. Browser/macOS speech synthesis is not part of this path and is never used
+as a fallback.
+
+The synthetic **Default Project** workspace is conversation-only. Its session header and tab set omit the Git review panel
+instead of offering to initialize a repository for a workspace that is not a source project.
+
+The **Settings → General → Voice agent** section controls:
+
+- whether the microphone control is visible;
+- whether final dictation is submitted automatically;
+- whether response sentences are spoken as soon as they are complete;
+- the local TTS endpoint, explicit quality or fast mode, and the voice (`kateryna`, `lada`, `mykyta`, `oleksa`,
+  `tetiana`, or the Piper voice);
+- a test phrase with backend, synthesis, cache, and time-to-first-sound metrics;
+- whether adaptive hands-free listening, automatic resume, and voice interruption are enabled.
+
+On macOS the desktop bundle declares microphone usage and Electron grants media permission only to the trusted internal
+renderer origin. Recognition availability still depends on a compatible system/browser speech-recognition service. If
+that service is unavailable, microphone access fails, or the Docker TTS backend is not ready, the composer returns to
+idle and shows a concrete error instead of silently hanging or selecting a hidden fallback.
+
+Start the default local backend with:
+
+```bash
+cd services/ukrainian-tts
+docker compose up --build -d
+```
+
+The first start downloads the selected Silero, Piper, and accentor artifacts into a persistent Docker volume. Silero V5
+CIS Extended is distributed under CC-NC-BY; Piper is GPL-3.0 and individual voices may have additional model-card terms.
+The backend accepts `POST /v1/audio/speech`, reports each mode independently through `GET /health`, and binds port 8880
+to localhost only. It never switches from quality to fast mode automatically.
 
 ## Current limitations
 

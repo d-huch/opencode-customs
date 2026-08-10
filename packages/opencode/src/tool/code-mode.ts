@@ -196,6 +196,7 @@ export const CodeModeTool = Tool.define(
     const init: Tool.DefWithoutID<typeof Parameters, Metadata> = {
       description: DESCRIPTION,
       parameters: Parameters,
+      execution: { access: "write" },
       execute: Effect.fn("CodeMode.execute")(function* (params, ctx) {
         if (ctx.abort.aborted) {
           return {

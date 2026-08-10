@@ -119,6 +119,22 @@ function repositoryKnowledgeMutation(value: unknown) {
   check(typeof value.removed === "number" && value.removed >= 0, "knowledge mutation should report removals")
 }
 
+function memoryConsolidationPreview(value: unknown) {
+  object(value)
+  check(typeof value.fingerprint === "string", "memory consolidation should report a fingerprint")
+  check(typeof value.actionable === "number", "memory consolidation should report actionable changes")
+  check(typeof value.protected === "number", "memory consolidation should report protected entries")
+  array(value.actions)
+}
+
+function memoryConsolidationResult(value: unknown) {
+  object(value)
+  check(typeof value.applied === "boolean", "memory consolidation should report whether it applied")
+  check(typeof value.stale === "boolean", "memory consolidation should report stale previews")
+  object(value.preview)
+  memoryConsolidationPreview(value.preview)
+}
+
 const scenarios: Scenario[] = [
   http.protected
     .get("/global/health", "global.health")
@@ -743,6 +759,18 @@ const scenarios: Scenario[] = [
     .get("/api/repository-map/knowledge", "v2.repositoryMap.knowledge")
     .at((ctx) => ({ path: "/api/repository-map/knowledge?limit=10", headers: ctx.headers() }))
     .json(200, locationData(repositoryKnowledge)),
+  http.protected
+    .get("/api/repository-map/knowledge/memory/consolidation", "v2.repositoryMap.previewMemoryConsolidation")
+    .json(200, locationData(memoryConsolidationPreview)),
+  http.protected
+    .post("/api/repository-map/knowledge/memory/consolidation", "v2.repositoryMap.applyMemoryConsolidation")
+    .at((ctx) => ({
+      path: "/api/repository-map/knowledge/memory/consolidation",
+      headers: ctx.headers(),
+      body: { fingerprint: "stale", generatedAt: 0 },
+    }))
+    .mutating()
+    .json(200, locationData(memoryConsolidationResult)),
   http.protected
     .delete("/api/repository-map/knowledge/{scope}/{id}", "v2.repositoryMap.removeKnowledge")
     .at((ctx) => ({

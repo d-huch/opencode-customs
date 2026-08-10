@@ -1,4 +1,4 @@
-import { Component, Show, createMemo, createResource, onMount } from "solid-js"
+import { Component, Show, createMemo, createResource, createSignal, onMount } from "solid-js"
 import { createMediaQuery } from "@solid-primitives/media"
 import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
 import { SelectV2 } from "@opencode-ai/ui/v2/select-v2"
@@ -95,6 +95,63 @@ export const SettingsGeneralV2: Component<{
   const mobile = createMediaQuery("(max-width: 767px)")
 
   const updater = useUpdaterAction()
+  const [voiceTest, setVoiceTest] = createSignal<"idle" | "running" | string>("idle")
+  const voiceModes = [
+    { value: "quality" as const, label: language.t("settings.general.voice.mode.quality") },
+    { value: "fast" as const, label: language.t("settings.general.voice.mode.fast") },
+  ]
+  const qualityVoices = [
+    { value: "kateryna", label: language.t("settings.general.voice.voice.kateryna") },
+    { value: "lada", label: language.t("settings.general.voice.voice.lada") },
+    { value: "mykyta", label: language.t("settings.general.voice.voice.mykyta") },
+    { value: "oleksa", label: language.t("settings.general.voice.voice.oleksa") },
+    { value: "tetiana", label: language.t("settings.general.voice.voice.tetiana") },
+  ]
+  const fastVoices = [{ value: "ukrainian_tts", label: language.t("settings.general.voice.voice.piper") }]
+  const voiceOptions = createMemo(() => (settings.voice.ttsMode() === "quality" ? qualityVoices : fastVoices))
+
+  const testVoice = async () => {
+    if (!platform.synthesizeLocalSpeech) {
+      setVoiceTest(language.t("settings.general.voice.test.unavailable"))
+      return
+    }
+    setVoiceTest("running")
+    const started = performance.now()
+    const result = await platform
+      .synthesizeLocalSpeech({
+        endpoint: settings.voice.ttsEndpoint(),
+        model: settings.voice.ttsModel(),
+        voice: settings.voice.ttsVoice(),
+        mode: settings.voice.ttsMode(),
+        text: language.t("settings.general.voice.test.phrase"),
+      })
+      .catch((error: unknown) => {
+        setVoiceTest(error instanceof Error ? error.message : String(error))
+        return undefined
+      })
+    if (!result) return
+    const url = URL.createObjectURL(result.audio)
+    const audio = new Audio(url)
+    audio.onended = () => URL.revokeObjectURL(url)
+    audio.onerror = () => URL.revokeObjectURL(url)
+    const played = await audio.play().then(
+      () => true,
+      (error: unknown) => {
+        URL.revokeObjectURL(url)
+        setVoiceTest(error instanceof Error ? error.message : String(error))
+        return false
+      },
+    )
+    if (!played) return
+    setVoiceTest(
+      language.t("settings.general.voice.test.metrics", {
+        first: Math.round(performance.now() - started),
+        total: Math.round(result.metrics.totalMs),
+        synthesis: Math.round(result.metrics.synthesisMs),
+        cache: result.metrics.cache,
+      }),
+    )
+  }
 
   const dir = createMemo(() => {
     if (!props.sessionID) return undefined
@@ -635,6 +692,129 @@ export const SettingsGeneralV2: Component<{
     </div>
   )
 
+  const VoiceSection = () => (
+    <div class="settings-v2-section">
+      <h3 class="settings-v2-section-title">{language.t("settings.general.section.voice")}</h3>
+
+      <SettingsListV2>
+        <SettingsRowV2
+          title={language.t("settings.general.voice.enabled.title")}
+          description={language.t("settings.general.voice.enabled.description")}
+        >
+          <Switch checked={settings.voice.enabled()} onChange={settings.voice.setEnabled} />
+        </SettingsRowV2>
+
+        <SettingsRowV2
+          title={language.t("settings.general.voice.autoSubmit.title")}
+          description={language.t("settings.general.voice.autoSubmit.description")}
+        >
+          <Switch
+            checked={settings.voice.autoSubmit()}
+            disabled={!settings.voice.enabled()}
+            onChange={settings.voice.setAutoSubmit}
+          />
+        </SettingsRowV2>
+
+        <SettingsRowV2
+          title={language.t("settings.general.voice.speakResponses.title")}
+          description={language.t("settings.general.voice.speakResponses.description")}
+        >
+          <Switch
+            checked={settings.voice.speakResponses()}
+            disabled={!settings.voice.enabled()}
+            onChange={settings.voice.setSpeakResponses}
+          />
+        </SettingsRowV2>
+
+        <Show when={settings.voice.speakResponses()}>
+          <SettingsRowV2
+            title={language.t("settings.general.voice.ttsEndpoint.title")}
+            description={language.t("settings.general.voice.ttsEndpoint.description")}
+          >
+            <div class="w-full sm:w-[320px]">
+              <TextInputV2
+                data-action="settings-voice-tts-endpoint"
+                type="url"
+                appearance="base"
+                value={settings.voice.ttsEndpoint()}
+                onInput={(event) => settings.voice.setTTSEndpoint(event.currentTarget.value)}
+                placeholder="http://127.0.0.1:8880/v1/audio/speech"
+                spellcheck={false}
+                autocomplete="off"
+                aria-label={language.t("settings.general.voice.ttsEndpoint.title")}
+              />
+            </div>
+          </SettingsRowV2>
+
+          <SettingsRowV2
+            title={language.t("settings.general.voice.mode.title")}
+            description={language.t("settings.general.voice.mode.description")}
+          >
+            <SelectV2
+              appearance="inline"
+              data-action="settings-voice-tts-mode"
+              options={voiceModes}
+              current={voiceModes.find((option) => option.value === settings.voice.ttsMode())}
+              placement="bottom-end"
+              gutter={6}
+              value={(option) => option.value}
+              label={(option) => option.label}
+              onSelect={(option) => option && settings.voice.setTTSMode(option.value)}
+            />
+          </SettingsRowV2>
+
+          <SettingsRowV2
+            title={language.t("settings.general.voice.ttsVoice.title")}
+            description={language.t("settings.general.voice.ttsVoice.description")}
+          >
+            <SelectV2
+              appearance="inline"
+              data-action="settings-voice-tts-voice"
+              options={voiceOptions()}
+              current={voiceOptions().find((option) => option.value === settings.voice.ttsVoice()) ?? voiceOptions()[0]}
+              placement="bottom-end"
+              gutter={6}
+              value={(option) => option.value}
+              label={(option) => option.label}
+              onSelect={(option) => option && settings.voice.setTTSVoice(option.value)}
+            />
+          </SettingsRowV2>
+
+          <SettingsRowV2
+            title={language.t("settings.general.voice.test.title")}
+            description={
+              voiceTest() === "idle"
+                ? language.t("settings.general.voice.test.description")
+                : voiceTest() === "running"
+                  ? language.t("settings.general.voice.test.running")
+                  : voiceTest()
+            }
+          >
+            <ButtonV2
+              size="normal"
+              variant="neutral"
+              disabled={voiceTest() === "running"}
+              onClick={() => void testVoice()}
+            >
+              {language.t("settings.general.voice.test.action")}
+            </ButtonV2>
+          </SettingsRowV2>
+        </Show>
+
+        <SettingsRowV2
+          title={language.t("settings.general.voice.handsFree.title")}
+          description={language.t("settings.general.voice.handsFree.description")}
+        >
+          <Switch
+            checked={settings.voice.handsFree()}
+            disabled={!settings.voice.enabled() || !settings.voice.autoSubmit()}
+            onChange={settings.voice.setHandsFree}
+          />
+        </SettingsRowV2>
+      </SettingsListV2>
+    </div>
+  )
+
   const UpdatesSection = () => (
     <div class="settings-v2-section">
       <h3 class="settings-v2-section-title">{language.t("settings.general.section.updates")}</h3>
@@ -706,6 +886,8 @@ export const SettingsGeneralV2: Component<{
         <NotificationsSection />
 
         <SoundsSection />
+
+        <VoiceSection />
 
         <Show when={desktop()}>
           <UpdatesSection />

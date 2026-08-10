@@ -23,6 +23,7 @@ dist-ssr
 *.sln
 *.sw?
 out/
+native/swift-build/
 
 resources/opencode-cli*
 resources/icons

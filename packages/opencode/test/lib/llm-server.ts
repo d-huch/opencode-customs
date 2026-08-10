@@ -502,6 +502,14 @@ export class Reply {
     return this
   }
 
+  length() {
+    this.#finish = "length"
+    this.#hang = false
+    this.#error = undefined
+    this.#reset = false
+    return this
+  }
+
   toolCalls() {
     this.#finish = "tool_calls"
     this.#hang = false
@@ -610,6 +618,11 @@ function isTitleRequest(body: unknown): boolean {
   return JSON.stringify(body).includes("Generate a title for this conversation")
 }
 
+function isClassifierRequest(body: unknown): boolean {
+  if (!body || typeof body !== "object") return false
+  return JSON.stringify(body).includes("epistemic routing and durable-memory classifier")
+}
+
 namespace TestLLMServer {
   export interface Service {
     readonly url: string
@@ -627,6 +640,7 @@ namespace TestLLMServer {
     readonly hold: (value: string, wait: PromiseLike<unknown>) => Effect.Effect<void>
     readonly reset: Effect.Effect<void>
     readonly hits: Effect.Effect<Hit[]>
+    readonly serviceHits: Effect.Effect<Hit[]>
     readonly calls: Effect.Effect<number>
     readonly wait: (count: number) => Effect.Effect<void>
     readonly inputs: Effect.Effect<Record<string, unknown>[]>
@@ -643,6 +657,7 @@ export class TestLLMServer extends Context.Service<TestLLMServer, TestLLMServer.
       const router = yield* HttpRouter.HttpRouter
 
       let hits: Hit[] = []
+      let serviceHits: Hit[] = []
       let list: Queue[] = []
       let waits: Wait[] = []
       let misses: Hit[] = []
@@ -662,8 +677,8 @@ export class TestLLMServer extends Context.Service<TestLLMServer, TestLLMServer.
         yield* Effect.forEach(ready, (item) => Deferred.succeed(item.ready, void 0))
       })
 
-      const pull = (hit: Hit) => {
-        const index = list.findIndex((entry) => !entry.match || entry.match(hit))
+      const pull = (hit: Hit, matchedOnly = false) => {
+        const index = list.findIndex((entry) => (!matchedOnly && !entry.match) || entry.match?.(hit))
         if (index === -1) return
         const first = list[index]
         list = [...list.slice(0, index), ...list.slice(index + 1)]
@@ -674,6 +689,22 @@ export class TestLLMServer extends Context.Service<TestLLMServer, TestLLMServer.
         const req = yield* HttpServerRequest.HttpServerRequest
         const body = yield* req.json.pipe(Effect.orElseSucceed(() => ({})))
         const current = hit(req.originalUrl, body)
+        if (isClassifierRequest(body)) {
+          serviceHits = [...serviceHits, current]
+          const next = pull(current, true)
+          const auto: Sse = {
+            type: "sse",
+            head: [role()],
+            tail: [textLine("REPOSITORY\nTest repository request\nNO_MEMORY"), finishLine("stop")],
+          }
+          if (!next) {
+            if (mode === "responses") return send(responses(auto, modelFrom(body)))
+            return send(auto)
+          }
+          if (next.type !== "sse") return fail(next)
+          if (mode === "responses") return send(responses(next, modelFrom(body)))
+          return send(next)
+        }
         if (isTitleRequest(body)) {
           hits = [...hits, current]
           yield* notify()
@@ -786,11 +817,13 @@ export class TestLLMServer extends Context.Service<TestLLMServer, TestLLMServer.
         }),
         reset: Effect.sync(() => {
           hits = []
+          serviceHits = []
           list = []
           waits = []
           misses = []
         }),
         hits: Effect.sync(() => [...hits]),
+        serviceHits: Effect.sync(() => [...serviceHits]),
         calls: Effect.sync(() => hits.length),
         wait: Effect.fn("TestLLMServer.wait")(function* (count: number) {
           if (hits.length >= count) return

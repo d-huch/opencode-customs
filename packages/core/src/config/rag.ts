@@ -10,6 +10,10 @@ export class Info extends Schema.Class<Info>("Config.Rag")({
   memory: Schema.Boolean.pipe(Schema.optional).annotate({
     description: "Enable embedding-assisted recall for durable project memory (default: true)",
   }),
+  memory_admission: Schema.Literals(["automatic", "explicit", "off"]).pipe(Schema.optional).annotate({
+    description:
+      "Control durable project-memory admission: automatic stores high-confidence user-provided facts, explicit requires a remember request, and off disables new conversation memories (default: automatic)",
+  }),
   model: Schema.String.pipe(Schema.optional).annotate({
     description: "Preferred LM Studio embedding model ID; the first loaded embedding model is used when omitted",
   }),

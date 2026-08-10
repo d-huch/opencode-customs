@@ -24,13 +24,25 @@ model:
 - A project-learned concept router for abstract tasks. It derives vocabulary from the current codebase, tolerates
   inflection and likely spelling mistakes through evidence-backed prefix grounding, and does not use a fixed business
   dictionary or assume a particular framework.
-- Context ranking that combines prompt evidence, analogous implementations, attached files, symbols, and graph
-  neighborhoods before selecting a compact set of files for the model.
-- Bounded hybrid RAG that combines graph, lexical, LSP, and optional local embeddings, then retrieves small source
-  windows instead of injecting whole files into the prompt. The embedding index updates incrementally through the file
-  watcher and never auto-loads a model into LM Studio.
-- Durable, project-scoped memory for verified compaction facts and successful file routes. Recall remains query-specific,
-  uses optional semantic ranking with lexical fallback, and contributes only a few matching notes and paths.
+- Second-generation repository retrieval that runs exact-identifier, lexical/concept, embedding, LSP/symbol, and graph
+  stages before reranking and directory-diverse selection. It searches for analogous existing implementations, labels
+  evidence as fact, assumption, or analogy, reports confidence and per-file selection reasons, and extracts only bounded
+  source windows. Durable used/irrelevant feedback influences later queries without hard-coded domain vocabulary, while
+  the viewer reports Recall@5 and Recall@10. The embedding index updates incrementally through the file watcher and never
+  auto-loads a model into LM Studio.
+- Managed Memory V2 with global, cross-project, project, expiring session, and reusable-pattern scopes for
+  high-confidence user-provided identity details, preferences, standing constraints, decisions, deliberately taught
+  facts, verified compaction facts, and successful file routes.
+  Automatic admission does not require a “remember” command, uses semantic topics to replace corrected facts, and never
+  switches to a hidden fallback model. Records advance through candidate, verified, and durable lifecycle states, or
+  remain inspectable as rejected, expired, or archived. Pinned records resist automatic replacement, lower-confidence corrections
+  become visible conflicts, and obvious credentials are rejected again at the storage boundary. Recall uses optional
+  semantic ranking with lexical fallback, contributes only query-relevant bounded notes and paths, and records why each
+  memory matched. A project fact recalled from another repository is explicitly labeled as an analogy and cannot inject
+  its paths as evidence for the current repository. The RAG/Memory viewer supports verification, promotion, rejection,
+  restoration, pinning, expiration, conflict resolution, usage-history inspection, deletion, and clearing. A
+  deterministic preview-before-apply consolidation pass merges duplicates, reviews conflicts, ages stale confidence,
+  strengthens independently reconfirmed reusable rules, archives unused records, and never mutates pinned memory.
 - Resource-aware prompt admission for custom models, including conservative fallback limits, full-request preflight,
   budgeted tool/system context, bounded history compaction, a live context-usage indicator, and protection from duplicate
   title-generation requests on the active model. Interactive turns degrade to a smaller context under critical macOS
@@ -38,7 +50,27 @@ model:
 - Local Agent Runtime layers for LM Studio: a read-only capability bridge, an adaptive Resource Governor, and durable
   execution checkpoints that recover abandoned sessions after an OpenCode process restart without replaying completed
   local tools. Generation-fenced per-request counters bound provider turns, tool calls, repeated compactions, and
-  evidence follow-ups without relying on compactable transcript text.
+  evidence follow-ups without relying on compactable transcript text. Typed event-stream heartbeats keep live desktop
+  subscriptions healthy, and reconnect reconciliation reloads pinned or running sessions so persisted assistant output
+  cannot remain invisible after a brief transport interruption.
+- A durable Request Pipeline Scheduler that advances every genuine user request through prompt admission,
+  classification, repository and memory recall, model readiness, context compilation, execution, verification, memory
+  admission, and completion. Each phase is generation-fenced and persisted in SQLite. Identical preparation is
+  deduplicated, a newer message cancels stale preparation, optional recall has a deadline, and independent memory recall
+  overlaps model readiness. Conversation-only turns skip repository RAG and Git analysis; tool continuations reuse
+  checkpointed classification and recall instead of repeating them. Classifier, RAG, memory, and main-model calls retain
+  separate durable budgets, while the interactive model is pinned for the request and never replaced by a hidden
+  fallback.
+- A resource-aware Tool Planner that runs independent read and search calls concurrently, serializes mutations behind
+  active reads and earlier writes, and records a small dependency graph for every call. Equivalent safe reads are
+  deduplicated and cached per session, every mutation invalidates that cache, and accepted evidence stops unnecessary
+  follow-up searches. Unknown and third-party tools are treated as mutations unless they explicitly declare read-only
+  behavior. The existing tool-call firewall and generation-fenced execution budgets remain authoritative.
+- A deterministic Change Risk Classifier that evaluates every mutation from its target artifacts, workspace scope,
+  destructive intent, and trusted tool metadata. Documentation, local UI, backend logic, database, access control,
+  build configuration, public contracts, dependencies, and multi-package changes receive explicit risk policies for
+  planning, scope, verification, critic review, confirmation, and automatic application. High and critical changes fail
+  closed at a separate approval boundary, and each assessment is persisted in the execution checkpoint and session log.
 - A capability-based multi-model router that assigns embedding, utility, coding, and vision roles from
   metadata, task shape, context capacity, model size, and live resource pressure without model-name or project-specific
   keyword tables. A compatible model explicitly selected in the composer remains the primary coding model; larger
@@ -46,13 +78,29 @@ model:
   background work such as history compaction, without unloading the active coding model. Coding and vision handoffs use
   LM Studio's native model-management API with readiness checks, checkpointed failure state, and guarded cleanup of idle
   runtime-managed instances. Interactive execution fails closed if the selected model cannot be activated; it is never
-  handed silently to a smaller fallback model.
+  handed silently to a smaller fallback model. A per-model Runtime switch can preserve the context configured in LM
+  Studio by preventing OpenCode from supplying an automatic context override during model loading. The same panel lists
+  every model reported by LM Studio and can exclude individual models from automatic embedding, utility, and vision
+  routing without hiding them from explicit model selection or unloading a running instance. Capability probes are
+  coalesced into a shared 30-second snapshot, while successful OpenCode-managed load and unload operations invalidate it
+  immediately. A provider-wide switch can disable automatic handoffs entirely: foreground and compaction requests then
+  stay on the model selected in the chat, with no automatic probe, load, unload, or substitution. Dedicated embedding
+  retrieval remains independent.
 - A screenshot vision pipeline that keeps durable history file-based, resizes large images against model and live-memory
   limits, selects only a probed vision-capable model, and records preparation, token, activation, and failure metrics in
   checkpoints and the Runtime panel. Base64 is created only transiently for provider APIs that require it, while RAG can
   ground the visual analysis in related project code during the same turn.
 - A bounded verification loop that asks the agent for the smallest repository-native checks, reuses normal shell
   permissions, adds changed-file LSP diagnostics, and repairs failed checks without assuming a language or framework.
+  Its deterministic Verification Matrix derives the required check types from changed artifacts and risk: formatter,
+  typecheck, focused unit/feature/component tests, migration validation, build, lint, API contract generation,
+  screenshot comparison, and Git diff inspection. Every selected check is executed or explicitly accounted for, and
+  unrelated suites are excluded.
+- A single evidence-based Critic Pass after a changed request passes verification. The reviewer receives a fresh compact
+  context containing only the original task, request-scoped patch, changed files, verification results, and known
+  limitations. It can report concrete defects with file, line, consequence, and direct evidence, but it cannot edit
+  files or start another review. The active strong model is reused by default; another reviewer model is used only when
+  explicitly configured. Its one-attempt budget and result survive recovery in the generation-fenced checkpoint.
 - A bounded evidence loop for read-only repository research. Findings must cite files actually read in the current turn,
   while unresolved searches finish as explicitly blocked instead of becoming guessed conclusions.
 - A semantic scope and freshness gate that classifies each genuine request as conversation-only, repository work, or
@@ -65,14 +113,32 @@ model:
   are detected across provider turns and stopped before they can create an unbounded local-model loop. Conservative
   tool-call repair fixes only syntax that preserves every emitted value and never invents truncated paths or patterns.
 - A desktop **Map** panel with index metrics, manual reindexing, LSP status, opt-in live routing diagnostics, and a
-  bounded RAG/memory viewer for inspecting, searching, deleting, and clearing project-scoped retrieval data.
+  bounded RAG/memory viewer for inspecting, searching, pinning, expiring, resolving, deleting, and clearing retrieval
+  data.
 - Per-session JSONL diagnostics under the standard OpenCode log directory. Each file records prompts, model routing,
   provider requests, compaction, tool calls and bounded results, failures, and checkpoint recovery. The Runtime menu can
   export the complete diagnostic bundle or clear all desktop, server, network, crash, and session logs. The session
-  Context tab shows the exact log path and can reveal the file directly in the desktop file manager.
+  Context tab shows the exact log path, can reveal the file directly in the desktop file manager, and includes a
+  privacy-bounded **Turn Inspector** for the latest request. Its Critical Path timeline measures every pipeline phase,
+  highlights the main blocker and parallel operations, reports cache state and potential savings, and records the
+  selected model, context, and reasoning effort. The same inspector previews the actual deterministically compiled
+  prompt by source, token budget, provenance, truncation, deduplication, and included tool schema; credentials and
+  binary payloads are redacted. LM Studio prompt-cache telemetry records read/write tokens, reuse percentage, a
+  privacy-safe stable-prefix fingerprint, and whether compaction preserved that prefix. A tool-call firewall blocks
+  malformed serialized calls, unavailable tools, and repeated identical calls before they can enter an `invalid`
+  retry loop.
+- A repeatable Evaluation Harness with cross-stack fixture projects, deterministic answer and file checks, RAG
+  Recall@5 and Recall@10, provider/tool/compaction budgets, phase timing, loop detection, raw diagnostic artifacts, and
+  baseline-versus-candidate reports.
 - A separate **Extensions** menu that discovers installed ChatGPT/Codex plugin bundles, exposes their skills to the
   agent, and starts enabled bundled MCP servers alongside native OpenCode plugins.
 - Custom OpenCode Customs desktop branding and macOS application/Dock icons.
+- A desktop voice agent with push-to-talk dictation and a hands-free Jarvis conversation mode. Live partial
+  transcription is visible in the composer, adaptive endpointing submits an utterance after a short context-sensitive
+  pause, and completed response sentences are spoken while the model is still generating. Speaking over the response
+  interrupts both playback and the active model turn, then submits the new utterance through the same durable request
+  pipeline as typed input. Speech is generated by a separate Ukrainian/English TTS service in `services/ukrainian-tts`; Apple
+  speech synthesis is never used as a fallback.
 
 See [OpenCode Customs features](CUSTOM_FEATURES.md) for architecture, behavior, diagnostics, API endpoints, limitations,
 and local build instructions.
@@ -89,6 +155,23 @@ OPENCODE_CHANNEL=dev OPENCODE_ICON_CHANNEL=customs CSC_IDENTITY_AUTO_DISCOVERY=f
 
 The unpacked Apple Silicon application is written to `packages/desktop/dist/mac-arm64/OpenCode Customs.app`. This
 command does not create a DMG and disables automatic signing-identity discovery.
+
+### Start the local multilingual voice backend
+
+The voice agent uses an independent OpenAI-compatible TTS service. Start it before enabling spoken responses:
+
+```bash
+cd services/ukrainian-tts
+docker compose up --build -d
+docker compose logs -f
+```
+
+The first start downloads Silero V5 CIS Extended for Ukrainian, a dedicated Silero English model, the optional Piper
+Ukrainian ONNX voice, and the contextual Ukrainian accentor into a persistent Docker volume. OpenCode Customs uses
+`http://127.0.0.1:8880/v1/audio/speech` by default. Mixed Ukrainian/English responses preserve both languages, while
+configured names and technical terms can receive explicit pronunciation and stress overrides. If the selected mode is
+unavailable, the voice loop stops with a visible error and does not switch engines or fall back to Apple speech synthesis. See
+[`services/ukrainian-tts/README.md`](services/ukrainian-tts/README.md) for configuration and license details.
 
 ### Upstream OpenCode installation
 

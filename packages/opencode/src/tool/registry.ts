@@ -56,6 +56,7 @@ import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { McpCatalog } from "@/mcp/catalog"
 import { VerificationTool } from "./verification"
 import { EvidenceTool } from "./evidence"
+import { CriticTool } from "./critic"
 
 export function webSearchEnabled(providerID: ProviderV2.ID, flags = { exa: false, parallel: false }) {
   return providerID === ProviderV2.ID.opencode || providerID === "lmstudio" || flags.exa || flags.parallel
@@ -113,6 +114,7 @@ const layer = Layer.effect(
     const skilltool = yield* SkillTool
     const verification = yield* VerificationTool
     const evidence = yield* EvidenceTool
+    const critic = yield* CriticTool
     const agent = yield* Agent.Service
     const codeMode = flags.experimentalCodeMode ? yield* Effect.promise(() => import("./code-mode")) : undefined
     const codeModeTool = codeMode ? yield* codeMode.CodeModeTool : undefined
@@ -139,6 +141,7 @@ const layer = Layer.effect(
             parameters,
             jsonSchema,
             description: def.description,
+            execution: { access: "write" },
             execute: (args, toolCtx) =>
               Effect.gen(function* () {
                 // Bridge the host's Effect-based `ask` into a Promise-returning
@@ -223,6 +226,7 @@ const layer = Layer.effect(
           lsp: Tool.init(lsptool),
           verification: Tool.init(verification),
           evidence: Tool.init(evidence),
+          critic: Tool.init(critic),
           plan: Tool.init(plan),
           ...(codeModeTool ? { execute: Tool.init(codeModeTool) } : {}),
         })
@@ -246,6 +250,7 @@ const layer = Layer.effect(
             tool.patch,
             tool.verification,
             tool.evidence,
+            tool.critic,
             ...(tool.execute ? [tool.execute] : []),
             ...(flags.experimentalLspTool ? [tool.lsp] : []),
             ...(flags.experimentalPlanMode && flags.client === "cli" ? [tool.plan] : []),
@@ -334,6 +339,7 @@ const layer = Layer.effect(
               .join("\n"),
             parameters: output.parameters,
             jsonSchema,
+            execution: tool.execution,
             execute: tool.execute,
             formatValidationError: tool.formatValidationError,
           }

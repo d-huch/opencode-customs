@@ -126,6 +126,14 @@ import type {
   RepositoryMapKnowledgeOutput,
   RepositoryMapRemoveKnowledgeInput,
   RepositoryMapRemoveKnowledgeOutput,
+  RepositoryMapUpdateMemoryInput,
+  RepositoryMapUpdateMemoryOutput,
+  RepositoryMapPreviewMemoryConsolidationInput,
+  RepositoryMapPreviewMemoryConsolidationOutput,
+  RepositoryMapApplyMemoryConsolidationInput,
+  RepositoryMapApplyMemoryConsolidationOutput,
+  RepositoryMapFeedbackRetrievalInput,
+  RepositoryMapFeedbackRetrievalOutput,
   RepositoryMapClearKnowledgeInput,
   RepositoryMapClearKnowledgeOutput,
 } from "./types"
@@ -1082,6 +1090,66 @@ export function make(options: ClientOptions) {
             method: "DELETE",
             path: `/api/repository-map/knowledge/${encodeURIComponent(input.scope)}/${encodeURIComponent(input.id)}`,
             query: { location: input["location"] },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      updateMemory: (input: RepositoryMapUpdateMemoryInput, requestOptions?: RequestOptions) =>
+        request<RepositoryMapUpdateMemoryOutput>(
+          {
+            method: "PATCH",
+            path: `/api/repository-map/knowledge/memory/${encodeURIComponent(input.id)}`,
+            query: { location: input["location"] },
+            body: {
+              pinned: input["pinned"],
+              expiresAt: input["expiresAt"],
+              clearExpiration: input["clearExpiration"],
+              resolve: input["resolve"],
+              lifecycle: input["lifecycle"],
+            },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      previewMemoryConsolidation: (
+        input?: RepositoryMapPreviewMemoryConsolidationInput,
+        requestOptions?: RequestOptions,
+      ) =>
+        request<RepositoryMapPreviewMemoryConsolidationOutput>(
+          {
+            method: "GET",
+            path: `/api/repository-map/knowledge/memory/consolidation`,
+            query: { location: input?.["location"] },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      applyMemoryConsolidation: (input: RepositoryMapApplyMemoryConsolidationInput, requestOptions?: RequestOptions) =>
+        request<RepositoryMapApplyMemoryConsolidationOutput>(
+          {
+            method: "POST",
+            path: `/api/repository-map/knowledge/memory/consolidation`,
+            query: { location: input["location"] },
+            body: { fingerprint: input["fingerprint"], generatedAt: input["generatedAt"] },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      feedbackRetrieval: (input: RepositoryMapFeedbackRetrievalInput, requestOptions?: RequestOptions) =>
+        request<RepositoryMapFeedbackRetrievalOutput>(
+          {
+            method: "PATCH",
+            path: `/api/repository-map/knowledge/retrieval/${encodeURIComponent(input.id)}`,
+            query: { location: input["location"] },
+            body: { path: input["path"], relevance: input["relevance"] },
             successStatus: 200,
             declaredStatuses: [401, 400],
             empty: false,

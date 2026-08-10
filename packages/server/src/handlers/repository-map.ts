@@ -2,6 +2,7 @@ import { RepositoryMap } from "@opencode-ai/core/repository-map"
 import { RepositoryContextRouter } from "@opencode-ai/core/repository-context-router"
 import { RepositoryEmbeddings } from "@opencode-ai/core/repository-embeddings"
 import { RepositoryMemory } from "@opencode-ai/core/repository-memory"
+import { RepositoryRetrievalFeedback } from "@opencode-ai/core/repository-retrieval-feedback"
 import { Effect } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { Api } from "../api"
@@ -27,6 +28,9 @@ export const RepositoryMapHandler = HttpApiBuilder.group(Api, "server.repository
             rag: RepositoryEmbeddings.Service.use((embeddings) =>
               embeddings.inspect({ search: ctx.query.search, limit: ctx.query.limit }),
             ),
+            retrieval: RepositoryRetrievalFeedback.Service.use((feedback) =>
+              feedback.inspect({ search: ctx.query.search, limit: ctx.query.limit }),
+            ),
           }),
         ),
       )
@@ -35,12 +39,35 @@ export const RepositoryMapHandler = HttpApiBuilder.group(Api, "server.repository
           Effect.gen(function* () {
             const memory = yield* RepositoryMemory.Service
             const embeddings = yield* RepositoryEmbeddings.Service
+            const feedback = yield* RepositoryRetrievalFeedback.Service
             const removed =
               ctx.params.scope === "memory"
                 ? yield* memory.remove(ctx.params.id)
-                : yield* embeddings.remove(ctx.params.id)
+                : ctx.params.scope === "rag"
+                  ? yield* embeddings.remove(ctx.params.id)
+                  : 0
             return { removed }
           }),
+        ),
+      )
+      .handle("repositoryMap.updateMemory", (ctx) =>
+        response(
+          RepositoryMemory.Service.use((memory) =>
+            memory.update(ctx.params.id, ctx.payload).pipe(Effect.map((removed) => ({ removed }))),
+          ),
+        ),
+      )
+      .handle("repositoryMap.previewMemoryConsolidation", () =>
+        response(RepositoryMemory.Service.use((memory) => memory.previewConsolidation())),
+      )
+      .handle("repositoryMap.applyMemoryConsolidation", (ctx) =>
+        response(RepositoryMemory.Service.use((memory) => memory.applyConsolidation(ctx.payload))),
+      )
+      .handle("repositoryMap.feedbackRetrieval", (ctx) =>
+        response(
+          RepositoryRetrievalFeedback.Service.use((feedback) =>
+            feedback.feedback(ctx.params.id, ctx.payload).pipe(Effect.map((removed) => ({ removed }))),
+          ),
         ),
       )
       .handle("repositoryMap.clearKnowledge", (ctx) =>
@@ -48,7 +75,13 @@ export const RepositoryMapHandler = HttpApiBuilder.group(Api, "server.repository
           Effect.gen(function* () {
             const memory = yield* RepositoryMemory.Service
             const embeddings = yield* RepositoryEmbeddings.Service
-            const removed = ctx.params.scope === "memory" ? yield* memory.clear() : yield* embeddings.clear()
+            const feedback = yield* RepositoryRetrievalFeedback.Service
+            const removed =
+              ctx.params.scope === "memory"
+                ? yield* memory.clear()
+                : ctx.params.scope === "rag"
+                  ? yield* embeddings.clear()
+                  : yield* feedback.clear()
             return { removed }
           }),
         ),

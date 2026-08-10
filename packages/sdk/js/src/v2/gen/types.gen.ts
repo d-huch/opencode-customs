@@ -92,6 +92,7 @@ export type Event =
   | EventWorktreeReady
   | EventWorktreeFailed
   | EventServerConnected
+  | EventServerHeartbeat
   | EventGlobalDisposed
   | EventServerInstanceDisposed
 
@@ -1609,6 +1610,13 @@ export type GlobalEvent = {
       }
     | {
         id: string
+        type: "server.heartbeat"
+        properties: {
+          [key: string]: unknown
+        }
+      }
+    | {
+        id: string
         type: "global.disposed"
         properties: {
           [key: string]: unknown
@@ -1753,6 +1761,7 @@ export type ProviderConfig = {
   env?: Array<string>
   id?: string
   npm?: string
+  auto_route?: boolean
   whitelist?: Array<string>
   blacklist?: Array<string>
   options?: {
@@ -1808,6 +1817,8 @@ export type ProviderConfig = {
         output?: Array<"text" | "audio" | "image" | "video" | "pdf">
       }
       experimental?: boolean
+      preserve_context?: boolean
+      auto_route?: boolean
       status?: "alpha" | "beta" | "deprecated" | "active"
       provider?: {
         npm?: string
@@ -2552,6 +2563,7 @@ export type LmStudioProbe = {
       tools: boolean
       vision: boolean
       reasoning: boolean
+      reasoningOptions?: Array<string>
       embeddings: boolean
     }
     visionCapabilitySource?: "native_capability" | "native_input" | "native_type"
@@ -3128,6 +3140,7 @@ export type V2Event =
   | WorktreeReady
   | WorktreeFailed
   | ServerConnected
+  | ServerHeartbeat
   | GlobalDisposed
 
 export type V2EventStream = string
@@ -4042,12 +4055,15 @@ export type ConfigVerification = {
   evidence?: boolean
   repair_attempts?: number
   evidence_attempts?: number
+  critic?: boolean
+  reviewer_agent?: string
   checks?: Array<ConfigVerificationCheck>
 }
 
 export type ConfigRag = {
   embeddings?: boolean
   memory?: boolean
+  memory_admission?: "automatic" | "explicit" | "off"
   model?: string
   max_files?: number
   max_chunks?: number
@@ -6306,6 +6322,23 @@ export type ServerConnected = {
   }
 }
 
+export type ServerHeartbeat = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "server.heartbeat"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    [key: string]: unknown
+  }
+}
+
 export type GlobalDisposed = {
   id: string
   metadata?: {
@@ -6446,13 +6479,43 @@ export type RepositoryMapDiagnosticsConfig = {
 
 export type RepositoryMapMemoryEntry = {
   id: string
-  kind: "route" | "summary"
+  kind: "route" | "summary" | "conversation"
   text: string
   terms: Array<string>
   files: Array<string>
   updatedAt: number
   embeddingModel?: string
   dimensions: number
+  category?: "identity" | "preference" | "constraint" | "decision" | "context"
+  topic?: string
+  confidence?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  source?: "classifier" | "answer" | "manual" | "route" | "compaction"
+  evidence?: string
+  originProject?: string
+  scope?: "global" | "cross-project" | "project" | "session" | "pattern"
+  scopeID?: string
+  lifecycle?: "candidate" | "verified" | "durable" | "rejected" | "expired" | "archived"
+  createdAt?: number
+  verifiedAt?: number
+  ttl?: number
+  classification?: "fact" | "analogy"
+  status?: "active" | "conflict"
+  conflictsWith?: string
+  conflicts?: Array<string>
+  pinned?: boolean
+  expiresAt?: number
+  lastUsedAt?: number
+  useCount?: number
+  confirmationCount?: number
+  lastQuery?: string
+  matchReason?: "lexical" | "semantic"
+  usage?: Array<{
+    at: number
+    query: string
+    reason: "lexical" | "semantic"
+    project: string
+    classification: "fact" | "analogy"
+  }>
 }
 
 export type RepositoryMapRagEntry = {
@@ -6463,6 +6526,43 @@ export type RepositoryMapRagEntry = {
   fileHash: string
   updatedAt: number
   dimensions: number
+}
+
+export type RepositoryMapRetrievalStage =
+  | "attachment"
+  | "exact"
+  | "lexical"
+  | "concept"
+  | "embedding"
+  | "lsp"
+  | "graph"
+  | "memory"
+  | "analogy"
+
+export type RepositoryMapRetrievalReason = {
+  stage: RepositoryMapRetrievalStage
+  detail: string
+  weight: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+}
+
+export type RepositoryMapRetrievalFile = {
+  path: string
+  score: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  confidence: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  classification: "fact" | "assumption" | "analogy"
+  reasons: Array<RepositoryMapRetrievalReason>
+  used?: boolean
+  rejected?: boolean
+}
+
+export type RepositoryMapRetrievalEntry = {
+  id: string
+  query: string
+  files: Array<RepositoryMapRetrievalFile>
+  createdAt: number
+  updatedAt: number
+  recallAt5?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  recallAt10?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
 }
 
 export type RepositoryMapKnowledge = {
@@ -6478,12 +6578,72 @@ export type RepositoryMapKnowledge = {
     files: number
     entries: Array<RepositoryMapRagEntry>
   }
+  retrieval: {
+    total: number
+    matched: number
+    recallAt5?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    recallAt10?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    entries: Array<RepositoryMapRetrievalEntry>
+  }
 }
 
-export type RepositoryMapKnowledgeScope = "memory" | "rag"
+export type RepositoryMapKnowledgeScope = "memory" | "rag" | "retrieval"
 
 export type RepositoryMapKnowledgeMutation = {
   removed: number
+}
+
+export type RepositoryMapMemoryLifecycleUpdate = {
+  pinned?: boolean
+  expiresAt?: number
+  clearExpiration?: boolean
+  resolve?: boolean
+  lifecycle?: "candidate" | "verified" | "durable" | "rejected" | "expired" | "archived"
+}
+
+export type RepositoryMapMemoryConsolidationAction = {
+  type:
+    | "merge_duplicate"
+    | "resolve_conflict"
+    | "decrease_confidence"
+    | "increase_confidence"
+    | "archive_unused"
+    | "unresolved_conflict"
+  id: string
+  relatedIDs: Array<string>
+  reason: string
+  beforeConfidence?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  afterConfidence?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  winnerID?: string
+}
+
+export type RepositoryMapMemoryConsolidationPreview = {
+  fingerprint: string
+  generatedAt: number
+  total: number
+  protected: number
+  actionable: number
+  unresolved: number
+  actions: Array<RepositoryMapMemoryConsolidationAction>
+}
+
+export type RepositoryMapMemoryConsolidationApply = {
+  fingerprint: string
+  generatedAt: number
+}
+
+export type RepositoryMapMemoryConsolidationResult = {
+  applied: boolean
+  stale: boolean
+  removed: number
+  updated: number
+  archived: number
+  preview: RepositoryMapMemoryConsolidationPreview
+}
+
+export type RepositoryMapRetrievalFeedback = {
+  path: string
+  relevance: "used" | "rejected" | "clear"
 }
 
 export type EventModelsDevRefreshed = {
@@ -7374,6 +7534,14 @@ export type EventWorktreeFailed = {
 export type EventServerConnected = {
   id: string
   type: "server.connected"
+  properties: {
+    [key: string]: unknown
+  }
+}
+
+export type EventServerHeartbeat = {
+  id: string
+  type: "server.heartbeat"
   properties: {
     [key: string]: unknown
   }
@@ -9780,6 +9948,88 @@ export type ProviderRuntimeRouterResponses = {
 
 export type ProviderRuntimeRouterResponse = ProviderRuntimeRouterResponses[keyof ProviderRuntimeRouterResponses]
 
+export type ProviderRuntimeTurnData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/provider/runtime/turn"
+}
+
+export type ProviderRuntimeTurnErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type ProviderRuntimeTurnError = ProviderRuntimeTurnErrors[keyof ProviderRuntimeTurnErrors]
+
+export type ProviderRuntimeTurnResponses = {
+  /**
+   * Latest durable Agent Turn Orchestrator state
+   */
+  200: {
+    turn: {
+      sessionID: string
+      executionID: string
+      generation: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      runtime: "v1" | "v2"
+      state:
+        | "preparing"
+        | "streaming"
+        | "settling_tools"
+        | "verifying"
+        | "repairing"
+        | "verified"
+        | "reviewing"
+        | "reviewed"
+        | "continuing"
+        | "completed"
+        | "interrupted"
+        | "failed"
+      phase: "classify" | "recall" | "execute" | "verify" | "critic" | "complete" | "failed"
+      step: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      requestMessageID: string
+      selectedProviderID: string
+      selectedModelID: string
+      selectedInstanceID: string
+      counters: {
+        evidenceAttempts: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        classifierTurns: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        ragRetrievals: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        memoryRetrievals: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        memoryWrites: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        verificationTurns: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        criticTurns: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        providerTurns: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        toolCalls: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        compactions: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      }
+      recoveries: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      error: string
+      timeStarted: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      timeUpdated: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      timeCompleted: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    }
+    limits: {
+      classifierTurns: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      ragRetrievals: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      memoryRetrievals: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      memoryWrites: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      verificationTurns: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      criticTurns: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      providerTurns: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      toolCalls: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      compactions: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    }
+  }
+}
+
+export type ProviderRuntimeTurnResponse = ProviderRuntimeTurnResponses[keyof ProviderRuntimeTurnResponses]
+
 export type ProviderAuthData = {
   body?: never
   path?: never
@@ -10137,6 +10387,183 @@ export type SessionLogResponses = {
 }
 
 export type SessionLogResponse = SessionLogResponses[keyof SessionLogResponses]
+
+export type SessionInspectData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/inspect"
+}
+
+export type SessionInspectErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+}
+
+export type SessionInspectError = SessionInspectErrors[keyof SessionInspectErrors]
+
+export type SessionInspectResponses = {
+  /**
+   * Inspect latest session turn
+   */
+  200: {
+    path: string
+    exists: boolean
+    requestMessageID?: string
+    startedAt?: string
+    completedAt?: string
+    durationMs?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    events: Array<{
+      timestamp: string
+      type: string
+      stage: "prompt" | "classify" | "recall" | "model" | "tool" | "compaction" | "recovery" | "error"
+      status: "info" | "error"
+      messageID?: string
+      executionID?: string
+      detail?: string
+    }>
+    stats: {
+      events: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      modelRequests: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      toolCalls: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      toolErrors: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      compactions: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      errors: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    }
+    latency: {
+      phases: Array<{
+        phase:
+          | "admission"
+          | "classifier"
+          | "rag"
+          | "memory"
+          | "capability_probe"
+          | "model_activation"
+          | "context_compilation"
+          | "prompt_processing"
+          | "generation"
+          | "tool_execution"
+          | "verification"
+          | "background_bookkeeping"
+        status: "pending" | "running" | "completed" | "skipped" | "timed_out" | "cancelled" | "failed"
+        startedAt?: string
+        completedAt?: string
+        durationMs?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        blocking: boolean
+        cache: "hit" | "miss" | "bypass" | "unknown"
+        detail?: string
+      }>
+      criticalPathMs: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      backgroundMs: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      parallelSavingsMs: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      potentialSavingsMs: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      blocker?: {
+        phase:
+          | "admission"
+          | "classifier"
+          | "rag"
+          | "memory"
+          | "capability_probe"
+          | "model_activation"
+          | "context_compilation"
+          | "prompt_processing"
+          | "generation"
+          | "tool_execution"
+          | "verification"
+          | "background_bookkeeping"
+        durationMs: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        detail?: string
+      }
+      parallel: Array<{
+        phases: Array<
+          | "admission"
+          | "classifier"
+          | "rag"
+          | "memory"
+          | "capability_probe"
+          | "model_activation"
+          | "context_compilation"
+          | "prompt_processing"
+          | "generation"
+          | "tool_execution"
+          | "verification"
+          | "background_bookkeeping"
+        >
+        overlapMs: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      }>
+      model?: {
+        providerID?: string
+        modelID?: string
+        instanceID?: string
+        context?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        reasoningEffort?: string
+      }
+      providerCache: "hit" | "miss" | "bypass" | "unknown"
+      promptCache: {
+        readTokens: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        writeTokens: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        inputTokens: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        promptTokens: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        reusePercent: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        prefixHash?: string
+        prefixPreserved?: boolean
+        compactionPreserved?: boolean
+      }
+    }
+    context?: {
+      version: 1
+      estimator: "canonical_serialized_conservative"
+      tokens: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      limit: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      usage: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      compressed: boolean
+      overflow: boolean
+      cache: {
+        prefixHash: string
+        prefixTokens: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        dynamicTokens: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      }
+      fragments: Array<{
+        source:
+          | "stable_system_prefix"
+          | "dynamic_system_tail"
+          | "tool_schemas"
+          | "current_user_prompt"
+          | "recent_dialogue"
+          | "checkpoint_summary"
+          | "memory"
+          | "repository_evidence"
+          | "tool_results"
+        provenance: Array<string>
+        tokens: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        budget: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        included: boolean
+        truncated: boolean
+        deduplicated: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        preview: string
+      }>
+      tools: Array<{
+        name: string
+        tokens: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        required: boolean
+        included: boolean
+      }>
+    }
+  }
+}
+
+export type SessionInspectResponse = SessionInspectResponses[keyof SessionInspectResponses]
 
 export type SessionChildrenData = {
   body?: never
@@ -14337,6 +14764,166 @@ export type V2RepositoryMapRemoveKnowledgeResponses = {
 
 export type V2RepositoryMapRemoveKnowledgeResponse =
   V2RepositoryMapRemoveKnowledgeResponses[keyof V2RepositoryMapRemoveKnowledgeResponses]
+
+export type V2RepositoryMapUpdateMemoryData = {
+  body: RepositoryMapMemoryLifecycleUpdate
+  path: {
+    id: string
+  }
+  query?: {
+    location?: {
+      directory?: string
+      workspace?: string
+    }
+  }
+  url: "/api/repository-map/knowledge/memory/{id}"
+}
+
+export type V2RepositoryMapUpdateMemoryErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2RepositoryMapUpdateMemoryError =
+  V2RepositoryMapUpdateMemoryErrors[keyof V2RepositoryMapUpdateMemoryErrors]
+
+export type V2RepositoryMapUpdateMemoryResponses = {
+  /**
+   * Success
+   */
+  200: {
+    location: LocationInfo
+    data: RepositoryMapKnowledgeMutation
+  }
+}
+
+export type V2RepositoryMapUpdateMemoryResponse =
+  V2RepositoryMapUpdateMemoryResponses[keyof V2RepositoryMapUpdateMemoryResponses]
+
+export type V2RepositoryMapPreviewMemoryConsolidationData = {
+  body?: never
+  path?: never
+  query?: {
+    location?: {
+      directory?: string
+      workspace?: string
+    }
+  }
+  url: "/api/repository-map/knowledge/memory/consolidation"
+}
+
+export type V2RepositoryMapPreviewMemoryConsolidationErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2RepositoryMapPreviewMemoryConsolidationError =
+  V2RepositoryMapPreviewMemoryConsolidationErrors[keyof V2RepositoryMapPreviewMemoryConsolidationErrors]
+
+export type V2RepositoryMapPreviewMemoryConsolidationResponses = {
+  /**
+   * Success
+   */
+  200: {
+    location: LocationInfo
+    data: RepositoryMapMemoryConsolidationPreview
+  }
+}
+
+export type V2RepositoryMapPreviewMemoryConsolidationResponse =
+  V2RepositoryMapPreviewMemoryConsolidationResponses[keyof V2RepositoryMapPreviewMemoryConsolidationResponses]
+
+export type V2RepositoryMapApplyMemoryConsolidationData = {
+  body: RepositoryMapMemoryConsolidationApply
+  path?: never
+  query?: {
+    location?: {
+      directory?: string
+      workspace?: string
+    }
+  }
+  url: "/api/repository-map/knowledge/memory/consolidation"
+}
+
+export type V2RepositoryMapApplyMemoryConsolidationErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2RepositoryMapApplyMemoryConsolidationError =
+  V2RepositoryMapApplyMemoryConsolidationErrors[keyof V2RepositoryMapApplyMemoryConsolidationErrors]
+
+export type V2RepositoryMapApplyMemoryConsolidationResponses = {
+  /**
+   * Success
+   */
+  200: {
+    location: LocationInfo
+    data: RepositoryMapMemoryConsolidationResult
+  }
+}
+
+export type V2RepositoryMapApplyMemoryConsolidationResponse =
+  V2RepositoryMapApplyMemoryConsolidationResponses[keyof V2RepositoryMapApplyMemoryConsolidationResponses]
+
+export type V2RepositoryMapFeedbackRetrievalData = {
+  body: RepositoryMapRetrievalFeedback
+  path: {
+    id: string
+  }
+  query?: {
+    location?: {
+      directory?: string
+      workspace?: string
+    }
+  }
+  url: "/api/repository-map/knowledge/retrieval/{id}"
+}
+
+export type V2RepositoryMapFeedbackRetrievalErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2RepositoryMapFeedbackRetrievalError =
+  V2RepositoryMapFeedbackRetrievalErrors[keyof V2RepositoryMapFeedbackRetrievalErrors]
+
+export type V2RepositoryMapFeedbackRetrievalResponses = {
+  /**
+   * Success
+   */
+  200: {
+    location: LocationInfo
+    data: RepositoryMapKnowledgeMutation
+  }
+}
+
+export type V2RepositoryMapFeedbackRetrievalResponse =
+  V2RepositoryMapFeedbackRetrievalResponses[keyof V2RepositoryMapFeedbackRetrievalResponses]
 
 export type V2RepositoryMapClearKnowledgeData = {
   body?: never

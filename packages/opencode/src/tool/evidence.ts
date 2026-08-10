@@ -25,6 +25,7 @@ export const EvidenceTool = Tool.define(
     description:
       "Submit grounded evidence immediately before the final answer to a read-only repository investigation, but only after successful repository research tools have run for the current genuine user request. Never call this tool for casual conversation or before repository research. This tool is stack-independent. Complete findings must cite project files actually read during the current user turn. Use blocked status with concrete unresolved points when searches cannot establish the requested conclusion. The session gate validates the submission against recorded tool results.",
     parameters: Parameters,
+    execution: { access: "control", completesEvidence: true } as const,
     execute: (input: Schema.Schema.Type<typeof Parameters>) =>
       Effect.sync(() => {
         if (input.findings.length > 12) throw new Error("Evidence accepts at most 12 findings")

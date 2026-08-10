@@ -145,6 +145,33 @@ describe("ModelCapabilityRouter", () => {
     expect(plan.selections.find((selection) => selection.role === "vision")?.capabilities.vision).toBe(true)
     expect(plan.selections.some((selection) => selection.role === "fallback")).toBe(false)
   })
+
+  test("excludes blocked models from automatic roles but keeps an explicit coding choice", () => {
+    const plan = ModelCapabilityRouter.plan({
+      providerID: "lmstudio",
+      pressure: "healthy",
+      complexity: "high",
+      preferredModelID: "manual-coder",
+      needsVision: true,
+      needsTools: true,
+      disabledModelIDs: ["manual-coder", "blocked-vision", "blocked-embed"],
+      candidates: [
+        candidate("manual-coder", "llm", 16 * gib, { tools: true, reasoning: true }),
+        candidate("utility", "llm", 2 * gib, { tools: true }),
+        candidate("blocked-vision", "llm", 12 * gib, { tools: true, vision: true, reasoning: true }),
+        candidate("allowed-vision", "llm", 8 * gib, { tools: true, vision: true }),
+        candidate("blocked-embed", "embedding", 1 * gib, { embeddings: true }),
+        candidate("allowed-embed", "embedding", 2 * gib, { embeddings: true }),
+      ],
+    })
+
+    expect(plan.selections.find((selection) => selection.role === "coding")?.modelID).toBe("manual-coder")
+    expect(plan.selections.find((selection) => selection.role === "utility")?.modelID).toBe("utility")
+    expect(plan.selections.find((selection) => selection.role === "vision")?.modelID).toBe("allowed-vision")
+    expect(plan.selections.find((selection) => selection.role === "embedding")?.modelID).toBe("allowed-embed")
+    expect(plan.candidateCount).toBe(3)
+    expect(plan.reason).toContain("candidates.blocked")
+  })
 })
 
 function candidate(

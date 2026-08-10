@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test"
-import { cycleModelVariant, getConfiguredAgentVariant, resolveModelVariant } from "./model-variant"
+import {
+  cycleModelVariant,
+  defaultModelVariant,
+  getConfiguredAgentVariant,
+  modelVariantOptions,
+  resolveModelVariant,
+} from "./model-variant"
 
 describe("model variant", () => {
   test("resolves configured agent variant when model matches", () => {
@@ -52,6 +58,25 @@ describe("model variant", () => {
     })
 
     expect(value).toBeUndefined()
+  })
+
+  test("uses none as the implicit variant when the model exposes it", () => {
+    expect(defaultModelVariant(["none", "minimal", "low", "medium", "high", "xhigh"])).toBe("none")
+    expect(defaultModelVariant(["off", "on"])).toBe("off")
+    expect(defaultModelVariant(["low", "high"])).toBeUndefined()
+  })
+
+  test("removes the UI-only default option when none is available", () => {
+    expect(modelVariantOptions(["minimal", "none", "low", "medium", "high", "xhigh"])).toEqual([
+      "none",
+      "minimal",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+    ])
+    expect(modelVariantOptions(["on", "off"])).toEqual(["off", "on"])
+    expect(modelVariantOptions(["low", "high"])).toEqual(["default", "low", "high"])
   })
 
   test("cycles from configured variant to next", () => {

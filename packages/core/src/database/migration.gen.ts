@@ -44,5 +44,10 @@ export const migrations = (
     import("./migration/20260718185428_execution_runtime"),
     import("./migration/20260719055409_model_capability_route"),
     import("./migration/20260719120708_durable_execution_budgets"),
+    import("./migration/20260723141652_agent_turn_orchestrator"),
+    import("./migration/20260725183114_tidy_iron_man"),
+    import("./migration/20260726074759_change_risk_assessment"),
+    import("./migration/20260726082237_verification_matrix"),
+    import("./migration/20260726085033_critic_pass"),
   ])
 ).map((module) => module.default) satisfies DatabaseMigration.Migration[]

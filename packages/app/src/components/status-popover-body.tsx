@@ -18,6 +18,8 @@ import { useSettings } from "@/context/settings"
 import { useMcpToggle } from "@/context/mcp"
 import { useSDK } from "@/context/sdk"
 import { useRepositoryDiagnostics } from "@/context/repository-diagnostics"
+import { useServerSync } from "@/context/server-sync"
+import { SettingsModelContextLimit } from "./settings-model-context-limit"
 
 const listServersByHealth = (
   list: ServerConnection.Any[],
@@ -240,6 +242,7 @@ function ServerStatusList(props: { state: ServerStatusState }) {
 
 export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
   const sync = useSync()
+  const serverSync = useServerSync()
   const global = useGlobal()
   const server = useServer()
   const platform = usePlatform()
@@ -266,18 +269,26 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
     () => (props.shown() && desktop() ? sdk() : undefined),
     (context) => context.client.provider.runtime.router().then((result) => result.data),
   )
+  const [agentTurn, { mutate: setAgentTurn, refetch: refetchAgentTurn }] = createResource(
+    () => (props.shown() && desktop() ? sdk() : undefined),
+    (context) => context.client.provider.runtime.turn().then((result) => result.data),
+  )
   const [repositoryMapState, setRepositoryMapState] = createStore({ refreshing: false })
   const [runtimeState, setRuntimeState] = createStore({
     activeTab: settings.general.newLayoutDesigns() ? "mcp" : "servers",
     refreshing: false,
     clearingLogs: false,
+    contextLocking: undefined as string | undefined,
+    routingGlobal: false,
+    routingModel: undefined as string | undefined,
   })
   const runtimeLoading = createMemo(
     () =>
       runtimeState.refreshing ||
       (!lmStudio() && lmStudio.loading) ||
       (!governor() && governor.loading) ||
-      (!capabilityRouter() && capabilityRouter.loading),
+      (!capabilityRouter() && capabilityRouter.loading) ||
+      (!agentTurn() && agentTurn.loading),
   )
   const repositoryMapStatus = createMemo(() => {
     if (repositoryMap()?.status === "complete") return language.t("status.popover.repositoryMap.status.complete")
@@ -296,7 +307,15 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
     if (lmStudio()?.status === "offline") return language.t("status.popover.runtime.status.offline")
     return language.t("status.popover.runtime.status.unconfigured")
   })
-  const loadedLmStudioModels = createMemo(() => lmStudio()?.models.filter((model) => model.loaded) ?? [])
+  const lmStudioModels = createMemo(() => lmStudio()?.models ?? [])
+  const lmStudioModel = (modelID: string) =>
+    Object.values(serverSync().data.provider.all.get("lmstudio")?.models ?? {}).find(
+      (model) => model.id === modelID || model.api.id === modelID,
+    )
+  const lmStudioModelConfig = (modelID: string) =>
+    Object.entries(serverSync().data.config.provider?.lmstudio?.models ?? {}).find(
+      ([id, model]) => id === modelID || model.id === modelID,
+    )
   const governorStatus = createMemo(() => {
     if (governor()?.status === "healthy") return language.t("status.popover.runtime.governor.status.healthy")
     if (governor()?.status === "pressured") return language.t("status.popover.runtime.governor.status.pressured")
@@ -332,6 +351,8 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
       return language.t("status.popover.runtime.router.reason.switchPreviousUnloaded")
     if (reason === "switch.previous.cleanup_failed")
       return language.t("status.popover.runtime.router.reason.switchCleanupFailed")
+    if (reason === "switch.context.preserved")
+      return language.t("status.popover.runtime.router.reason.switchContextPreserved")
     if (reason === "switch.no_candidate") return language.t("status.popover.runtime.router.reason.switchNoCandidate")
     if (reason === "switch.unconfigured") return language.t("status.popover.runtime.router.reason.switchUnconfigured")
     if (reason === "switch.primary.memory" || reason === "switch.fallback.memory")
@@ -365,6 +386,17 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
     if (status === "prepared") return language.t("status.popover.runtime.vision.status.prepared")
     if (status === "completed") return language.t("status.popover.runtime.vision.status.completed")
     return language.t("status.popover.runtime.vision.status.failed")
+  }
+  const agentTurnPhase = (
+    phase: "classify" | "recall" | "execute" | "verify" | "critic" | "complete" | "failed",
+  ) => {
+    if (phase === "classify") return language.t("status.popover.runtime.turn.phase.classify")
+    if (phase === "recall") return language.t("status.popover.runtime.turn.phase.recall")
+    if (phase === "execute") return language.t("status.popover.runtime.turn.phase.execute")
+    if (phase === "verify") return language.t("status.popover.runtime.turn.phase.verify")
+    if (phase === "critic") return language.t("status.popover.runtime.turn.phase.critic")
+    if (phase === "complete") return language.t("status.popover.runtime.turn.phase.complete")
+    return language.t("status.popover.runtime.turn.phase.failed")
   }
 
   const fail = (err: unknown) => {
@@ -400,6 +432,13 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
             .then((result) => {
               if (polling.stopped || !result.data) return
               setCapabilityRouter(result.data)
+            })
+            .catch(() => undefined),
+          context.client.provider.runtime
+            .turn()
+            .then((result) => {
+              if (polling.stopped || !result.data) return
+              setAgentTurn(result.data)
             })
             .catch(() => undefined),
         ])
@@ -451,7 +490,7 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
   const refreshRuntime = async () => {
     if (runtimeState.refreshing) return
     setRuntimeState("refreshing", true)
-    await Promise.all([refetchLmStudio(), refetchGovernor(), refetchCapabilityRouter()])
+    await Promise.all([refetchLmStudio(), refetchGovernor(), refetchCapabilityRouter(), refetchAgentTurn()])
       .catch(fail)
       .finally(() => setRuntimeState("refreshing", false))
   }
@@ -472,6 +511,59 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
       )
       .catch(fail)
       .finally(() => setRuntimeState("clearingLogs", false))
+  }
+  const modelContextLocked = (modelID: string) => lmStudioModelConfig(modelID)?.[1].preserve_context === true
+  const automaticModelRouting = createMemo(
+    () => serverSync().data.config.provider?.lmstudio?.auto_route !== false,
+  )
+  const modelAutomaticRouting = (modelID: string) => lmStudioModelConfig(modelID)?.[1].auto_route !== false
+  const setModelContextLocked = async (modelID: string, checked: boolean) => {
+    if (runtimeState.contextLocking) return
+    setRuntimeState("contextLocking", modelID)
+    await serverSync()
+      .updateConfig({
+        provider: {
+          lmstudio: {
+            models: {
+              [modelID]: { preserve_context: checked },
+            },
+          },
+        },
+      })
+      .catch(fail)
+      .finally(() => setRuntimeState("contextLocking", undefined))
+  }
+  const setModelAutomaticRouting = async (modelID: string, checked: boolean) => {
+    if (runtimeState.routingModel) return
+    setRuntimeState("routingModel", modelID)
+    await serverSync()
+      .updateConfig({
+        provider: {
+          lmstudio: {
+            models: {
+              [modelID]: { auto_route: checked },
+            },
+          },
+        },
+      })
+      .then(() => refetchCapabilityRouter())
+      .catch(fail)
+      .finally(() => setRuntimeState("routingModel", undefined))
+  }
+  const setAutomaticModelRouting = async (checked: boolean) => {
+    if (runtimeState.routingGlobal) return
+    setRuntimeState("routingGlobal", true)
+    await serverSync()
+      .updateConfig({
+        provider: {
+          lmstudio: {
+            auto_route: checked,
+          },
+        },
+      })
+      .then(() => refetchCapabilityRouter())
+      .catch(fail)
+      .finally(() => setRuntimeState("routingGlobal", false))
   }
 
   return (
@@ -676,6 +768,77 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
           <Tabs.Content value="runtime">
             <div class="flex flex-col px-2 pb-2">
               <div class="flex min-h-32 flex-col gap-3 rounded-sm bg-background-base p-3">
+                <Show when={agentTurn()?.turn}>
+                  {(turn) => (
+                    <div class="flex flex-col gap-2 border-b border-border-weak-base pb-3">
+                      <div class="flex items-center gap-2 px-1">
+                        <div
+                          classList={{
+                            "size-1.5 shrink-0 rounded-full": true,
+                            "bg-icon-success-base": turn().phase === "complete",
+                            "bg-icon-warning-base": !["complete", "failed"].includes(turn().phase),
+                            "bg-icon-critical-base": turn().phase === "failed",
+                          }}
+                        />
+                        <span class="text-14-medium text-text-base">
+                          {language.t("status.popover.runtime.turn.title")} · {agentTurnPhase(turn().phase)}
+                        </span>
+                        <span class="ml-auto text-10-regular tabular-nums text-text-weaker">
+                          {language.t("status.popover.runtime.turn.step")} {turn().step}
+                        </span>
+                      </div>
+
+                      <div class="flex flex-col gap-1 rounded-md bg-surface-raised-base px-2 py-1.5">
+                        <div class="flex min-w-0 items-center gap-2">
+                          <span class="shrink-0 text-10-medium uppercase text-text-weaker">
+                            {language.t("status.popover.runtime.turn.model")}
+                          </span>
+                          <span class="min-w-0 flex-1 truncate text-12-medium text-text-base">
+                            {turn().selectedModelID
+                              ? `${turn().selectedProviderID}/${turn().selectedModelID}`
+                              : language.t("status.popover.runtime.turn.pending")}
+                          </span>
+                        </div>
+                        <span class="truncate text-10-regular text-text-weaker">
+                          {language.t("status.popover.runtime.turn.generation")} {turn().generation}
+                          {Number(turn().recoveries) > 0
+                            ? ` · ${language.t("status.popover.runtime.turn.recoveries")} ${turn().recoveries}`
+                            : ""}
+                        </span>
+                      </div>
+
+                      <div class="grid grid-cols-2 gap-1.5 text-10-regular text-text-weaker">
+                        <span>
+                          {language.t("status.popover.runtime.turn.classifier")}: {turn().counters.classifierTurns}/
+                          {agentTurn()?.limits.classifierTurns}
+                        </span>
+                        <span>
+                          RAG: {turn().counters.ragRetrievals}/{agentTurn()?.limits.ragRetrievals}
+                        </span>
+                        <span>
+                          {language.t("status.popover.runtime.turn.memory")}: {turn().counters.memoryRetrievals}/
+                          {agentTurn()?.limits.memoryRetrievals}
+                        </span>
+                        <span>
+                          {language.t("status.popover.runtime.turn.verification")}: {turn().counters.verificationTurns}/
+                          {agentTurn()?.limits.verificationTurns}
+                        </span>
+                        <span>
+                          {language.t("status.popover.runtime.turn.critic")}: {turn().counters.criticTurns}/
+                          {agentTurn()?.limits.criticTurns}
+                        </span>
+                        <span>
+                          {language.t("status.popover.runtime.turn.provider")}: {turn().counters.providerTurns}/
+                          {agentTurn()?.limits.providerTurns}
+                        </span>
+                        <span>
+                          Tools: {turn().counters.toolCalls}/{agentTurn()?.limits.toolCalls}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </Show>
+
                 <Show when={governor()}>
                   {(runtime) => (
                     <div class="flex flex-col gap-3 border-b border-border-weak-base pb-3">
@@ -765,6 +928,20 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
                           {route().candidateCount} {language.t("status.popover.runtime.router.candidates")}
                         </span>
                       </div>
+
+                      <label class="flex items-start gap-2 rounded-md bg-surface-raised-base px-2 py-2 text-11-regular text-text-weaker">
+                        <Switch
+                          checked={automaticModelRouting()}
+                          disabled={runtimeState.routingGlobal}
+                          onChange={(checked) => void setAutomaticModelRouting(checked)}
+                        />
+                        <span class="flex flex-col gap-0.5">
+                          <span class="text-12-medium text-text-base">
+                            {language.t("status.popover.runtime.router.automatic")}
+                          </span>
+                          <span>{language.t("status.popover.runtime.router.automaticDescription")}</span>
+                        </span>
+                      </label>
 
                       <Show when={route().activation}>
                         {(activation) => (
@@ -962,40 +1139,93 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
 
                     <div class="flex flex-col gap-1 border-t border-border-weak-base pt-3">
                       <span class="px-1 text-12-medium text-text-base">
-                        {language.t("status.popover.runtime.loadedModels")}
+                        {language.t("status.popover.runtime.models")}
                       </span>
                       <Show
-                        when={loadedLmStudioModels().length > 0}
+                        when={lmStudioModels().length > 0}
                         fallback={
                           <span class="px-1 text-11-regular text-text-weaker">
-                            {language.t("status.popover.runtime.noLoadedModels")}
+                            {language.t("status.popover.runtime.noModels")}
                           </span>
                         }
                       >
-                        <For each={loadedLmStudioModels()}>
-                          {(model) => (
-                            <div class="flex flex-col gap-1 rounded-md bg-surface-raised-base px-2 py-1.5">
-                              <div class="flex min-w-0 items-center gap-2">
-                                <span class="min-w-0 flex-1 truncate text-12-regular text-text-base">{model.name}</span>
-                                <Show when={model.context.active}>
-                                  {(context) => (
-                                    <span class="shrink-0 text-10-regular tabular-nums text-text-weaker">
-                                      {Number(context()).toLocaleString(language.intl())}
-                                    </span>
-                                  )}
-                                </Show>
+                        <For each={lmStudioModels()}>
+                          {(model) => {
+                            const configured = () => lmStudioModel(model.id)
+                            const configModelID = () =>
+                              lmStudioModelConfig(model.id)?.[0] ?? configured()?.id ?? model.id
+                            return (
+                              <div class="flex flex-col gap-1 rounded-md bg-surface-raised-base px-2 py-1.5">
+                                <div class="flex min-w-0 items-center gap-2">
+                                  <div
+                                    classList={{
+                                      "size-1.5 shrink-0 rounded-full": true,
+                                      "bg-icon-success-base": model.loaded,
+                                      "bg-border-strong-base": !model.loaded,
+                                    }}
+                                  />
+                                  <span class="min-w-0 flex-1 truncate text-12-regular text-text-base">
+                                    {model.name}
+                                  </span>
+                                  <span class="shrink-0 text-10-regular text-text-weaker">
+                                    {language.t(
+                                      model.loaded
+                                        ? "status.popover.runtime.model.loaded"
+                                        : "status.popover.runtime.model.available",
+                                    )}
+                                  </span>
+                                  <Show
+                                    when={configured()}
+                                    fallback={
+                                      <Show when={model.context.active}>
+                                        {(context) => (
+                                          <span class="shrink-0 text-10-regular tabular-nums text-text-weaker">
+                                            {Number(context()).toLocaleString(language.intl())}
+                                          </span>
+                                        )}
+                                      </Show>
+                                    }
+                                  >
+                                    {(info) => (
+                                      <SettingsModelContextLimit
+                                        providerID="lmstudio"
+                                        modelID={info().id}
+                                        context={info().limit.context}
+                                        input={info().limit.input}
+                                        output={info().limit.output}
+                                        variant="runtime"
+                                      />
+                                    )}
+                                  </Show>
+                                </div>
+                                <div class="flex flex-wrap gap-1">
+                                  <RuntimeCapability label="Tools" enabled={model.capabilities.tools} />
+                                  <RuntimeCapability label="Vision" enabled={model.capabilities.vision} />
+                                  <RuntimeCapability
+                                    label={language.t("model.tooltip.reasoning")}
+                                    enabled={model.capabilities.reasoning}
+                                  />
+                                  <RuntimeCapability label="Embeddings" enabled={model.capabilities.embeddings} />
+                                </div>
+                                <label class="flex items-center gap-2 pt-1 text-11-regular text-text-weaker">
+                                  <Switch
+                                    checked={modelAutomaticRouting(configModelID())}
+                                    disabled={runtimeState.routingModel !== undefined}
+                                    onChange={(checked) => void setModelAutomaticRouting(configModelID(), checked)}
+                                  />
+                                  <span>{language.t("status.popover.runtime.model.autoRoute")}</span>
+                                </label>
+                                <label class="flex items-center gap-2 pt-1 text-11-regular text-text-weaker">
+                                  <Switch
+                                    checked={modelContextLocked(configModelID())}
+                                    disabled={runtimeState.contextLocking !== undefined}
+                                    onChange={(checked) => void setModelContextLocked(configModelID(), checked)}
+                                  />
+                                  <span>{language.t("status.popover.runtime.model.preserveContext")}</span>
+                                </label>
                               </div>
-                              <div class="flex flex-wrap gap-1">
-                                <RuntimeCapability label="Tools" enabled={model.capabilities.tools} />
-                                <RuntimeCapability label="Vision" enabled={model.capabilities.vision} />
-                                <RuntimeCapability
-                                  label={language.t("model.tooltip.reasoning")}
-                                  enabled={model.capabilities.reasoning}
-                                />
-                                <RuntimeCapability label="Embeddings" enabled={model.capabilities.embeddings} />
-                              </div>
-                            </div>
-                          )}
+                            )
+                          }}
                         </For>
                       </Show>
                     </div>

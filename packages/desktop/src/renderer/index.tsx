@@ -313,6 +313,17 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
         type: "image/png",
       })
     },
+
+    requestMicrophoneAccess: () => window.api.requestMicrophoneAccess(),
+    recognizeSpeech: os === "macos" ? (locale) => window.api.recognizeSpeech(locale) : undefined,
+    stopSpeechRecognition: os === "macos" ? () => window.api.stopSpeechRecognition() : undefined,
+    onSpeechRecognitionLevel: os === "macos" ? (callback) => window.api.onSpeechRecognitionLevel(callback) : undefined,
+    onSpeechRecognitionEvent: os === "macos" ? (callback) => window.api.onSpeechRecognitionEvent(callback) : undefined,
+    synthesizeLocalSpeech: async (input) => {
+      const result = await window.api.synthesizeLocalSpeech(input)
+      return { audio: new Blob([result.audio], { type: result.contentType }), metrics: result.metrics }
+    },
+    cancelLocalSpeech: () => window.api.cancelLocalSpeech(),
   }
 }
 

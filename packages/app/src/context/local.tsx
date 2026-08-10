@@ -8,7 +8,7 @@ import { useSettings } from "@/context/settings"
 import { useProviders } from "@/hooks/use-providers"
 import { Persist, persisted } from "@/utils/persist"
 import { hasCustomAgent, resolveAgent } from "./local-agent"
-import { cycleModelVariant, getConfiguredAgentVariant, resolveModelVariant } from "./model-variant"
+import { cycleModelVariant, defaultModelVariant, getConfiguredAgentVariant, resolveModelVariant } from "./model-variant"
 import { useSDK } from "./sdk"
 import { useSync } from "./sync"
 import { useServerSDK } from "./server-sdk"
@@ -162,6 +162,8 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       }
     }
 
+    const loadedModel = () => models.loaded.current()
+
     const defaultModel = () => {
       const defaults = providers.default()
       for (const provider of providers.connected()) {
@@ -178,7 +180,9 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       }
     }
 
-    const fallback = createMemo<ModelKey | undefined>(() => configuredModel() ?? recentModel() ?? defaultModel())
+    const fallback = createMemo<ModelKey | undefined>(
+      () => loadedModel() ?? configuredModel() ?? recentModel() ?? defaultModel(),
+    )
 
     const agent = {
       list,
@@ -234,6 +238,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
     const current = () => {
       const item = firstModel(
         () => scope()?.model,
+        loadedModel,
         () => agent.current()?.model,
         fallback,
       )
@@ -336,6 +341,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           if (!model) return
           const saved = models.variant.get({ providerID: model.provider.id, modelID: model.id })
           if (saved && this.list().includes(saved)) return saved
+          return defaultModelVariant(this.list())
         },
         list() {
           const item = current()

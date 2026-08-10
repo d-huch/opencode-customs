@@ -1,6 +1,9 @@
 import path from "path"
 import { Effect, Schema } from "effect"
 import { FSUtil } from "@opencode-ai/core/fs-util"
+import { Database } from "@opencode-ai/core/database/database"
+import { SessionExecutionCheckpoint } from "@opencode-ai/core/session/execution-checkpoint"
+import { VerificationMatrix } from "@opencode-ai/core/verification-matrix"
 import { InstanceState } from "@/effect/instance-state"
 import { LSP } from "@/lsp/lsp"
 import { attempt, TOOL_ID } from "@/session/verification"
@@ -10,7 +13,39 @@ import { Tool } from "./tool"
 const Check = Schema.Struct({
   name: Schema.String.annotate({ description: "Short label for the check" }),
   command: Schema.String.annotate({ description: "Repository-native verification command" }),
+  kinds: Schema.Array(
+    Schema.Literals([
+      "formatter",
+      "typecheck",
+      "unit_test",
+      "feature_test",
+      "component_test",
+      "migration_validation",
+      "build",
+      "lint",
+      "api_contract_generation",
+      "screenshot_comparison",
+      "git_diff_inspection",
+    ]),
+  ).annotate({ description: "Verification Matrix check types covered by this command" }),
   timeout: Schema.optional(Schema.Number).annotate({ description: "Optional timeout in milliseconds" }),
+})
+
+const Omission = Schema.Struct({
+  kind: Schema.Literals([
+    "formatter",
+    "typecheck",
+    "unit_test",
+    "feature_test",
+    "component_test",
+    "migration_validation",
+    "build",
+    "lint",
+    "api_contract_generation",
+    "screenshot_comparison",
+    "git_diff_inspection",
+  ]),
+  reason: Schema.String.annotate({ description: "Concrete reason this check type cannot run in the current project" }),
 })
 
 const Parameters = Schema.Struct({
@@ -18,7 +53,10 @@ const Parameters = Schema.Struct({
     description: "Every project file changed by the current task, relative to the project when possible",
   }),
   checks: Schema.Array(Check).annotate({
-    description: "The smallest relevant commands. May be empty when active LSP diagnostics fully cover the files.",
+    description: "The smallest repository-native commands covering the selected Verification Matrix check types",
+  }),
+  omissions: Schema.Array(Omission).annotate({
+    description: "Selected conditional checks that are unavailable, with a concrete reason. Required checks remain unverified.",
   }),
 })
 
@@ -27,6 +65,7 @@ export const VerificationTool = Tool.define(
   Effect.gen(function* () {
     const shell = yield* ShellTool
     const lsp = yield* LSP.Service
+    const database = yield* Database.Service
 
     return () =>
       Effect.gen(function* () {
@@ -39,9 +78,11 @@ export const VerificationTool = Tool.define(
             Effect.gen(function* () {
               if (input.files.length === 0) throw new Error("Verification requires at least one changed file")
               if (input.files.length > 50) throw new Error("Verification accepts at most 50 changed files")
-              if (input.checks.length > 6) throw new Error("Verification accepts at most 6 focused checks")
+              if (input.checks.length > 10) throw new Error("Verification accepts at most 10 focused checks")
               if (input.checks.some((check) => check.timeout !== undefined && check.timeout <= 0))
                 throw new Error("Verification timeouts must be positive")
+              if (input.checks.some((check) => check.kinds.length === 0))
+                throw new Error("Every verification command must declare at least one matrix check type")
 
               const instance = yield* InstanceState.context
               const files = Array.from(
@@ -52,6 +93,21 @@ export const VerificationTool = Tool.define(
                   }),
                 ),
               ).sort()
+              const checkpoint = yield* SessionExecutionCheckpoint.load(database.db, ctx.sessionID)
+              const matrix =
+                checkpoint?.verification_plan &&
+                checkpoint.verification_plan.files.length === files.length &&
+                checkpoint.verification_plan.files.every((file) => files.includes(file))
+                  ? checkpoint.verification_plan
+                  : VerificationMatrix.select({ files })
+              const covered = new Set(input.checks.flatMap((check) => check.kinds))
+              const omitted = new Map(input.omissions.map((omission) => [omission.kind, omission.reason]))
+              const coverage = VerificationMatrix.audit(matrix, {
+                covered: Array.from(covered),
+                omissions: input.omissions,
+              })
+              if (coverage.unrelated.length)
+                throw new Error(`Verification includes unrelated check types: ${coverage.unrelated.join(", ")}`)
               const checks = yield* Effect.forEach(
                 input.checks,
                 (check) =>
@@ -68,6 +124,7 @@ export const VerificationTool = Tool.define(
                       Effect.map((result) => ({
                         name: check.name,
                         command: check.command,
+                        kinds: check.kinds,
                         exit: result.metadata.exit,
                         passed: result.metadata.exit === 0,
                         output: result.output,
@@ -95,7 +152,12 @@ export const VerificationTool = Tool.define(
                   })),
               )
               const executed = checks.length + lspFiles.length
-              const passed = executed > 0 && checks.every((check) => check.passed) && errors.length === 0
+              const passed =
+                executed > 0 &&
+                checks.every((check) => check.passed) &&
+                errors.length === 0 &&
+                coverage.missing.length === 0 &&
+                coverage.requiredOmissions.length === 0
               const currentAttempt = attempt(ctx.messages)
               const output = [
                 passed ? "Verification passed." : "Verification did not pass.",
@@ -110,6 +172,31 @@ export const VerificationTool = Tool.define(
                         : `PASS LSP diagnostics (${lspFiles.length} changed file${lspFiles.length === 1 ? "" : "s"})`,
                     ]
                   : []),
+                `Verification Matrix:\n${matrix.checks
+                  .map((check) => {
+                    const status = covered.has(check.kind)
+                      ? "RUN"
+                      : omitted.has(check.kind)
+                        ? check.requirement === "required"
+                          ? "BLOCKED"
+                          : "OMIT"
+                        : "MISSING"
+                    return `- ${status} ${check.kind} [${check.requirement}]: ${check.reasons.join(" ")}${
+                      omitted.has(check.kind) ? ` Omission: ${omitted.get(check.kind)}` : ""
+                    }`
+                  })
+                  .join("\n")}`,
+                matrix.rationale,
+                coverage.requiredOmissions.length
+                  ? `Required checks unavailable:\n${coverage.requiredOmissions
+                      .map((check) => `- ${check.kind}: ${omitted.get(check.kind)}`)
+                      .join("\n")}`
+                  : undefined,
+                coverage.missing.length
+                  ? `Selected checks not accounted for:\n${coverage.missing
+                      .map((check) => `- ${check.kind}`)
+                      .join("\n")}`
+                  : undefined,
                 executed === 0
                   ? "No executable check or active LSP coverage was provided. The change remains unverified."
                   : undefined,
@@ -127,9 +214,14 @@ export const VerificationTool = Tool.define(
                   checks: checks.map((check) => ({
                     name: check.name,
                     command: check.command,
+                    kinds: check.kinds,
                     exit: check.exit,
                     passed: check.passed,
                   })),
+                  matrix,
+                  omissions: input.omissions,
+                  missing: coverage.missing.map((check) => check.kind),
+                  requiredOmissions: coverage.requiredOmissions.map((check) => check.kind),
                   lsp: { files: lspFiles.length, errors: errors.length },
                   unverified: executed === 0,
                 },

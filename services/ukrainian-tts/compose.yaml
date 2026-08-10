@@ -1,0 +1,25 @@
+services:
+  opencode-customs-tts:
+    build:
+      context: .
+    ports:
+      - "127.0.0.1:8880:8880"
+    environment:
+      TTS_QUALITY_MODEL_ID: ${TTS_QUALITY_MODEL_ID:-silero-v5-ukrainian}
+      TTS_FAST_MODEL_ID: ${TTS_FAST_MODEL_ID:-piper-ukrainian}
+      TTS_MAX_INPUT_CHARS: ${TTS_MAX_INPUT_CHARS:-6000}
+      TTS_CHUNK_CHARS: ${TTS_CHUNK_CHARS:-350}
+      TTS_CPU_THREADS: ${TTS_CPU_THREADS:-4}
+      TTS_DOWNLOAD_ATTEMPTS: ${TTS_DOWNLOAD_ATTEMPTS:-2}
+      TTS_DOWNLOAD_TIMEOUT_SECONDS: ${TTS_DOWNLOAD_TIMEOUT_SECONDS:-30}
+    volumes:
+      - ukrainian-tts-cache:/home/tts/.cache
+      - ./models:/models:ro
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 5g
+    cpus: 4
+
+volumes:
+  ukrainian-tts-cache:

@@ -6,7 +6,7 @@ import { probeLmStudio } from "./lmstudio"
 import type { LmStudioProbe, LmStudioRequest } from "./lmstudio"
 import { snapshot } from "./resource-governor"
 
-const current = new Map<string, ModelCapabilityRouter.Plan>()
+const current = new Map<string, { policy: string; plan: ModelCapabilityRouter.Plan }>()
 
 export async function route(input: {
   readonly config: ConfigV1.Info
@@ -36,6 +36,9 @@ export async function route(input: {
     needsVision: input.requestShape.images > 0,
     needsTools: input.requestShape.tools > 0,
     allowUnloaded: input.allowUnloaded,
+    disabledModelIDs: Object.entries(provider?.models ?? {}).flatMap(([modelID, model]) =>
+      model.auto_route === false ? [modelID, ...(model.id ? [model.id] : [])] : [],
+    ),
     candidates: probe.models.map((model) => ({
       providerID: "lmstudio",
       modelID: model.id,
@@ -51,18 +54,31 @@ export async function route(input: {
     })),
   })
   const visible = withoutLegacyFallback(plan)
-  if (input.record !== false) current.set(runtimeKey(input.config), visible)
+  if (input.record !== false)
+    current.set(runtimeKey(input.config), { policy: routingPolicy(input.config), plan: visible })
   return visible
 }
 
+export function allowsAutomaticRoute(config: ConfigV1.Info, modelID: string) {
+  const configured = Object.entries(config.provider?.lmstudio?.models ?? {}).find(
+    ([id, model]) => id === modelID || model.id === modelID,
+  )
+  return configured?.[1].auto_route !== false
+}
+
+export function automaticRoutingEnabled(config: ConfigV1.Info) {
+  return config.provider?.lmstudio?.auto_route !== false
+}
+
 export function latest(config: ConfigV1.Info) {
-  const plan = current.get(runtimeKey(config))
-  return plan ? withoutLegacyFallback(plan) : undefined
+  const item = current.get(runtimeKey(config))
+  if (!item || item.policy !== routingPolicy(config)) return undefined
+  return withoutLegacyFallback(item.plan)
 }
 
 export function record(config: ConfigV1.Info, plan: ModelCapabilityRouter.Plan) {
   const visible = withoutLegacyFallback(plan)
-  current.set(runtimeKey(config), visible)
+  current.set(runtimeKey(config), { policy: routingPolicy(config), plan: visible })
   return visible
 }
 
@@ -73,6 +89,16 @@ export function selection(plan: ModelCapabilityRouter.Plan, role: ModelCapabilit
 function runtimeKey(config: ConfigV1.Info) {
   const baseURL = config.provider?.lmstudio?.options?.baseURL
   return typeof baseURL === "string" ? baseURL : "unconfigured"
+}
+
+function routingPolicy(config: ConfigV1.Info) {
+  return [
+    `global:${automaticRoutingEnabled(config)}`,
+    ...Object.entries(config.provider?.lmstudio?.models ?? {})
+      .filter(([, model]) => model.auto_route === false)
+      .map(([modelID, model]) => `${modelID}:${model.id ?? ""}`)
+      .toSorted(),
+  ].join("|")
 }
 
 function withoutLegacyFallback(plan: ModelCapabilityRouter.Plan): ModelCapabilityRouter.Plan {

@@ -52,6 +52,42 @@ describe("LM Studio embedding provider", () => {
 
     expect(await Effect.runPromise(provider.model())).toBeUndefined()
   })
+
+  test("does not choose an embedding model blocked from automatic routing", async () => {
+    const provider = lmStudioEmbeddingProvider(
+      () =>
+        Effect.succeed({
+          ...config(),
+          provider: {
+            lmstudio: {
+              ...config().provider?.lmstudio,
+              models: { blocked: { id: "blocked", auto_route: false } },
+            },
+          },
+        }),
+      async (input) => {
+        if (String(input).endsWith("/api/v1/models"))
+          return Response.json({
+            models: [
+              {
+                key: "blocked",
+                type: "embedding",
+                loaded_instances: [{ id: "blocked@q8", config: { context_length: 8_192 } }],
+              },
+              {
+                key: "allowed",
+                type: "embedding",
+                loaded_instances: [{ id: "allowed@q8", config: { context_length: 8_192 } }],
+              },
+            ],
+          })
+        return Response.json({ data: [] })
+      },
+    )
+
+    expect((await Effect.runPromise(provider.model()))?.name).toBe("allowed")
+    expect((await Effect.runPromise(provider.model("blocked")))?.name).toBe("blocked")
+  })
 })
 
 function config(): ConfigV1.Info {

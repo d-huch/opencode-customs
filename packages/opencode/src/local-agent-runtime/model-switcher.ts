@@ -21,6 +21,15 @@ const active = new Map<string, { readonly modelID: string; readonly instanceID: 
 export type Result = {
   readonly model: Provider.Model
   readonly plan: ModelCapabilityRouter.Plan
+  readonly telemetry?: {
+    readonly capabilityProbeStartedAt: number
+    readonly capabilityProbeCompletedAt: number
+    readonly capabilityProbeMs: number
+    readonly activationStartedAt: number
+    readonly activationCompletedAt: number
+    readonly modelActivationMs: number
+    readonly probeCache: "hit" | "miss" | "bypass"
+  }
 }
 
 export async function activate(input: {
@@ -33,6 +42,7 @@ export async function activate(input: {
   readonly resources?: ReturnType<typeof snapshot>
   readonly vision?: ModelCapabilityRouter.Vision
 }): Promise<Result> {
+  if (!CapabilityRouter.automaticRoutingEnabled(input.config)) return manual(input)
   const baseURL = input.config.provider?.lmstudio?.options?.baseURL
   if (typeof baseURL !== "string" || !URL.canParse(baseURL)) {
     const plan = await CapabilityRouter.route({
@@ -65,6 +75,53 @@ export async function activate(input: {
   return guarded.then((result) => withVision(input.config, result, input.vision))
 }
 
+function manual(input: Parameters<typeof activate>[0]): Result {
+  const role = input.role ?? (input.requestShape.images > 0 ? "vision" : "coding")
+  const compatible = role !== "vision" || input.preferredModel.capabilities.input.image
+  const selection = {
+    role,
+    providerID: String(input.preferredModel.providerID),
+    modelID: String(input.preferredModel.id),
+    instanceID: input.preferredModel.api.id,
+    name: input.preferredModel.name,
+    score: 0,
+    context: input.preferredModel.limit.context,
+    capabilities: {
+      tools: input.preferredModel.capabilities.toolcall,
+      vision: input.preferredModel.capabilities.input.image,
+      reasoning: input.preferredModel.capabilities.reasoning,
+      embeddings: false,
+    },
+    reason: ["preference.explicit", "routing.disabled"],
+  } satisfies ModelCapabilityRouter.Selection
+  return {
+    model: input.preferredModel,
+    plan: CapabilityRouter.record(input.config, {
+      status: compatible ? "ready" : "degraded",
+      checkedAt: Date.now(),
+      providerID: String(input.preferredModel.providerID),
+      complexity: ModelCapabilityRouter.complexity(input.requestShape),
+      pressure: input.resources?.status ?? snapshot().status,
+      candidateCount: 1,
+      selections: [selection],
+      reason: ["routing.disabled"],
+      activation: {
+        status: compatible ? "ready" : "degraded",
+        checkedAt: Date.now(),
+        role,
+        requestedModelID: String(input.preferredModel.id),
+        activeModelID: String(input.preferredModel.id),
+        activeInstanceID: input.preferredModel.api.id,
+        attempts: 0,
+        failover: false,
+        rollback: false,
+        reason: ["routing.disabled"],
+      },
+      ...(input.vision ? { vision: input.vision } : {}),
+    }),
+  }
+}
+
 export function completeVision(
   config: ConfigV1.Info,
   plan: ModelCapabilityRouter.Plan,
@@ -84,6 +141,29 @@ export function completeVision(
   })
 }
 
+export function failureMessage(result: Result) {
+  const activation = result.plan.activation
+  const role = activation?.role ?? "coding"
+  const selection = CapabilityRouter.selection(result.plan, role)
+  const model = selection?.name ?? activation?.requestedModelID ?? String(result.model.id)
+  const reasons = activation?.reason ?? []
+  const providerError = reasons.find((reason) => reason.startsWith("switch.error:"))?.slice("switch.error:".length)
+  const detail = providerError
+    ? providerError
+    : reasons.includes("switch.primary.memory")
+      ? "the Resource Governor refused the launch because there is not enough free memory. Unload another LM Studio model or reduce its context, then retry"
+      : reasons.includes("switch.no_candidate")
+        ? `no allowed ${role === "vision" ? "vision-capable " : ""}LM Studio model satisfies the request capabilities`
+        : reasons.includes("switch.unconfigured")
+          ? "the LM Studio base URL is missing or invalid"
+          : result.plan.vision?.status === "failed"
+            ? "no allowed vision-capable LM Studio model is available"
+            : "LM Studio did not make the selected model ready"
+  const preserved =
+    activation?.status === "rolled_back" ? " The previously loaded model was preserved but not used." : ""
+  return `LM Studio could not activate "${model}": ${detail}.${preserved} No fallback model was used.`
+}
+
 async function activateNow(
   input: Parameters<typeof activate>[0] & {
     readonly baseURL: string
@@ -92,12 +172,33 @@ async function activateNow(
   if (input.signal?.aborted) throw input.signal.reason
   const provider = input.config.provider?.lmstudio
   const apiKey = provider?.options?.apiKey
+  const capabilityProbeStartedAt = Date.now()
+  let probeCache = "miss" as "hit" | "miss" | "bypass"
   const probe = await probeLmStudio({
     baseURL: input.baseURL,
     apiKey,
     request: input.request,
-    refresh: true,
+    onCache: (status) => {
+      probeCache = status
+    },
   })
+  const capabilityProbeCompletedAt = Date.now()
+  const activationStartedAt = capabilityProbeCompletedAt
+  const complete = (result: Result): Result => {
+    const activationCompletedAt = Date.now()
+    return {
+      ...result,
+      telemetry: {
+        capabilityProbeStartedAt,
+        capabilityProbeCompletedAt,
+        capabilityProbeMs: Math.max(0, capabilityProbeCompletedAt - capabilityProbeStartedAt),
+        activationStartedAt,
+        activationCompletedAt,
+        modelActivationMs: Math.max(0, activationCompletedAt - activationStartedAt),
+        probeCache,
+      },
+    }
+  }
   const requested =
     findLmStudioModel(probe, input.preferredModel.api.id) ?? findLmStudioModel(probe, input.preferredModel.id)
   const requestedModelID = requested?.id ?? input.preferredModel.api.id
@@ -141,7 +242,8 @@ async function activateNow(
   const selections = [primary]
     .filter((selection): selection is ModelCapabilityRouter.Selection => selection !== undefined)
     .filter((selection) => role !== "vision" || selection.capabilities.vision)
-  if (selections.length === 0) return failed(input.config, plan, input.preferredModel, role, ["switch.no_candidate"])
+  if (selections.length === 0)
+    return complete(failed(input.config, plan, input.preferredModel, role, ["switch.no_candidate"]))
 
   const activeModel = active.get(input.baseURL)
   const previous =
@@ -172,7 +274,7 @@ async function activateNow(
               signal: input.signal,
             })
       if (role !== "utility") active.set(input.baseURL, { modelID: selection.modelID, instanceID: loadedInstanceID })
-      return success(input.config, plan, result, role, selection, previous, previousInstanceID, cleanup)
+      return complete(success(input.config, plan, result, role, selection, previous, previousInstanceID, cleanup))
     }
 
     const resources = input.resources ?? snapshot()
@@ -187,15 +289,18 @@ async function activateNow(
 
     let loaded: Awaited<ReturnType<typeof loadLmStudioModel>> | undefined
     try {
-      const budget = await contextBudget({
-        providerID: "lmstudio",
-        modelID: selection.modelID,
-        requestedContext: selection.context ?? input.preferredModel.limit.context,
-        outputTokens: input.preferredModel.limit.output,
-        baseURL: input.baseURL,
-        apiKey,
-        request: input.request,
-      })
+      const preserveContext = input.config.provider?.lmstudio?.models?.[selection.modelID]?.preserve_context === true
+      const budget = preserveContext
+        ? undefined
+        : await contextBudget({
+            providerID: "lmstudio",
+            modelID: selection.modelID,
+            requestedContext: selection.context ?? input.preferredModel.limit.context,
+            outputTokens: input.preferredModel.limit.output,
+            baseURL: input.baseURL,
+            apiKey,
+            request: input.request,
+          })
       loaded = await loadLmStudioModel({
         baseURL: input.baseURL,
         apiKey,
@@ -222,7 +327,7 @@ async function activateNow(
       )
       const cleanup =
         role === "utility"
-          ? ["switch.previous.preserved"]
+          ? ["switch.previous.preserved", ...(preserveContext ? ["switch.context.preserved"] : [])]
           : await unloadPrevious({
               baseURL: input.baseURL,
               apiKey,
@@ -230,9 +335,9 @@ async function activateNow(
               activeInstanceID: loaded.instanceID,
               request: input.request,
               signal: input.signal,
-            })
+            }).then((reason) => [...reason, ...(preserveContext ? ["switch.context.preserved"] : [])])
       if (role !== "utility") active.set(input.baseURL, { modelID: selection.modelID, instanceID: loaded.instanceID })
-      return success(input.config, plan, result, role, selection, previous, previousInstanceID, cleanup)
+      return complete(success(input.config, plan, result, role, selection, previous, previousInstanceID, cleanup))
     } catch (error) {
       reasons.push("switch.primary.failed")
       reasons.push(`switch.error:${errorMessage(error)}`)
@@ -249,15 +354,8 @@ async function activateNow(
     }
   }
 
-  return failed(
-    input.config,
-    plan,
-    input.preferredModel,
-    role,
-    reasons,
-    previous,
-    previousInstanceID,
-    selections.length,
+  return complete(
+    failed(input.config, plan, input.preferredModel, role, reasons, previous, previousInstanceID, selections.length),
   )
 }
 

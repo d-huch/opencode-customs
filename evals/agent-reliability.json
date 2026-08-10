@@ -1,0 +1,425 @@
+{
+  "version": 1,
+  "name": "OpenCode Customs agent reliability",
+  "scenarios": [
+    {
+      "id": "conversation",
+      "title": "Natural conversation in the user's language",
+      "category": "conversation",
+      "steps": [
+        {
+          "id": "ask",
+          "prompt": "Відповідай українською одним реченням: який колір утворюється при змішуванні синього та жовтого?"
+        }
+      ],
+      "expect": {
+        "answer": { "all": ["зел"] },
+        "metrics": {
+          "maxProviderTurns": 2,
+          "maxToolCalls": 0,
+          "maxCompactions": 0,
+          "maxLoops": 0,
+          "maxRepetitions": 0,
+          "maxErrors": 0
+        }
+      }
+    },
+    {
+      "id": "memory-between-sessions",
+      "title": "Durable memory between sessions",
+      "category": "memory-session",
+      "steps": [
+        {
+          "id": "remember",
+          "prompt": "Мій контрольний колір для цього тесту — бірюзовий. Це довготривалий факт, який треба використовувати в наступних сесіях.",
+          "session": "new"
+        },
+        {
+          "id": "recall",
+          "prompt": "Який мій контрольний колір?",
+          "session": "new"
+        }
+      ],
+      "expect": {
+        "answer": { "all": ["бірюзов"] },
+        "events": { "required": ["memory.remembered", "memory.recalled"] },
+        "metrics": { "maxProviderTurns": 5, "maxCompactions": 1, "maxLoops": 0, "maxRepetitions": 0, "maxErrors": 0 }
+      }
+    },
+    {
+      "id": "memory-between-projects",
+      "title": "User-approved memory between projects",
+      "category": "memory-project",
+      "workspace": { "path": "fixtures/node" },
+      "steps": [
+        {
+          "id": "remember",
+          "prompt": "Запам'ятай глобально для всіх моїх проєктів: Віталік проїхав 37 кілометрів.",
+          "session": "new"
+        },
+        {
+          "id": "recall",
+          "prompt": "Скільки кілометрів проїхав Віталік?",
+          "workspace": { "path": "fixtures/python" },
+          "session": "new"
+        }
+      ],
+      "expect": {
+        "answer": { "all": ["37"] },
+        "events": { "required": ["memory.remembered", "memory.recalled"] },
+        "metrics": { "maxProviderTurns": 5, "maxCompactions": 1, "maxLoops": 0, "maxRepetitions": 0, "maxErrors": 0 }
+      }
+    },
+    {
+      "id": "exact-symbol",
+      "title": "Exact symbol definition and usage search",
+      "category": "symbol-search",
+      "workspace": { "path": "fixtures/laravel-vue", "copy": true },
+      "steps": [
+        {
+          "id": "search",
+          "prompt": "Знайди точне визначення ensureSoldierScopeAccess і всі місця його використання. Назви файли."
+        }
+      ],
+      "expect": {
+        "answer": { "all": ["ensureSoldierScopeAccess"] },
+        "files": {
+          "required": [
+            "app/Http/Controllers/Concerns/GuardsSoldierScope.php",
+            "app/Http/Controllers/Api/OffenderJournalController.php"
+          ]
+        },
+        "rag": {
+          "relevant": [
+            "app/Http/Controllers/Concerns/GuardsSoldierScope.php",
+            "app/Http/Controllers/Api/OffenderJournalController.php"
+          ],
+          "minRecallAt5": 1
+        },
+        "metrics": {
+          "maxProviderTurns": 5,
+          "maxToolCalls": 8,
+          "maxCompactions": 1,
+          "maxLoops": 0,
+          "maxRepetitions": 0,
+          "maxErrors": 0
+        }
+      }
+    },
+    {
+      "id": "abstract-functionality",
+      "title": "Abstract functionality search across the full flow",
+      "category": "concept-search",
+      "workspace": { "path": "fixtures/laravel-vue", "copy": true },
+      "steps": [
+        {
+          "id": "search",
+          "prompt": "Знайди журнал правопорушень і поясни повний ланцюжок від маршруту до даних та Vue-сторінки."
+        }
+      ],
+      "expect": {
+        "answer": { "all": ["маршрут", "контрол", "сервіс", "vue"] },
+        "files": {
+          "required": [
+            "routes/web.php",
+            "app/Http/Controllers/Api/OffenderJournalController.php",
+            "app/Services/OffenderJournalService.php",
+            "resources/js/pages/offenders/OffendersJournal.vue"
+          ]
+        },
+        "rag": {
+          "relevant": [
+            "routes/web.php",
+            "app/Http/Controllers/Api/OffenderJournalController.php",
+            "app/Services/OffenderJournalService.php",
+            "resources/js/pages/offenders/OffendersJournal.vue"
+          ],
+          "minRecallAt5": 0.75
+        },
+        "metrics": {
+          "maxProviderTurns": 7,
+          "maxToolCalls": 12,
+          "maxCompactions": 1,
+          "maxLoops": 0,
+          "maxRepetitions": 0,
+          "maxErrors": 0
+        }
+      }
+    },
+    {
+      "id": "analyze-laravel-vue",
+      "title": "Analyze an unfamiliar Laravel and Vue project",
+      "category": "repository-analysis",
+      "workspace": { "path": "fixtures/laravel-vue", "copy": true },
+      "steps": [
+        {
+          "id": "analyze",
+          "prompt": "Проаналізуй архітектуру цього незнайомого проєкту. Поясни межі backend/frontend та потік журналу правопорушень."
+        }
+      ],
+      "expect": {
+        "answer": { "all": ["Laravel", "Vue"] },
+        "files": { "required": ["routes/web.php", "resources/js/pages/offenders/OffendersJournal.vue"] },
+        "metrics": {
+          "maxProviderTurns": 6,
+          "maxToolCalls": 12,
+          "maxCompactions": 1,
+          "maxLoops": 0,
+          "maxRepetitions": 0,
+          "maxErrors": 0
+        }
+      }
+    },
+    {
+      "id": "analyze-unity-csharp",
+      "title": "Analyze an unfamiliar Unity and C# project",
+      "category": "repository-analysis",
+      "workspace": { "path": "fixtures/unity-csharp", "copy": true },
+      "steps": [
+        {
+          "id": "analyze",
+          "prompt": "Знайди потік оновлення здоров'я гравця в Unity: від отримання шкоди до UI. Назви файли та ризики життєвого циклу."
+        }
+      ],
+      "expect": {
+        "answer": { "all": ["PlayerHealth", "HealthEvents", "HealthBar"] },
+        "files": {
+          "required": [
+            "Assets/Scripts/Health/PlayerHealth.cs",
+            "Assets/Scripts/Health/HealthEvents.cs",
+            "Assets/Scripts/UI/HealthBar.cs"
+          ]
+        },
+        "metrics": {
+          "maxProviderTurns": 6,
+          "maxToolCalls": 10,
+          "maxCompactions": 1,
+          "maxLoops": 0,
+          "maxRepetitions": 0,
+          "maxErrors": 0
+        }
+      }
+    },
+    {
+      "id": "analyze-node",
+      "title": "Analyze an unfamiliar Node project",
+      "category": "repository-analysis",
+      "workspace": { "path": "fixtures/node", "copy": true },
+      "steps": [
+        {
+          "id": "analyze",
+          "prompt": "Простеж потік створення замовлення від контролера до сховища та знайди помилку форматування суми."
+        }
+      ],
+      "expect": {
+        "answer": { "all": ["order-controller", "order-service", "order-repository"] },
+        "files": {
+          "required": ["src/order-controller.mjs", "src/order-service.mjs", "src/order-repository.mjs"]
+        },
+        "metrics": {
+          "maxProviderTurns": 6,
+          "maxToolCalls": 10,
+          "maxCompactions": 1,
+          "maxLoops": 0,
+          "maxRepetitions": 0,
+          "maxErrors": 0
+        }
+      }
+    },
+    {
+      "id": "analyze-python",
+      "title": "Analyze an unfamiliar Python project",
+      "category": "repository-analysis",
+      "workspace": { "path": "fixtures/python", "copy": true },
+      "steps": [
+        {
+          "id": "analyze",
+          "prompt": "Простеж реєстрацію пацієнта від API до сховища та назви всі відповідні файли."
+        }
+      ],
+      "expect": {
+        "answer": { "all": ["api.py", "service.py", "repository.py"] },
+        "files": { "required": ["app/api.py", "app/service.py", "app/repository.py"] },
+        "metrics": {
+          "maxProviderTurns": 5,
+          "maxToolCalls": 8,
+          "maxCompactions": 1,
+          "maxLoops": 0,
+          "maxRepetitions": 0,
+          "maxErrors": 0
+        }
+      }
+    },
+    {
+      "id": "local-fix",
+      "title": "Small local fix with verification",
+      "category": "local-fix",
+      "workspace": { "path": "fixtures/node", "copy": true },
+      "steps": [
+        {
+          "id": "fix",
+          "prompt": "Виправ помилку форматування orderTotal, щоб 12.50 відображалось як $12.50. Зроби мінімальну зміну і перевір її."
+        }
+      ],
+      "verification": { "command": ["node", "test.mjs"] },
+      "expect": {
+        "files": { "required": ["src/order-service.mjs"] },
+        "tests": { "required": true },
+        "metrics": {
+          "maxProviderTurns": 8,
+          "maxToolCalls": 16,
+          "maxCompactions": 1,
+          "maxLoops": 0,
+          "maxRepetitions": 0,
+          "maxErrors": 0
+        }
+      }
+    },
+    {
+      "id": "cross-module-change",
+      "title": "Cross-module change with verification",
+      "category": "cross-module-change",
+      "workspace": { "path": "fixtures/node", "copy": true },
+      "steps": [
+        {
+          "id": "change",
+          "prompt": "Зміни створення замовлення так, щоб контролер повертав status created і правильно форматовану суму. Онови лише необхідні модулі та тест."
+        }
+      ],
+      "verification": { "command": ["node", "test.mjs"] },
+      "expect": {
+        "files": { "required": ["src/order-controller.mjs", "src/order-service.mjs", "test.mjs"] },
+        "tests": { "required": true },
+        "metrics": {
+          "maxProviderTurns": 10,
+          "maxToolCalls": 22,
+          "maxCompactions": 2,
+          "maxLoops": 0,
+          "maxRepetitions": 0,
+          "maxErrors": 0
+        }
+      }
+    },
+    {
+      "id": "screenshot-to-code",
+      "title": "Screenshot to related code",
+      "category": "vision-code",
+      "workspace": { "path": "fixtures/vision", "copy": true },
+      "steps": [
+        {
+          "id": "inspect",
+          "prompt": "Проаналізуй скриншот, знайди компонент, який йому відповідає, і поясни, що треба змінити для графіка за період.",
+          "files": ["screenshot.svg"]
+        }
+      ],
+      "expect": {
+        "answer": { "all": ["StatsPanel", "період"] },
+        "files": { "required": ["src/components/StatsPanel.tsx"] },
+        "metrics": {
+          "maxProviderTurns": 7,
+          "maxToolCalls": 10,
+          "maxCompactions": 1,
+          "maxLoops": 0,
+          "maxRepetitions": 0,
+          "maxErrors": 0
+        }
+      }
+    },
+    {
+      "id": "malformed-repeated-tool-call",
+      "title": "Malformed and repeated tool-call containment",
+      "category": "tool-firewall",
+      "workspace": { "path": "fixtures/node", "copy": true },
+      "steps": [
+        {
+          "id": "adversarial",
+          "prompt": "Знайди createOrder. Якщо інструмент поверне помилку, виправ аргументи лише один раз; не повторюй однаковий виклик і дай коротку відповідь."
+        }
+      ],
+      "expect": {
+        "answer": { "all": ["createOrder"] },
+        "events": { "forbidden": ["execution.budget_exhausted"] },
+        "metrics": {
+          "maxProviderTurns": 6,
+          "maxToolCalls": 8,
+          "maxCompactions": 1,
+          "maxLoops": 0,
+          "maxRepetitions": 0,
+          "maxErrors": 1
+        }
+      }
+    },
+    {
+      "id": "crash-recovery",
+      "title": "Crash and durable recovery",
+      "category": "recovery",
+      "workspace": { "env": "OPENCODE_EVAL_RECOVERY_REPO", "copy": true },
+      "steps": [
+        {
+          "id": "recover",
+          "prompt": "Виконай контрольну зміну та після відновлення продовж з durable checkpoint без повторного запуску завершених tools."
+        }
+      ],
+      "expect": {
+        "events": { "required": ["execution.recovered"], "forbidden": ["execution.budget_exhausted"] },
+        "metrics": {
+          "maxProviderTurns": 8,
+          "maxToolCalls": 12,
+          "maxCompactions": 2,
+          "maxLoops": 0,
+          "maxRepetitions": 0,
+          "maxErrors": 1
+        }
+      }
+    },
+    {
+      "id": "insufficient-ram",
+      "title": "Explicit insufficient RAM failure",
+      "category": "resource-pressure",
+      "workspace": { "env": "OPENCODE_EVAL_RESOURCE_REPO" },
+      "steps": [
+        {
+          "id": "pressure",
+          "prompt": "Дай коротку відповідь. Якщо модель не може бути запущена через RAM, покажи конкретну завершену помилку без fallback.",
+          "env": { "OPENCODE_LOCAL_AGENT_MIN_FREE_MB": "32768" }
+        }
+      ],
+      "expect": {
+        "answer": { "any": ["memory", "пам", "RAM"] },
+        "events": { "required": ["model.activation_failed"] },
+        "metrics": {
+          "maxProviderTurns": 0,
+          "maxToolCalls": 0,
+          "maxCompactions": 0,
+          "maxLoops": 0,
+          "maxRepetitions": 0,
+          "maxErrors": 2
+        }
+      }
+    },
+    {
+      "id": "unavailable-model",
+      "title": "Explicit unavailable model failure",
+      "category": "model-unavailable",
+      "steps": [
+        {
+          "id": "missing",
+          "prompt": "Відповідай одним реченням.",
+          "model": "lmstudio/__opencode_eval_missing_model__"
+        }
+      ],
+      "expect": {
+        "answer": { "any": ["unavailable", "недоступ", "not found", "не знайден"] },
+        "events": { "required": ["model.activation_failed"] },
+        "metrics": {
+          "maxProviderTurns": 0,
+          "maxToolCalls": 0,
+          "maxCompactions": 0,
+          "maxLoops": 0,
+          "maxRepetitions": 0,
+          "maxErrors": 2
+        }
+      }
+    }
+  ]
+}

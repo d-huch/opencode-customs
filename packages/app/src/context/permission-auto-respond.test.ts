@@ -104,6 +104,19 @@ describe("autoRespondsPermission", () => {
 
     expect(autoRespondsPermission(autoAccept, sessions, permission("child"), directory)).toBe(true)
   })
+
+  test("never auto-accepts a high-risk change boundary", () => {
+    const directory = "/tmp/project"
+    const sessions = [session({ id: "root" })]
+    const request = { sessionID: "root", permission: "change_risk" }
+    const autoAccept = {
+      [`${base64Encode(directory)}/*`]: true,
+      [`${base64Encode(directory)}/root`]: true,
+    }
+
+    expect(autoRespondsPermission(autoAccept, sessions, request, directory)).toBe(false)
+    expect(sessionAutoAccept(autoAccept, sessions, request, directory)).toBe(false)
+  })
 })
 
 describe("isDirectoryAutoAccepting", () => {

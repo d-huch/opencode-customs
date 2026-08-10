@@ -703,6 +703,18 @@ export function createServerSession(client: OpencodeClient, options?: { retry?: 
     })
   }
 
+  const reconnect = async () => {
+    const sessions = [
+      ...new Set([
+        ...pinned.keys(),
+        ...Object.entries(data.session_status)
+          .filter(([, status]) => status.type !== "idle")
+          .map(([sessionID]) => sessionID),
+      ]),
+    ]
+    await Promise.allSettled(sessions.map((sessionID) => sync(sessionID, { force: true })))
+  }
+
   const prefetch = async (sessionID: string, limit: number) => {
     touch(sessionID)
     await inflight.get(sessionID)
@@ -1060,6 +1072,7 @@ export function createServerSession(client: OpencodeClient, options?: { retry?: 
       },
     },
     sync,
+    reconnect,
     prefetch,
     shouldPrefetch(sessionID: string, limit: number) {
       if (data.message[sessionID] === undefined) return true

@@ -13,6 +13,9 @@ import { ProviderV2 } from "@opencode-ai/core/provider"
 import { probeLmStudio } from "@/local-agent-runtime/lmstudio"
 import { snapshot } from "@/local-agent-runtime/resource-governor"
 import { CapabilityRouter } from "@/local-agent-runtime/capability-router"
+import { Database } from "@opencode-ai/core/database/database"
+import { SessionExecutionCheckpoint } from "@opencode-ai/core/session/execution-checkpoint"
+import { SessionExecutionBudget } from "@/session/execution-budget"
 
 function mapProviderAuthError<A, R>(self: Effect.Effect<A, ProviderAuth.Error, R>) {
   return self.pipe(
@@ -39,6 +42,7 @@ export const providerHandlers = HttpApiBuilder.group(InstanceHttpApi, "provider"
     const cfg = yield* Config.Service
     const provider = yield* Provider.Service
     const svc = yield* ProviderAuth.Service
+    const database = yield* Database.Service
 
     const list = Effect.fn("ProviderHttpApi.list")(function* () {
       const config = yield* cfg.get()
@@ -54,9 +58,15 @@ export const providerHandlers = HttpApiBuilder.group(InstanceHttpApi, "provider"
         mapValues(filtered, (item) => Provider.fromModelsDevProvider(item)),
         connected,
       )
+      const lmstudio = config.provider?.lmstudio
       return {
         all: Object.values(providers).map(Provider.toPublicInfo),
-        default: Provider.defaultModelIDs(providers),
+        default: yield* Effect.promise(() =>
+          Provider.runtimeDefaultModelIDs(providers, {
+            baseURL: lmstudio?.options?.baseURL,
+            apiKey: lmstudio?.options?.apiKey,
+          }),
+        ),
         connected: Object.keys(connected),
       }
     })
@@ -72,7 +82,6 @@ export const providerHandlers = HttpApiBuilder.group(InstanceHttpApi, "provider"
         probeLmStudio({
           baseURL: info?.options?.baseURL,
           apiKey: info?.options?.apiKey,
-          refresh: true,
         }),
       )
     })
@@ -89,9 +98,25 @@ export const providerHandlers = HttpApiBuilder.group(InstanceHttpApi, "provider"
         CapabilityRouter.route({
           config,
           requestShape: { textCharacters: 0, files: 0, images: 0, tools: 0 },
-          refresh: true,
         }),
       )
+    })
+
+    const agentTurn = Effect.fn("ProviderHttpApi.agentTurn")(function* () {
+      return {
+        turn: yield* SessionExecutionCheckpoint.latest(database.db),
+        limits: {
+          classifierTurns: SessionExecutionBudget.limits.classifier_turns,
+          ragRetrievals: SessionExecutionBudget.limits.rag_retrievals,
+          memoryRetrievals: SessionExecutionBudget.limits.memory_retrievals,
+          memoryWrites: SessionExecutionBudget.limits.memory_writes,
+          verificationTurns: SessionExecutionBudget.limits.verification_turns,
+          criticTurns: SessionExecutionBudget.limits.critic_turns,
+          providerTurns: SessionExecutionBudget.limits.provider_turns,
+          toolCalls: SessionExecutionBudget.limits.tool_calls,
+          compactions: SessionExecutionBudget.limits.compactions,
+        },
+      }
     })
 
     const authorize = Effect.fn("ProviderHttpApi.authorize")(function* (ctx: {
@@ -141,6 +166,7 @@ export const providerHandlers = HttpApiBuilder.group(InstanceHttpApi, "provider"
       .handle("lmStudioProbe", lmStudioProbe)
       .handle("resourceGovernor", resourceGovernor)
       .handle("capabilityRouter", capabilityRouter)
+      .handle("agentTurn", agentTurn)
       .handle("auth", auth)
       .handleRaw("authorize", authorizeRaw)
       .handle("callback", callback)

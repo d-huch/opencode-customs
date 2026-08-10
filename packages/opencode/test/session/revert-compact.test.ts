@@ -498,6 +498,22 @@ describe("revert + compact workflow", () => {
               id: PartID.ascending(),
               messageID: a.id,
               sessionID: sid,
+              type: "tool",
+              tool: "write",
+              callID: `write-${a.id}`,
+              state: {
+                status: "completed",
+                input: {},
+                title: file,
+                output: "done",
+                metadata: { filepath: path.join(dir, file) },
+                time: { start: 1, end: 2 },
+              },
+            })
+            yield* session.updatePart({
+              id: PartID.ascending(),
+              messageID: a.id,
+              sessionID: sid,
               type: "patch",
               hash: patch.hash,
               files: patch.files,
@@ -588,6 +604,22 @@ describe("revert + compact workflow", () => {
               snapshot: after,
               cost: 0,
               tokens,
+            })
+            yield* session.updatePart({
+              id: PartID.ascending(),
+              messageID: a.id,
+              sessionID: sid,
+              type: "tool",
+              tool: "write",
+              callID: `write-${a.id}`,
+              state: {
+                status: "completed",
+                input: {},
+                title: "a.txt",
+                output: "done",
+                metadata: { filepath: path.join(dir, "a.txt") },
+                time: { start: 1, end: 2 },
+              },
             })
             yield* session.updatePart({
               id: PartID.ascending(),

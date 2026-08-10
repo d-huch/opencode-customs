@@ -1285,15 +1285,27 @@ const SLUG_OVERRIDES: Record<string, string> = {
 }
 
 export function providerOptions(model: Provider.Model, options: { [x: string]: any }) {
+  // LM Studio exposes native reasoning toggles as "on"/"off" in its model
+  // metadata, while its OpenAI-compatible chat endpoint accepts the standard
+  // reasoning_effort vocabulary. Keep the native labels in the UI and
+  // translate only at the provider boundary.
+  const compatible =
+    model.providerID === "lmstudio" &&
+    model.api.npm === "@ai-sdk/openai-compatible" &&
+    (options.reasoningEffort === "on" || options.reasoningEffort === "off")
+      ? { ...options, reasoningEffort: options.reasoningEffort === "off" ? "none" : "high" }
+      : options
   const usesOpenAIReasoningGate =
     model.api.npm === "@ai-sdk/openai" ||
     model.api.npm === "@ai-sdk/azure" ||
     model.api.npm === "@ai-sdk/amazon-bedrock/mantle"
   const normalized =
     usesOpenAIReasoningGate &&
-    (model.capabilities.reasoning || options.reasoningEffort !== undefined || options.reasoningSummary !== undefined)
-      ? { ...options, forceReasoning: true }
-      : options
+    (model.capabilities.reasoning ||
+      compatible.reasoningEffort !== undefined ||
+      compatible.reasoningSummary !== undefined)
+      ? { ...compatible, forceReasoning: true }
+      : compatible
 
   if (model.api.npm === "@ai-sdk/gateway") {
     // Gateway providerOptions are split across two namespaces:

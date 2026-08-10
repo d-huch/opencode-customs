@@ -737,12 +737,68 @@ const Endpoint18_5 = (raw: RawClient["server.repositoryMap"]) => (input: Endpoin
     query: { location: input["location"] },
   }).pipe(Effect.mapError(mapClientError))
 
-type Endpoint18_6Request = Parameters<RawClient["server.repositoryMap"]["repositoryMap.clearKnowledge"]>[0]
+type Endpoint18_6Request = Parameters<RawClient["server.repositoryMap"]["repositoryMap.updateMemory"]>[0]
 type Endpoint18_6Input = {
-  readonly scope: Endpoint18_6Request["params"]["scope"]
+  readonly id: Endpoint18_6Request["params"]["id"]
   readonly location?: Endpoint18_6Request["query"]["location"]
+  readonly pinned?: Endpoint18_6Request["payload"]["pinned"]
+  readonly expiresAt?: Endpoint18_6Request["payload"]["expiresAt"]
+  readonly clearExpiration?: Endpoint18_6Request["payload"]["clearExpiration"]
+  readonly resolve?: Endpoint18_6Request["payload"]["resolve"]
+  readonly lifecycle?: Endpoint18_6Request["payload"]["lifecycle"]
 }
 const Endpoint18_6 = (raw: RawClient["server.repositoryMap"]) => (input: Endpoint18_6Input) =>
+  raw["repositoryMap.updateMemory"]({
+    params: { id: input["id"] },
+    query: { location: input["location"] },
+    payload: {
+      pinned: input["pinned"],
+      expiresAt: input["expiresAt"],
+      clearExpiration: input["clearExpiration"],
+      resolve: input["resolve"],
+      lifecycle: input["lifecycle"],
+    },
+  }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint18_7Request = Parameters<RawClient["server.repositoryMap"]["repositoryMap.previewMemoryConsolidation"]>[0]
+type Endpoint18_7Input = { readonly location?: Endpoint18_7Request["query"]["location"] }
+const Endpoint18_7 = (raw: RawClient["server.repositoryMap"]) => (input?: Endpoint18_7Input) =>
+  raw["repositoryMap.previewMemoryConsolidation"]({ query: { location: input?.["location"] } }).pipe(
+    Effect.mapError(mapClientError),
+  )
+
+type Endpoint18_8Request = Parameters<RawClient["server.repositoryMap"]["repositoryMap.applyMemoryConsolidation"]>[0]
+type Endpoint18_8Input = {
+  readonly location?: Endpoint18_8Request["query"]["location"]
+  readonly fingerprint: Endpoint18_8Request["payload"]["fingerprint"]
+  readonly generatedAt: Endpoint18_8Request["payload"]["generatedAt"]
+}
+const Endpoint18_8 = (raw: RawClient["server.repositoryMap"]) => (input: Endpoint18_8Input) =>
+  raw["repositoryMap.applyMemoryConsolidation"]({
+    query: { location: input["location"] },
+    payload: { fingerprint: input["fingerprint"], generatedAt: input["generatedAt"] },
+  }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint18_9Request = Parameters<RawClient["server.repositoryMap"]["repositoryMap.feedbackRetrieval"]>[0]
+type Endpoint18_9Input = {
+  readonly id: Endpoint18_9Request["params"]["id"]
+  readonly location?: Endpoint18_9Request["query"]["location"]
+  readonly path: Endpoint18_9Request["payload"]["path"]
+  readonly relevance: Endpoint18_9Request["payload"]["relevance"]
+}
+const Endpoint18_9 = (raw: RawClient["server.repositoryMap"]) => (input: Endpoint18_9Input) =>
+  raw["repositoryMap.feedbackRetrieval"]({
+    params: { id: input["id"] },
+    query: { location: input["location"] },
+    payload: { path: input["path"], relevance: input["relevance"] },
+  }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint18_10Request = Parameters<RawClient["server.repositoryMap"]["repositoryMap.clearKnowledge"]>[0]
+type Endpoint18_10Input = {
+  readonly scope: Endpoint18_10Request["params"]["scope"]
+  readonly location?: Endpoint18_10Request["query"]["location"]
+}
+const Endpoint18_10 = (raw: RawClient["server.repositoryMap"]) => (input: Endpoint18_10Input) =>
   raw["repositoryMap.clearKnowledge"]({
     params: { scope: input["scope"] },
     query: { location: input["location"] },
@@ -755,7 +811,11 @@ const adaptGroup18 = (raw: RawClient["server.repositoryMap"]) => ({
   configureDiagnostics: Endpoint18_3(raw),
   knowledge: Endpoint18_4(raw),
   removeKnowledge: Endpoint18_5(raw),
-  clearKnowledge: Endpoint18_6(raw),
+  updateMemory: Endpoint18_6(raw),
+  previewMemoryConsolidation: Endpoint18_7(raw),
+  applyMemoryConsolidation: Endpoint18_8(raw),
+  feedbackRetrieval: Endpoint18_9(raw),
+  clearKnowledge: Endpoint18_10(raw),
 })
 
 const adaptClient = (raw: RawClient) => ({

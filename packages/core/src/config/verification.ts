@@ -25,6 +25,13 @@ export class Info extends Schema.Class<Info>("Config.Verification")({
   evidence_attempts: NonNegativeInt.pipe(Schema.optional).annotate({
     description: "Maximum bounded follow-up attempts after an incomplete evidence pass (default: 2)",
   }),
+  critic: Schema.Boolean.pipe(Schema.optional).annotate({
+    description: "Run one evidence-based critic pass after successful verification (default: true)",
+  }),
+  reviewer_agent: Schema.String.pipe(Schema.optional).annotate({
+    description:
+      "Explicit agent allowed to provide a different reviewer model. When omitted, the critic uses the current strong model.",
+  }),
   checks: Schema.Array(Check).pipe(Schema.optional).annotate({
     description: "Optional stack-independent registry of project-specific focused checks",
   }),

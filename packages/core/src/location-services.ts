@@ -28,6 +28,7 @@ import { RepositoryEmbeddings } from "./repository-embeddings"
 import { RepositoryContextRouter } from "./repository-context-router"
 import { RepositoryMemory } from "./repository-memory"
 import { RepositoryMap } from "./repository-map"
+import { RepositoryRetrievalFeedback } from "./repository-retrieval-feedback"
 import * as SessionRunnerLLM from "./session/runner/llm"
 import { SessionRunnerModel } from "./session/runner/model"
 import { SessionTodo } from "./session/todo"
@@ -67,6 +68,7 @@ export const locationServices = LayerNode.group([
   RepositoryEmbeddings.node,
   RepositoryMap.node,
   RepositoryMemory.node,
+  RepositoryRetrievalFeedback.node,
   RepositoryContextRouter.node,
   LocationMutation.node,
   FileMutation.node,

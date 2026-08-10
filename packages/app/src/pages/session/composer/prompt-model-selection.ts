@@ -1,7 +1,12 @@
 import { batch, createMemo, startTransition } from "solid-js"
 import { useModels } from "@/context/models"
 import type { ModelKey, ModelSelection } from "@/context/local"
-import { cycleModelVariant, getConfiguredAgentVariant, resolveModelVariant } from "@/context/model-variant"
+import {
+  cycleModelVariant,
+  defaultModelVariant,
+  getConfiguredAgentVariant,
+  resolveModelVariant,
+} from "@/context/model-variant"
 import { usePrompt } from "@/context/prompt"
 import { useSDK } from "@/context/sdk"
 import { useSync } from "@/context/sync"
@@ -29,6 +34,7 @@ export function createPromptModelSelection(input: { agent: () => { model?: Model
   }
 
   const recent = () => models.recent.list().find(valid)
+  const loaded = () => models.loaded.current()
   const fallback = () => {
     const defaults = providers.default()
     return providers.connected().flatMap((provider) => {
@@ -38,7 +44,7 @@ export function createPromptModelSelection(input: { agent: () => { model?: Model
   }
 
   const current = () => {
-    const key = [prompt.model.current(), input.agent()?.model, configured(), recent(), fallback()].find(
+    const key = [prompt.model.current(), loaded(), input.agent()?.model, configured(), recent(), fallback()].find(
       (item): item is ModelKey => !!item && valid(item),
     )
     if (!key) return
@@ -101,6 +107,7 @@ export function createPromptModelSelection(input: { agent: () => { model?: Model
         if (!model) return
         const saved = models.variant.get({ providerID: model.provider.id, modelID: model.id })
         if (saved && this.list().includes(saved)) return saved
+        return defaultModelVariant(this.list())
       },
       list() {
         return Object.keys(current()?.variants ?? {})

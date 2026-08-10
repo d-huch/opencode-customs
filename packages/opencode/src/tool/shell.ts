@@ -48,6 +48,32 @@ const FILES = new Set([
   "new-item",
   "rename-item",
 ])
+const WRITES = new Set([
+  "rm",
+  "cp",
+  "mv",
+  "mkdir",
+  "touch",
+  "chmod",
+  "chown",
+  "set-content",
+  "add-content",
+  "copy-item",
+  "move-item",
+  "remove-item",
+  "new-item",
+  "rename-item",
+  "copy",
+  "del",
+  "erase",
+  "md",
+  "mkdir",
+  "move",
+  "rd",
+  "ren",
+  "rename",
+  "rmdir",
+])
 const CMD_FILES = new Set([
   "copy",
   "del",
@@ -74,6 +100,7 @@ type Scan = {
   dirs: Set<string>
   patterns: Set<string>
   always: Set<string>
+  writes: Set<string>
 }
 
 type Chunk = {
@@ -386,6 +413,7 @@ export const ShellTool = Tool.define(
         dirs: new Set<string>(),
         patterns: new Set<string>(),
         always: new Set<string>(),
+        writes: new Set<string>(),
       }
       const shellKind = ShellID.toKind(Shell.name(shell))
 
@@ -398,10 +426,18 @@ export const ShellTool = Tool.define(
           for (const arg of pathArgs(command, ps, shellKind === "cmd")) {
             const resolved = yield* argPath(arg, cwd, ps, shell)
             yield* Effect.logInfo("resolved path", { arg, resolved })
+            if (resolved && WRITES.has(cmd) && containsPath(resolved, instance)) scan.writes.add(resolved)
             if (!resolved || containsPath(resolved, instance)) continue
             const dir = (yield* fs.isDir(resolved)) ? resolved : path.dirname(resolved)
             scan.dirs.add(dir)
           }
+        }
+
+        for (const match of source(node).matchAll(/(?:^|\s)(?:>|>>|1>|1>>)\s*(?:"([^"]+)"|'([^']+)'|([^\s;&|]+))/g)) {
+          const target = match[1] ?? match[2] ?? match[3]
+          if (!target) continue
+          const resolved = yield* argPath(target, cwd, ps, shell)
+          if (resolved && containsPath(resolved, instance)) scan.writes.add(resolved)
         }
 
         if (tokens.length && (!cmd || !CWD.has(cmd))) {
@@ -606,6 +642,7 @@ export const ShellTool = Tool.define(
         return {
           description: prompt.description,
           parameters: prompt.parameters,
+          execution: { access: "write" } as const,
           execute: (params: Parameters, ctx: Tool.Context) =>
             Effect.gen(function* () {
               const instanceCtx = yield* InstanceState.context
@@ -617,7 +654,7 @@ export const ShellTool = Tool.define(
               }
               const timeout = params.timeout ?? defaultTimeoutMs
               const ps = Shell.ps(shell)
-              yield* Effect.scoped(
+              const writes = yield* Effect.scoped(
                 Effect.gen(function* () {
                   const tree = yield* Effect.acquireRelease(parse(params.command, ps), (tree) =>
                     Effect.sync(() => tree.delete()),
@@ -625,10 +662,11 @@ export const ShellTool = Tool.define(
                   const scan = yield* collect(tree.rootNode, cwd, ps, shell, instanceCtx)
                   if (!containsPath(cwd, instanceCtx)) scan.dirs.add(cwd)
                   yield* ask(ctx, scan, params)
+                  return Array.from(scan.writes)
                 }),
               )
 
-              return yield* run(
+              const result = yield* run(
                 {
                   shell,
                   command: params.command,
@@ -638,6 +676,13 @@ export const ShellTool = Tool.define(
                 },
                 ctx,
               )
+              return {
+                ...result,
+                metadata: {
+                  ...result.metadata,
+                  files: writes,
+                },
+              }
             }),
         }
       })

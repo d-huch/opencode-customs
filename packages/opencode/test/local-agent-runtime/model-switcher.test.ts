@@ -8,6 +8,38 @@ import { acquireModel } from "@/local-agent-runtime/resource-governor"
 import type { Provider } from "@/provider/provider"
 
 describe("LM Studio model switcher", () => {
+  test("keeps the selected model and performs no routing calls when global routing is disabled", async () => {
+    const requests: string[] = []
+    const selected = model("selected", "selected-instance")
+    const result = await ModelSwitcher.activate({
+      config: {
+        provider: {
+          lmstudio: {
+            auto_route: false,
+            options: { baseURL: "http://switch-disabled.test/v1" },
+          },
+        },
+      },
+      preferredModel: selected,
+      requestShape: { textCharacters: 2_000, files: 1, images: 0, tools: 5 },
+      resources: healthyResources(),
+      request: async (input, init) => {
+        requests.push(`${init?.method ?? "GET"} ${new URL(String(input)).pathname}`)
+        return Response.json({})
+      },
+    })
+
+    expect(result.model).toBe(selected)
+    expect(result.plan.activation).toMatchObject({
+      status: "ready",
+      activeModelID: "selected",
+      attempts: 0,
+      failover: false,
+    })
+    expect(result.plan.reason).toContain("routing.disabled")
+    expect(requests).toEqual([])
+  })
+
   test("hands a session to an already loaded compatible model without a load request", async () => {
     const requests: string[] = []
     const result = await ModelSwitcher.activate({
@@ -115,6 +147,44 @@ describe("LM Studio model switcher", () => {
     expect(requests.filter((item) => item === "POST /api/v1/models/load")).toHaveLength(1)
   })
 
+  test("does not override LM Studio context when the selected model context is locked", async () => {
+    const loaded = new Map<string, string>()
+    let loadBody: Record<string, unknown> | undefined
+    const request: LmStudioRequest = async (input, init) => {
+      const url = new URL(String(input))
+      if (url.pathname === "/v1/models")
+        return Response.json({ data: [...loaded.values()].map((id) => ({ id })) })
+      if (url.pathname === "/api/v1/models")
+        return Response.json({
+          models: [native("target", loaded.get("target"), { tools: true, reasoning: true }, 12_288)],
+        })
+      if (url.pathname === "/api/v1/models/load") {
+        loadBody = JSON.parse(String(init?.body)) as Record<string, unknown>
+        loaded.set("target", "target-instance")
+        return Response.json({ instance_id: "target-instance", load_config: { context_length: 12_288 } })
+      }
+      return Response.json({})
+    }
+    const result = await ModelSwitcher.activate({
+      config: {
+        provider: {
+          lmstudio: {
+            options: { baseURL: "http://switch-preserve-context.test/v1" },
+            models: { target: { preserve_context: true } },
+          },
+        },
+      },
+      preferredModel: model("target", "target"),
+      requestShape: { textCharacters: 2_000, files: 1, images: 0, tools: 5 },
+      resources: healthyResources(),
+      request,
+    })
+
+    expect(loadBody).toEqual({ model: "target", echo_load_config: true })
+    expect(result.model.limit.context).toBe(12_288)
+    expect(result.plan.activation?.reason).toContain("switch.context.preserved")
+  })
+
   test("fails closed after the selected coding model fails to load", async () => {
     const requests: string[] = []
     const loaded = new Map<string, string>([["old", "old-instance"]])
@@ -152,6 +222,9 @@ describe("LM Studio model switcher", () => {
     expect(String(result.model.id)).toBe("primary")
     expect(result.plan.activation).toMatchObject({ status: "failed", attempts: 1, failover: false, rollback: false })
     expect(result.plan.activation?.reason).toContain("switch.primary.failed")
+    expect(ModelSwitcher.failureMessage(result)).toContain('LM Studio could not activate "primary"')
+    expect(ModelSwitcher.failureMessage(result)).toContain("load failed")
+    expect(ModelSwitcher.failureMessage(result)).toContain("No fallback model was used")
     expect(requests.filter((request) => request === "POST /api/v1/models/load")).toHaveLength(1)
     expect(loaded.has("backup")).toBe(false)
     expect(requests.some((request) => request === "POST /api/v1/models/unload")).toBe(false)
@@ -186,8 +259,28 @@ describe("LM Studio model switcher", () => {
     expect(result.model.api.id).toBe("old-instance")
     expect(result.plan.activation).toMatchObject({ status: "failed", attempts: 0, failover: false, rollback: false })
     expect(result.plan.activation?.reason).toContain("switch.no_candidate")
+    expect(ModelSwitcher.failureMessage(result)).toContain("no allowed LM Studio model satisfies")
     expect(requests.filter((request) => request === "POST /api/v1/models/load")).toHaveLength(0)
     expect(requests.some((request) => request === "POST /api/v1/models/unload")).toBe(false)
+  })
+
+  test("reports the Resource Governor reason when memory prevents model activation", async () => {
+    const resources = healthyResources()
+    const result = await ModelSwitcher.activate({
+      config: config("http://switch-memory.test/v1"),
+      preferredModel: model("large-coder", "large-coder"),
+      requestShape: { textCharacters: 2_000, files: 1, images: 0, tools: 5 },
+      resources: {
+        ...resources,
+        status: "pressured",
+        memory: { ...resources.memory, availableBytes: 3 * 1024 ** 3, availablePercent: 5 },
+      },
+      request: bridge([native("large-coder", undefined, { tools: true }, 8_192, 16 * 1024 ** 3)], []),
+    })
+
+    expect(result.plan.activation?.reason).toContain("switch.primary.memory")
+    expect(ModelSwitcher.failureMessage(result)).toContain("Resource Governor refused the launch")
+    expect(ModelSwitcher.failureMessage(result)).toContain("Unload another LM Studio model")
   })
 
   test("unloads only a previous instance managed by OpenCode after the replacement is ready", async () => {
@@ -273,6 +366,7 @@ describe("LM Studio model switcher", () => {
       failover: false,
     })
     expect(result.plan.vision?.reason).toContain("vision.model.unavailable")
+    expect(ModelSwitcher.failureMessage(result)).toContain("vision-capable")
   })
 
   test("fails closed when the selected vision model fails to load", async () => {
