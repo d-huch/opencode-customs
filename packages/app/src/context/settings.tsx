@@ -24,6 +24,10 @@ export interface VoiceSettings {
   autoSubmit: boolean
   speakResponses: boolean
   handsFree: boolean
+  wakePhraseEnabled: boolean
+  wakePhrases: string
+  wakeFollowupSeconds: number
+  wakeOnLaunch: boolean
   ttsMode: "quality" | "fast"
   ttsEndpoint: string
   ttsModel: string
@@ -226,6 +230,10 @@ const defaultSettings: Settings = {
     autoSubmit: true,
     speakResponses: true,
     handsFree: false,
+    wakePhraseEnabled: false,
+    wakePhrases: "джарвіс, jarvis",
+    wakeFollowupSeconds: 30,
+    wakeOnLaunch: false,
     ttsMode: "quality",
     ttsEndpoint: "http://127.0.0.1:8880/v1/audio/speech",
     ttsModel: "silero-v5-ukrainian",
@@ -556,6 +564,28 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         handsFree: withFallback(() => store.voice?.handsFree, defaultSettings.voice.handsFree),
         setHandsFree(value: boolean) {
           setStore("voice", "handsFree", value)
+        },
+        wakePhraseEnabled: withFallback(
+          () => store.voice?.wakePhraseEnabled,
+          defaultSettings.voice.wakePhraseEnabled,
+        ),
+        setWakePhraseEnabled(value: boolean) {
+          setStore("voice", "wakePhraseEnabled", value)
+        },
+        wakePhrases: withFallback(() => store.voice?.wakePhrases, defaultSettings.voice.wakePhrases),
+        setWakePhrases(value: string) {
+          setStore("voice", "wakePhrases", value.slice(0, 200))
+        },
+        wakeFollowupSeconds: withFallback(
+          () => store.voice?.wakeFollowupSeconds,
+          defaultSettings.voice.wakeFollowupSeconds,
+        ),
+        setWakeFollowupSeconds(value: number) {
+          setStore("voice", "wakeFollowupSeconds", Math.min(120, Math.max(5, Math.round(value))))
+        },
+        wakeOnLaunch: withFallback(() => store.voice?.wakeOnLaunch, defaultSettings.voice.wakeOnLaunch),
+        setWakeOnLaunch(value: boolean) {
+          setStore("voice", "wakeOnLaunch", value)
         },
         ttsMode: withFallback(() => store.voice?.ttsMode, defaultSettings.voice.ttsMode),
         setTTSMode(value: "quality" | "fast") {

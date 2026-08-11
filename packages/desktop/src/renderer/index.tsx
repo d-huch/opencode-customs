@@ -324,6 +324,10 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
       return { audio: new Blob([result.audio], { type: result.contentType }), metrics: result.metrics }
     },
     cancelLocalSpeech: () => window.api.cancelLocalSpeech(),
+    appendVoiceDiagnostic: (input) => window.api.appendVoiceDiagnostic(input),
+    getVoiceDiagnostics: (sessionID) => window.api.getVoiceDiagnostics(sessionID),
+    clearVoiceDiagnostics: (sessionID) => window.api.clearVoiceDiagnostics(sessionID),
+    exportVoiceDiagnostics: (sessionID) => window.api.exportVoiceDiagnostics(sessionID),
   }
 }
 

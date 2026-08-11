@@ -1,6 +1,7 @@
 # OpenCode Customs Local Voice Runtime
 
-This Docker service exposes an OpenAI-compatible local text-to-speech endpoint for OpenCode Customs. It never calls macOS speech synthesis and has no Apple fallback.
+This Docker service exposes an OpenAI-compatible local text-to-speech endpoint and a streaming speech-to-text WebSocket
+for OpenCode Customs. It never calls macOS speech recognition or synthesis and has no Apple fallback.
 
 Two explicit modes are available:
 
@@ -21,6 +22,29 @@ The desktop client speaks new assistant replies for both typed and voice-submitt
 sentence or a bounded 50–140 character clause. While that audio is playing, it prepares the next chunk in parallel. This
 reduces time to first sound without waiting for the full assistant response. Playback failures are logged separately from
 successful backend synthesis so a silent renderer can be distinguished from a TTS generation failure.
+
+## Full-duplex recognition
+
+The desktop keeps one microphone stream open and sends 16 kHz mono PCM frames to
+`WS /v1/audio/transcriptions/stream`. Chromium WebRTC echo cancellation receives the active renderer output as its
+playback reference before the microphone reaches the backend. The server then applies WebRTC VAD, preserves the latest
+1.5 seconds in a ring buffer, streams bounded Whisper partials, and uses a two-stage endpoint. A short pause requests a
+candidate transcript; an unfinished phrase receives a semantic continuation window before it becomes final. This
+means an interruption includes speech that began before TTS playback was stopped instead of losing its first words.
+
+Each streaming event includes the VAD state, captured audio and speech/silence duration, pre-roll, transcription
+latency, transcript stability, and endpoint reason used by the in-chat voice diagnostics view.
+
+For reproducible recognition diagnostics, `POST /v1/audio/transcriptions/replay?language=uk` accepts a PCM16 WAV body.
+Mono and stereo input are supported and resampled to 16 kHz before passing through the same faster-whisper recognizer.
+The response includes the transcript, source sample rate, channel count, audio duration, and transcription time. The
+desktop Voice Inspector invokes this endpoint only after the user explicitly selects a WAV file; the live stream itself
+does not write microphone audio to disk.
+
+The client also sends the spoken response text with the duplex state. It is used only to reject residual semantic echo;
+audio never enters the LLM context. A distinct partial transcript interrupts playback and the active model turn, while
+echo-like transcripts are ignored. The WebSocket remains active between turns, so no Swift process or Apple Speech
+service is launched for each utterance.
 
 ## Start
 
@@ -71,6 +95,23 @@ Edit `app/pronunciations.json` to add project-specific names, abbreviations, and
 - `TTS_CHUNK_CHARS` — maximum Silero synthesis chunk, default `350`.
 - `TTS_CACHE_ROOT` — model and audio cache directory.
 - `TTS_DOWNLOAD_ATTEMPTS` and `TTS_DOWNLOAD_TIMEOUT_SECONDS` — bounded model download retry policy.
+- `STT_MODEL` — faster-whisper model, default `small`.
+- `STT_WAKE_MODEL` — dedicated low-latency wake-word recognizer, default `tiny`. It is not used as an answer,
+  coding, command, or fallback model.
+- `STT_DEVICE` and `STT_COMPUTE_TYPE` — inference target, default `cpu` and `int8`.
+- `STT_PRE_ROLL_MS` — server-side microphone ring buffer, default `1500`.
+- `STT_SILENCE_MS` — initial pause before endpoint analysis, default `700`.
+- `STT_SEMANTIC_GRACE_MS` — maximum continuation window for an unfinished phrase, default `1800`.
+- `STT_PARTIAL_MS` — minimum interval between partial transcriptions, default `900`.
+- `STT_VAD_MODE` — WebRTC VAD aggressiveness from `0` to `3`, default `2`.
+- `STT_WAKE_MATCH_THRESHOLD` — generic similarity threshold for configured wake phrases, default `0.78`.
+- `STT_WAKE_COMMAND_OVERLAP_MS` — audio retained before the detected wake-word boundary, default `80` ms.
+
+When the configurable wake gate is armed, VAD sends a completed microphone fragment only to the dedicated wake
+recognizer. Unmatched background speech is discarded without invoking the main `STT_MODEL`. A matched phrase exposes its
+word timestamp; the main recognizer then receives only the command audio after that boundary. A phrase without a command
+opens the configured follow-up window. If the dedicated wake recognizer is unavailable, the stream returns a visible
+error and never falls through to full STT.
 
 The application never switches between quality and fast mode automatically. If the selected backend fails, the error is shown and the hands-free loop stops.
 

@@ -24,6 +24,20 @@ export type SpeechRecognitionEvent = {
   text?: string
   error?: string
 }
+export type VoiceDiagnosticInput = {
+  sessionID: string
+  turnID?: string
+  source: "agent" | "stt" | "tts" | "ui" | "replay"
+  event: string
+  state?: string
+  text?: string
+  error?: string
+  generation?: number
+  level?: number
+  durationMs?: number
+  diagnostics?: Record<string, string | number | boolean | null | undefined>
+}
+export type VoiceDiagnosticEntry = VoiceDiagnosticInput & { timestamp: string }
 
 export type FatalRendererErrorLog = {
   error: string
@@ -148,6 +162,16 @@ type PlatformBase = {
 
   /** Cancel an in-flight local TTS request. */
   cancelLocalSpeech?(): Promise<void>
+
+  /** Append one event to the durable per-session voice JSONL log. */
+  appendVoiceDiagnostic?(input: VoiceDiagnosticInput): Promise<void>
+
+  /** Read the current session's recent voice timeline and local log path. */
+  getVoiceDiagnostics?(sessionID: string): Promise<{ path: string; entries: VoiceDiagnosticEntry[] }>
+
+  /** Clear one session's voice log, or every voice log when no session is supplied. */
+  clearVoiceDiagnostics?(sessionID?: string): Promise<{ files: number; bytes: number }>
+  exportVoiceDiagnostics?(sessionID: string): Promise<string>
 
   /** Export collected diagnostic logs (desktop only) */
   exportDebugLogs?(): Promise<string>

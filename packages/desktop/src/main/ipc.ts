@@ -15,6 +15,13 @@ import type { UpdaterController } from "./updater-controller"
 import { createUpdaterSubscriptions } from "./updater-subscriptions"
 import { createNativeVoiceController } from "./native-voice"
 import { synthesizeLocalSpeech, type LocalTTSInput } from "./local-tts"
+import {
+  appendVoiceDiagnostic,
+  clearVoiceDiagnostics,
+  exportVoiceDiagnostics,
+  getVoiceDiagnostics,
+  type VoiceDiagnosticInput,
+} from "./voice-diagnostics"
 
 const pickerFilters = (ext?: string[]) => {
   if (!ext || ext.length === 0) return undefined
@@ -239,6 +246,18 @@ export function registerIpcHandlers(deps: Deps) {
     localSpeech.get(event.sender.id)?.abort()
     localSpeech.delete(event.sender.id)
   })
+  ipcMain.handle("append-voice-diagnostic", (_event: IpcMainInvokeEvent, input: VoiceDiagnosticInput) =>
+    appendVoiceDiagnostic(input),
+  )
+  ipcMain.handle("get-voice-diagnostics", (_event: IpcMainInvokeEvent, sessionID: string) =>
+    getVoiceDiagnostics(sessionID),
+  )
+  ipcMain.handle("clear-voice-diagnostics", (_event: IpcMainInvokeEvent, sessionID?: string) =>
+    clearVoiceDiagnostics(sessionID),
+  )
+  ipcMain.handle("export-voice-diagnostics", (_event: IpcMainInvokeEvent, sessionID: string) =>
+    exportVoiceDiagnostics(sessionID),
+  )
 
   ipcMain.on("show-notification", (_event: IpcMainEvent, title: string, body?: string) => {
     new Notification({ title, body }).show()

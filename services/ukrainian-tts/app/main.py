@@ -14,13 +14,14 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response
 from piper import PiperVoice, SynthesisConfig
 from pydantic import BaseModel, Field
 
 from app.accent import UkrainianAccentor
 from app.language import adapt_mixed_latin, normalize_voice, segment_languages
+from app.streaming_stt import DuplexSession, StreamingRecognizer, WakeWordRecognizer, decode_wav_pcm16
 
 
 QUALITY_MODEL_ID = os.getenv("TTS_QUALITY_MODEL_ID", "silero-v5-ukrainian")
@@ -301,17 +302,28 @@ def encode_wav(audio: np.ndarray, sampling_rate: int):
 
 
 engine: SpeechEngine | None = None
+recognizer: StreamingRecognizer | None = None
+wake_recognizer: WakeWordRecognizer | None = None
 generation_lock = asyncio.Lock()
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    global engine
+    global engine, recognizer, wake_recognizer
     engine = SpeechEngine()
-    loading = asyncio.create_task(engine.load())
+    recognizer = StreamingRecognizer()
+    wake_recognizer = WakeWordRecognizer()
+    loading = [
+        asyncio.create_task(engine.load()),
+        asyncio.create_task(recognizer.load()),
+        asyncio.create_task(wake_recognizer.load()),
+    ]
     yield
-    loading.cancel()
+    for task in loading:
+        task.cancel()
     engine = None
+    recognizer = None
+    wake_recognizer = None
 
 
 app = FastAPI(title="OpenCode Customs Local Voice Runtime", version="2.0.0", lifespan=lifespan)
@@ -332,17 +344,22 @@ def health():
             **(engine.status("fast") if engine else {"ready": False, "loading": True, "error": None}),
         },
     }
+    stt = recognizer.status() if recognizer else {"ready": False, "loading": True, "error": None}
+    wake_stt = wake_recognizer.status() if wake_recognizer else {"ready": False, "loading": True, "error": None}
+    components = [*modes.values(), stt]
     return {
         "status": (
             "ready"
-            if all(item["ready"] for item in modes.values())
+            if all(item["ready"] for item in components)
             else "loading"
-            if any(item["loading"] for item in modes.values())
+            if any(item["loading"] for item in components)
             else "degraded"
         ),
         "modes": modes,
         "sample_rate": SAMPLE_RATE,
         "cpu_threads": CPU_THREADS,
+        "stt": stt,
+        "wake_stt": wake_stt,
     }
 
 
@@ -399,3 +416,284 @@ async def speech(request: SpeechRequest):
             "X-TTS-Total-Ms": f"{total_ms:.1f}",
         },
     )
+
+
+@app.websocket("/v1/audio/transcriptions/stream")
+async def transcriptions(websocket: WebSocket):
+    await websocket.accept()
+    session = DuplexSession()
+    partial_task: asyncio.Task | None = None
+    send_lock = asyncio.Lock()
+
+    async def send(payload: dict):
+        async with send_lock:
+            await websocket.send_json(payload)
+
+    async def send_transcript(
+        kind: str,
+        pcm: bytes,
+        mode: str,
+        reference: str,
+        generation: int,
+        diagnostics: dict,
+        wake: bool = False,
+    ):
+        if recognizer is None:
+            await send({"type": "error", "error": "The local STT runtime is unavailable."})
+            return
+        started = time.perf_counter()
+        try:
+            text = await recognizer.transcribe(pcm, session.language)
+        except Exception as error:
+            await send({"type": "error", "error": str(error)})
+            return
+        if wake and not text.strip():
+            await send(
+                {
+                    "type": "error",
+                    "error": "The wake phrase was detected, but the following command could not be transcribed. No fallback was used.",
+                }
+            )
+            return
+        session.observe_transcript(text, generation)
+        await send(
+            {
+                "type": kind,
+                "text": text,
+                "mode": mode,
+                "reference": reference,
+                "generation": generation,
+                "wake": wake,
+                "diagnostics": {
+                    **diagnostics,
+                    "transcription_ms": round((time.perf_counter() - started) * 1000),
+                    "transcript_stability": max(
+                        diagnostics.get("transcript_stability", 0),
+                        session.transcript_stability,
+                    ),
+                },
+            }
+        )
+
+    async def send_wake_candidate(
+        pcm: bytes,
+        mode: str,
+        reference: str,
+        generation: int,
+        diagnostics: dict,
+        phrases: list[str],
+    ):
+        if wake_recognizer is None or not wake_recognizer.status()["ready"]:
+            error = wake_recognizer.status().get("error") if wake_recognizer else None
+            await send(
+                {
+                    "type": "error",
+                    "error": error or "The dedicated wake-word recognizer is unavailable. No full STT fallback was used.",
+                }
+            )
+            return
+        started = time.perf_counter()
+        try:
+            detection = await wake_recognizer.detect(pcm, session.language, phrases)
+        except Exception as error:
+            await send({"type": "error", "error": f"Wake-word recognition failed: {error}"})
+            return
+        wake_diagnostics = {
+            **diagnostics,
+            "wake_recognition_ms": round((time.perf_counter() - started) * 1000),
+            "wake_model": wake_recognizer.model_name,
+        }
+        if not detection["matched"]:
+            await send(
+                {
+                    "type": "wake_ignored",
+                    "text": detection["text"],
+                    "mode": mode,
+                    "reference": reference,
+                    "generation": generation,
+                    "diagnostics": wake_diagnostics,
+                }
+            )
+            return
+        await send(
+            {
+                "type": "wake_detected",
+                "text": detection["text"],
+                "phrase": detection["phrase"],
+                "confidence": detection["confidence"],
+                "command": detection["has_command"],
+                "mode": mode,
+                "reference": reference,
+                "generation": generation,
+                "diagnostics": wake_diagnostics,
+            }
+        )
+        if not detection["has_command"]:
+            return
+        await send_transcript(
+            "final",
+            detection["command_pcm"],
+            mode,
+            reference,
+            generation,
+            {**wake_diagnostics, "endpoint_reason": "wake_command"},
+            True,
+        )
+
+    try:
+        await send(
+            {
+                "type": "ready",
+                **(recognizer.status() if recognizer else {}),
+                "wake": wake_recognizer.status() if wake_recognizer else None,
+            }
+        )
+        while True:
+            message = await websocket.receive()
+            if message["type"] == "websocket.disconnect":
+                break
+            if message.get("text") is not None:
+                command = json.loads(message["text"])
+                if command.get("type") == "configure":
+                    session.configure(command.get("language"))
+                    session.set_wake(
+                        bool(command.get("wake_enabled")),
+                        bool(command.get("wake_armed")),
+                        command.get("wake_phrases") or [],
+                    )
+                    if session.wake_enabled and (wake_recognizer is None or not wake_recognizer.status()["ready"]):
+                        error = wake_recognizer.status().get("error") if wake_recognizer else None
+                        await send(
+                            {
+                                "type": "error",
+                                "error": error
+                                or "The dedicated wake-word recognizer is unavailable. No full STT fallback was used.",
+                            }
+                        )
+                        continue
+                    await send(
+                        {
+                            "type": "configured",
+                            "language": session.language,
+                            "wake_enabled": session.wake_enabled,
+                            "wake_armed": session.wake_armed,
+                        }
+                    )
+                    continue
+                if command.get("type") == "wake":
+                    session.set_wake(
+                        bool(command.get("enabled")),
+                        bool(command.get("armed")),
+                        command.get("phrases") or [],
+                    )
+                    if session.wake_enabled and (wake_recognizer is None or not wake_recognizer.status()["ready"]):
+                        error = wake_recognizer.status().get("error") if wake_recognizer else None
+                        await send(
+                            {
+                                "type": "error",
+                                "error": error
+                                or "The dedicated wake-word recognizer is unavailable. No full STT fallback was used.",
+                            }
+                        )
+                        continue
+                    await send(
+                        {
+                            "type": "wake_state",
+                            "wake_enabled": session.wake_enabled,
+                            "wake_armed": session.wake_armed,
+                        }
+                    )
+                    continue
+                if command.get("type") == "state":
+                    session.set_mode(command.get("mode", "paused"), command.get("reference", ""))
+                    await send({"type": "state", "mode": session.mode})
+                    continue
+                if command.get("type") == "flush":
+                    wake_armed = session.wake_armed
+                    phrases = list(session.wake_phrases)
+                    pcm, mode, reference, generation, diagnostics = session.finish("manual_flush")
+                    if pcm:
+                        if wake_armed:
+                            await send_wake_candidate(pcm, mode, reference, generation, diagnostics, phrases)
+                        else:
+                            await send_transcript("final", pcm, mode, reference, generation, diagnostics)
+                    continue
+            data = message.get("bytes")
+            if not data:
+                continue
+            for frame in session.frames(data):
+                for event in session.push(frame):
+                    if event["type"] == "speech_start":
+                        await send(event)
+                        continue
+                    if event["type"] == "partial_ready":
+                        if partial_task and not partial_task.done():
+                            continue
+                        partial_task = asyncio.create_task(
+                            send_transcript(
+                                "partial",
+                                session.snapshot(),
+                                session.mode,
+                                session.reference,
+                                event["generation"],
+                                session.diagnostics(),
+                            )
+                        )
+                        continue
+                    if event["type"] == "endpoint_ready":
+                        if partial_task and not partial_task.done():
+                            continue
+                        partial_task = asyncio.create_task(
+                            send_transcript(
+                                "partial",
+                                session.snapshot(),
+                                session.mode,
+                                session.reference,
+                                event["generation"],
+                                session.diagnostics("endpoint_candidate"),
+                            )
+                        )
+                        continue
+                    if event["type"] == "discard":
+                        await send(event)
+                        continue
+                    wake_armed = session.wake_armed
+                    phrases = list(session.wake_phrases)
+                    pcm, mode, reference, generation, diagnostics = session.finish(event.get("reason", "silence"))
+                    if partial_task and not partial_task.done():
+                        partial_task.cancel()
+                    if wake_armed:
+                        await send_wake_candidate(pcm, mode, reference, generation, diagnostics, phrases)
+                        continue
+                    await send_transcript("final", pcm, mode, reference, generation, diagnostics)
+    except WebSocketDisconnect:
+        return
+    finally:
+        if partial_task and not partial_task.done():
+            partial_task.cancel()
+
+
+@app.post("/v1/audio/transcriptions/replay")
+async def replay_transcription(request: Request, language: str = "uk"):
+    if recognizer is None:
+        raise HTTPException(status_code=503, detail="The local STT runtime is unavailable.")
+    if not recognizer.status()["ready"]:
+        raise HTTPException(status_code=503, detail=recognizer.status().get("error") or "The local STT model is loading.")
+    data = await request.body()
+    if len(data) > 25 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Replay WAV exceeds the 25 MB limit.")
+    try:
+        pcm, diagnostics = decode_wav_pcm16(data)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    started = time.perf_counter()
+    text = await recognizer.transcribe(pcm, language.split("-", 1)[0].lower() or None)
+    return {
+        "text": text,
+        "language": language,
+        "diagnostics": {
+            **diagnostics,
+            "transcription_ms": round((time.perf_counter() - started) * 1000),
+            "endpoint_reason": "replay",
+        },
+    }

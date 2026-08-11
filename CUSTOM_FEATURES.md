@@ -998,9 +998,19 @@ automatic submission is enabled, are sent through the same request scheduler use
 not bypass admission, memory, repository retrieval, model selection, tools, durable checkpoints, or verification, and it
 does not select a hidden fallback model.
 
-Partial recognition results are streamed to the composer. The native recognizer applies adaptive endpointing: a
-punctuated utterance closes quickly, a very short utterance gets a longer pause, and ordinary speech uses a bounded
-silence window. Final recognition results still enter the normal durable request pipeline.
+The renderer keeps a persistent 16 kHz PCM stream to the local Docker backend. A 1.5-second client and server ring buffer
+preserves speech that starts immediately before an interruption, WebRTC echo cancellation uses renderer playback as its
+reference, WebRTC VAD detects speech, and faster-whisper produces bounded partial and final transcripts. The connection
+stays open between turns instead of launching an Apple or Swift recognizer for every utterance. Final recognition results
+still enter the normal durable request pipeline.
+
+Endpointing is deliberately two-stage. The first silence window requests a candidate transcript without closing the
+utterance. A language-aware completion check can finalize a stable, complete phrase; an unfinished phrase keeps listening
+through a bounded semantic grace window, and resumed speech cancels the pending endpoint. This prevents short pauses such
+as `Tell me about ...` from being submitted as truncated prompts without turning endpointing into project-specific keyword
+routing. Every streaming event carries bounded diagnostics for microphone level, VAD state, captured speech and silence,
+pre-roll duration, transcript stability, recognition latency, and the final endpoint reason. The chat status renders these
+signals while listening so audio and endpoint failures can be diagnosed without opening Docker logs.
 
 As assistant text streams, the first complete sentence or a bounded clause is sent through the desktop IPC bridge to the
 independent OpenAI-compatible backend in `services/ukrainian-tts`. Quality mode uses Silero V5 CIS Extended for
@@ -1012,12 +1022,22 @@ current one plays reduces time to first audio. New assistant replies are spoken 
 prompts. Repeated synthesis and accent results are cached without placing WAV or base64 data in model context. Markdown
 presentation and fenced code are removed from the spoken form without modifying the stored response.
 
-Hands-free mode can also run recognition while a synthesized sentence is playing. Recognition is armed after a short
-playback guard interval. Transcripts that overlap any text already spoken in the current response are treated as speaker
-echo, and short incidental fragments are ignored. A stable, distinct utterance cancels the active audio request and
+Hands-free mode continues streaming recognition while a synthesized sentence is playing. Hardware/Chromium acoustic
+echo cancellation removes the playback reference first; transcripts that still overlap text already spoken in the
+current response are treated as residual semantic echo, and short incidental fragments are ignored. A stable, distinct utterance cancels the active audio request and
 playback, interrupts an unfinished model turn, and immediately becomes the next user prompt. The recognizer then resumes
 after the response without another button press. Browser/macOS speech synthesis is not part of this path and is never used
 as a fallback.
+
+An optional acoustic wake-phrase gate sits before the main STT model and durable prompt admission. Up to eight configured
+phrases are matched by an explicit low-latency wake recognizer using generic word similarity and timestamp boundaries;
+there are no hard-coded phrase, language, or project aliases. While the gate is armed, unmatched background speech is
+recorded as `wake_ignored` in Voice Inspector but never invokes the main STT model or reaches the scheduler, RAG, memory,
+tools, or an LLM. After a match, only audio following the wake-word timestamp is sent to the main recognizer. Saying only
+the activation phrase opens a bounded command window; completing a response opens a configurable follow-up window so a
+natural clarification does not require the phrase again. Automatic listener startup is explicit and disabled by default.
+The wake recognizer is never used to answer a request and is not a fallback; if it is unavailable, the voice loop stops
+with a visible error.
 
 The synthetic **Default Project** workspace is conversation-only. Its session header and tab set omit the Git review panel
 instead of offering to initialize a repository for a workspace that is not a source project.
@@ -1031,11 +1051,39 @@ The **Settings → General → Voice agent** section controls:
   `tetiana`, or the Piper voice);
 - a test phrase with backend, synthesis, cache, and time-to-first-sound metrics;
 - whether adaptive hands-free listening, automatic resume, and voice interruption are enabled.
+- whether a configurable wake phrase is required, how long follow-up turns remain active, and whether the listener starts
+  automatically when the composer mounts.
+
+The **Voice Inspector** in the same settings section provides a durable, bounded timeline for the current session. Each
+entry records its source (`ui`, `stt`, `agent`, `tts`, or `replay`), state transition, timestamp, duration, bounded text,
+error, and numeric diagnostics. The timeline is persisted as one JSONL file per session under the desktop application data
+directory, survives a restart, and can be refreshed, revealed in Finder, or exported to Downloads. One session or every
+voice diagnostics file can be cleared from the inspector.
+
+Every hands-free interaction receives a stable voice turn ID. The inspector groups durable events by that ID and evaluates
+the complete critical path: wake-word recognition, final STT, model time to first response, TTS synthesis, time to first
+sound, and total turn duration. It reports median phase latency, the current bottleneck, completed, failed, interrupted,
+and background-ignored turns. Closed microphone utterances also retain a bounded normalized level trace, rendered as a
+waveform next to the raw event without retaining microphone audio. These deterministic summaries make two builds directly
+comparable while the JSONL timeline remains the source of truth.
+
+The inspector also includes a deterministic **Voice Regression Runner**. It uses the currently selected local TTS model
+and voice to synthesize fixed Ukrainian and English phrases, passes the resulting WAV through the same replay STT endpoint,
+and runs negative silence and low-level background-noise cases. Each result records the transcript, language and
+punctuation checks, word error rate (WER), character error rate (CER), TTS time, STT time, and end-to-end latency. A report
+can be saved as the baseline for that exact endpoint/model/voice tuple and compared with later runs. JSON and standalone
+HTML exports make results suitable for CI artifacts or manual comparison. These replay scenarios deliberately do not claim
+to validate live echo cancellation or barge-in; those remain observable through real duplex turns in the durable timeline.
+
+For deterministic STT debugging, the inspector can send an explicitly selected mono or stereo PCM16 WAV file to
+`POST /v1/audio/transcriptions/replay`. The backend converts it to mono 16 kHz PCM, runs the same recognizer used by the
+duplex stream, and returns the transcript plus source format and timing diagnostics. OpenCode Customs does not retain raw
+microphone audio automatically; replay always requires an explicit file selection.
 
 On macOS the desktop bundle declares microphone usage and Electron grants media permission only to the trusted internal
-renderer origin. Recognition availability still depends on a compatible system/browser speech-recognition service. If
-that service is unavailable, microphone access fails, or the Docker TTS backend is not ready, the composer returns to
-idle and shows a concrete error instead of silently hanging or selecting a hidden fallback.
+renderer origin. Recognition requires the configured local Docker voice backend; Apple Speech is not used. If the local
+streaming STT model is unavailable, microphone access fails, or the selected TTS mode is not ready, the composer returns
+to idle and shows a concrete error instead of silently hanging or selecting a hidden fallback.
 
 Start the default local backend with:
 
@@ -1046,8 +1094,8 @@ docker compose up --build -d
 
 The first start downloads the selected Silero, Piper, and accentor artifacts into a persistent Docker volume. Silero V5
 CIS Extended is distributed under CC-NC-BY; Piper is GPL-3.0 and individual voices may have additional model-card terms.
-The backend accepts `POST /v1/audio/speech`, reports each mode independently through `GET /health`, and binds port 8880
-to localhost only. It never switches from quality to fast mode automatically.
+The backend accepts `POST /v1/audio/speech` and `WS /v1/audio/transcriptions/stream`, reports TTS and STT independently
+through `GET /health`, and binds port 8880 to localhost only. It never switches from quality to fast mode automatically.
 
 ## Current limitations
 

@@ -152,6 +152,10 @@ export const SettingsGeneralV2: Component<{
       }),
     )
   }
+  const openVoiceInspector = async () => {
+    const module = await import("../dialog-voice-inspector")
+    void dialog.show(() => <module.DialogVoiceInspector sessionID={props.sessionID} />)
+  }
 
   const dir = createMemo(() => {
     if (!props.sessionID) return undefined
@@ -810,6 +814,73 @@ export const SettingsGeneralV2: Component<{
             disabled={!settings.voice.enabled() || !settings.voice.autoSubmit()}
             onChange={settings.voice.setHandsFree}
           />
+        </SettingsRowV2>
+
+        <Show when={settings.voice.handsFree()}>
+          <SettingsRowV2
+            title={language.t("settings.general.voice.wakePhrase.title")}
+            description={language.t("settings.general.voice.wakePhrase.description")}
+          >
+            <Switch
+              checked={settings.voice.wakePhraseEnabled()}
+              disabled={!settings.voice.enabled() || !settings.voice.autoSubmit()}
+              onChange={settings.voice.setWakePhraseEnabled}
+            />
+          </SettingsRowV2>
+
+          <Show when={settings.voice.wakePhraseEnabled()}>
+            <SettingsRowV2
+              title={language.t("settings.general.voice.wakePhrases.title")}
+              description={language.t("settings.general.voice.wakePhrases.description")}
+            >
+              <div class="w-full sm:w-[320px]">
+                <TextInputV2
+                  data-action="settings-voice-wake-phrases"
+                  appearance="base"
+                  value={settings.voice.wakePhrases()}
+                  onInput={(event) => settings.voice.setWakePhrases(event.currentTarget.value)}
+                  placeholder="джарвіс, jarvis"
+                  spellcheck={false}
+                  autocomplete="off"
+                  aria-label={language.t("settings.general.voice.wakePhrases.title")}
+                />
+              </div>
+            </SettingsRowV2>
+
+            <SettingsRowV2
+              title={language.t("settings.general.voice.wakeFollowup.title")}
+              description={language.t("settings.general.voice.wakeFollowup.description")}
+            >
+              <div class="w-28">
+                <TextInputV2
+                  data-action="settings-voice-wake-followup"
+                  type="number"
+                  appearance="base"
+                  min={5}
+                  max={120}
+                  value={String(settings.voice.wakeFollowupSeconds())}
+                  onChange={(event) => settings.voice.setWakeFollowupSeconds(event.currentTarget.valueAsNumber)}
+                  aria-label={language.t("settings.general.voice.wakeFollowup.title")}
+                />
+              </div>
+            </SettingsRowV2>
+
+            <SettingsRowV2
+              title={language.t("settings.general.voice.wakeOnLaunch.title")}
+              description={language.t("settings.general.voice.wakeOnLaunch.description")}
+            >
+              <Switch checked={settings.voice.wakeOnLaunch()} onChange={settings.voice.setWakeOnLaunch} />
+            </SettingsRowV2>
+          </Show>
+        </Show>
+
+        <SettingsRowV2
+          title={language.t("settings.general.voice.inspector.title")}
+          description={language.t("settings.general.voice.inspector.description")}
+        >
+          <ButtonV2 size="normal" variant="neutral" onClick={() => void openVoiceInspector()}>
+            {language.t("settings.general.voice.inspector.action")}
+          </ButtonV2>
         </SettingsRowV2>
       </SettingsListV2>
     </div>

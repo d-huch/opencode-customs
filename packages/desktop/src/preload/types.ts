@@ -43,6 +43,20 @@ export type LocalTTSInput = {
   speed?: number
   text: string
 }
+export type VoiceDiagnosticInput = {
+  sessionID: string
+  turnID?: string
+  source: "agent" | "stt" | "tts" | "ui" | "replay"
+  event: string
+  state?: string
+  text?: string
+  error?: string
+  generation?: number
+  level?: number
+  durationMs?: number
+  diagnostics?: Record<string, string | number | boolean | null | undefined>
+}
+export type VoiceDiagnosticEntry = VoiceDiagnosticInput & { timestamp: string }
 export type TitlebarTheme = {
   mode: "light" | "dark"
   scheme?: "system" | "light" | "dark"
@@ -114,6 +128,10 @@ export type ElectronAPI = {
     metrics: { cache: string; prepareMs: number; synthesisMs: number; totalMs: number }
   }>
   cancelLocalSpeech: () => Promise<void>
+  appendVoiceDiagnostic: (input: VoiceDiagnosticInput) => Promise<void>
+  getVoiceDiagnostics: (sessionID: string) => Promise<{ path: string; entries: VoiceDiagnosticEntry[] }>
+  clearVoiceDiagnostics: (sessionID?: string) => Promise<{ files: number; bytes: number }>
+  exportVoiceDiagnostics: (sessionID: string) => Promise<string>
   showNotification: (title: string, body?: string) => void
   getWindowFocused: () => Promise<boolean>
   setWindowFocus: () => Promise<void>
