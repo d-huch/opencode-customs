@@ -7,6 +7,8 @@ import { usePlatform, type MicrophoneAccess } from "@/context/platform"
 import { useSettings } from "@/context/settings"
 import { useSync } from "@/context/sync"
 import { createLocalDuplexSpeech, type DuplexSpeechEvent } from "@/utils/duplex-speech"
+import { createGaplessAudioPlayer } from "@/utils/gapless-audio-player"
+import { createLocalSpeechStream } from "@/utils/streaming-tts"
 import { showToast } from "@/utils/toast"
 import { configuredWakePhrases, extractWakeCommand, routeWakeTranscript } from "@/utils/wake-phrase"
 import {
@@ -36,6 +38,20 @@ export type VoiceAgentStatus = {
     phase: "ready" | "wake_detected" | "wake_ignored" | "speech_start" | "partial" | "final" | "discard"
     preRollMs?: number
     transcriptionMs?: number
+    transcriptionCache?: "hit" | "miss"
+    decodeCount?: number
+    decodedAudioMs?: number
+    committedAudioMs?: number
+    ttsFirstChunkMs?: number
+    firstSoundMs?: number
+    ttsChunks?: number
+    ttsBufferedMs?: number
+    ttsUnderruns?: number
+    echoReferencePercent?: number
+    echoResidualPercent?: number
+    echoCoherence?: number
+    echoSuppressionDb?: number
+    echoDelayMs?: number
     wakeRecognitionMs?: number
     wakeModel?: string
     wakeConfidence?: number
@@ -77,18 +93,6 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
   const settings = useSettings()
   const platform = usePlatform()
   const sync = useSync()
-  const synthesizeSpeech = (text: string) => {
-    if (!platform.synthesizeLocalSpeech) {
-      return Promise.reject(new Error("The local TTS bridge is unavailable in this application build."))
-    }
-    return platform.synthesizeLocalSpeech({
-      endpoint: settings.voice.ttsEndpoint(),
-      model: settings.voice.ttsModel(),
-      voice: settings.voice.ttsVoice(),
-      mode: settings.voice.ttsMode(),
-      text,
-    })
-  }
   const [state, setState] = createSignal<"idle" | "listening" | "thinking" | "synthesizing" | "speaking">("idle")
   const [microphoneLevel, setMicrophoneLevel] = createSignal(0)
   const [liveTranscript, setLiveTranscript] = createSignal("")
@@ -107,21 +111,16 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
   let restartTimer: ReturnType<typeof setTimeout> | undefined
   let wakeFollowupTimer: ReturnType<typeof setTimeout> | undefined
   let speechGeneration = 0
-  let speechAudio: HTMLAudioElement | undefined
-  let speechAudioURL: string | undefined
+  let speechPlayer: ReturnType<typeof createGaplessAudioPlayer> | undefined
+  let speechStartedAt: number | undefined
+  let speechPlaybackStarted = false
+  let speechStreamCancel: (() => void) | undefined
   let speechQueue: string[] = []
   let speechBuffer = ""
   let speechObserved = ""
   let speechMessageID: string | undefined
   let speechFinal = false
   let speechBusy = false
-  let speechPrefetch:
-    | {
-        generation: number
-        text: string
-        result: ReturnType<typeof synthesizeSpeech>
-      }
-    | undefined
   let duplex: ReturnType<typeof createLocalDuplexSpeech> | undefined
   let duplexStarting: Promise<void> | undefined
   let bargeInActive = false
@@ -135,6 +134,7 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
   let responseStartedForTurn = false
   let responseCompletedForTurn = false
   let microphoneTrace: number[] = []
+  let lastEchoLogAt = 0
   const recordVoice = (
     source: "agent" | "stt" | "tts" | "ui",
     event: string,
@@ -240,19 +240,13 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
   }
 
   const stopSpeech = () => {
+    speechStreamCancel?.()
+    speechStreamCancel = undefined
     void platform.cancelLocalSpeech?.()
-    if (speechAudio) {
-      speechAudio.onplay = null
-      speechAudio.onended = null
-      speechAudio.onerror = null
-      speechAudio.pause()
-      speechAudio.removeAttribute("src")
-      speechAudio.load()
-      speechAudio = undefined
-    }
-    if (!speechAudioURL) return
-    URL.revokeObjectURL(speechAudioURL)
-    speechAudioURL = undefined
+    speechPlayer?.cancel()
+    speechPlayer = undefined
+    speechStartedAt = undefined
+    speechPlaybackStarted = false
   }
 
   const resetSpeechStream = () => {
@@ -262,7 +256,8 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
     speechMessageID = undefined
     speechFinal = false
     speechBusy = false
-    speechPrefetch = undefined
+    speechStartedAt = undefined
+    speechPlaybackStarted = false
   }
 
   const failSpeech = (generation: number, error: unknown) => {
@@ -309,6 +304,14 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
       stopSpeech()
       resetSpeechStream()
       speechMessageID = messageID
+      setVoiceDiagnostics((current) => ({
+        ...current,
+        ttsFirstChunkMs: undefined,
+        firstSoundMs: undefined,
+        ttsChunks: 0,
+        ttsBufferedMs: 0,
+        ttsUnderruns: 0,
+      }))
     }
     speechBuffer = `${speechBuffer}${text.slice(speechObserved.length)}`
     speechObserved = text
@@ -316,81 +319,134 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
     speechQueue.push(...next.chunks)
     speechBuffer = next.remainder
     speechFinal = final
-    if (speechBusy) prefetchSpeech()
     void drainSpeech()
   }
 
-  const prefetchSpeech = () => {
-    if (!speechBusy || speechPrefetch || !platform.synthesizeLocalSpeech) return
-    const text = speechQueue[0]
-    if (!text) return
-    const result = synthesizeSpeech(text)
-    void result.catch(() => undefined)
-    speechPrefetch = {
-      generation: speechGeneration,
-      text,
-      result,
+  const ensureSpeechPlayer = (generation: number, text: string) => {
+    if (speechPlayer) return speechPlayer
+    try {
+      speechPlayer = createGaplessAudioPlayer({
+        context: duplex?.audioContext(),
+        onReferenceNode: (node) => duplex?.setPlaybackReference(node),
+        onStart: () => {
+          if (generation !== speechGeneration) return
+          speechPlaybackStarted = true
+          setState("speaking")
+          duplex?.setState("speaking", speechObserved)
+          const firstSoundMs = performance.now() - (speechStartedAt ?? performance.now())
+          setVoiceDiagnostics((current) => ({ ...current, firstSoundMs }))
+          recordVoice("tts", "playback_started", { text, durationMs: firstSoundMs })
+        },
+        onBuffer: (ttsBufferedMs) => {
+          if (generation !== speechGeneration) return
+          setVoiceDiagnostics((current) => ({ ...current, ttsBufferedMs }))
+        },
+        onUnderrun: (ttsUnderruns) => {
+          if (generation !== speechGeneration) return
+          setVoiceDiagnostics((current) => ({ ...current, ttsUnderruns }))
+          recordVoice("tts", "playback_underrun", { diagnostics: { count: ttsUnderruns } })
+        },
+      })
+    } catch (error) {
+      failSpeech(generation, error)
     }
+    return speechPlayer
   }
 
   const drainSpeech = async () => {
     if (speechBusy) return
     const text = speechQueue.shift()
     if (!text) {
-      if (speechFinal) restart()
-      else setState("thinking")
+      if (!speechFinal) return
+      if (!speechPlayer) {
+        restart()
+        return
+      }
+      const generation = speechGeneration
+      speechBusy = true
+      await speechPlayer
+        .finish()
+        .then(() => {
+          if (generation !== speechGeneration) return
+          speechPlayer = undefined
+          speechBusy = false
+          recordVoice("tts", "playback_completed", {
+            durationMs: performance.now() - (speechStartedAt ?? performance.now()),
+          })
+          restart()
+        })
+        .catch((error: unknown) => failSpeech(generation, error))
       return
     }
     const generation = speechGeneration
     const synthesisStarted = performance.now()
+    speechStartedAt ??= synthesisStarted
     speechBusy = true
-    setState("synthesizing")
+    if (!speechPlaybackStarted) setState("synthesizing")
     recordVoice("tts", "synthesis_started", { text })
-    if (!platform.synthesizeLocalSpeech) {
-      failSpeech(generation, new Error("The local TTS bridge is unavailable in this application build."))
-      return
-    }
-    const prefetched =
-      speechPrefetch?.generation === generation && speechPrefetch.text === text ? speechPrefetch.result : undefined
-    speechPrefetch = undefined
-    const audioBlob = await (prefetched ?? synthesizeSpeech(text))
+    let chunks = 0
+    const stream = (() => {
+      try {
+        return createLocalSpeechStream({
+          endpoint: settings.voice.ttsEndpoint(),
+          model: settings.voice.ttsModel(),
+          voice: settings.voice.ttsVoice(),
+          mode: settings.voice.ttsMode(),
+          text,
+          onChunk: (chunk) => {
+            if (generation !== speechGeneration) return
+            chunks += 1
+            const firstChunkMs = performance.now() - synthesisStarted
+            setVoiceDiagnostics((current) => ({
+              ...current,
+              ttsFirstChunkMs: current.ttsFirstChunkMs ?? firstChunkMs,
+              ttsChunks: chunks,
+            }))
+            recordVoice("tts", "stream_chunk_ready", {
+              text: chunk.text,
+              durationMs: firstChunkMs,
+              diagnostics: {
+                chunk: chunk.index,
+                cache: chunk.cache,
+                prepare_ms: chunk.prepareMs,
+                synthesis_ms: chunk.synthesisMs,
+                total_ms: chunk.totalMs,
+              },
+            })
+            const player = ensureSpeechPlayer(generation, text)
+            if (!player) return
+            void player
+              .enqueue(chunk.audio, chunk.sampleRate)
+              .then(() => {
+                if (generation !== speechGeneration) return
+                recordVoice("tts", "playback_chunk_buffered", {
+                  text: chunk.text,
+                  diagnostics: { chunk: chunk.index },
+                })
+              })
+              .catch((error: unknown) => failSpeech(generation, error))
+          },
+        })
+      } catch (error) {
+        failSpeech(generation, error)
+      }
+    })()
+    if (!stream) return
+    speechStreamCancel = stream.cancel
+    const completed = await stream.done
       .catch((error: unknown) => {
         failSpeech(generation, error)
         return undefined
       })
-    if (!audioBlob || generation !== speechGeneration) return
-    recordVoice("tts", "synthesis_completed", {
+    if (!completed || generation !== speechGeneration) return
+    speechStreamCancel = undefined
+    speechBusy = false
+    recordVoice("tts", "stream_completed", {
       text,
       durationMs: performance.now() - synthesisStarted,
-      diagnostics: {
-        cache: audioBlob.metrics.cache,
-        prepare_ms: audioBlob.metrics.prepareMs,
-        synthesis_ms: audioBlob.metrics.synthesisMs,
-        total_ms: audioBlob.metrics.totalMs,
-      },
+      diagnostics: { chunks: completed.chunks, stream_ms: completed.totalMs },
     })
-    speechAudioURL = URL.createObjectURL(audioBlob.audio)
-    speechAudio = new Audio(speechAudioURL)
-    speechAudio.onplay = () => {
-      setState("speaking")
-      duplex?.setState("speaking", speechObserved)
-      prefetchSpeech()
-      console.info("[voice-agent] audio playback started", { generation, textLength: text.length })
-      recordVoice("tts", "playback_started", { text })
-    }
-    speechAudio.onended = () => {
-      if (generation !== speechGeneration) return
-      stopSpeech()
-      speechBusy = false
-      console.info("[voice-agent] audio playback completed", { generation })
-      recordVoice("tts", "playback_completed", { text })
-      void drainSpeech()
-    }
-    speechAudio.onerror = () => {
-      console.error("[voice-agent] audio playback failed", { generation, error: speechAudio?.error })
-      failSpeech(generation, new Error("The generated audio could not be played."))
-    }
-    await speechAudio.play().catch((error: unknown) => failSpeech(generation, error))
+    void drainSpeech()
   }
 
   const submitTranscript = (text: string) => {
@@ -537,6 +593,11 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
             silence_ms: event.diagnostics?.silence_ms,
             pre_roll_ms: event.diagnostics?.pre_roll_ms,
             transcription_ms: event.diagnostics?.transcription_ms,
+            transcription_cache: event.diagnostics?.transcription_cache,
+            incremental_decode: event.diagnostics?.incremental_decode,
+            decode_count: event.diagnostics?.decode_count,
+            decoded_audio_ms: event.diagnostics?.decoded_audio_ms,
+            committed_audio_ms: event.diagnostics?.committed_audio_ms,
             transcript_stability: event.diagnostics?.transcript_stability,
             endpoint_reason: event.diagnostics?.endpoint_reason,
             wake_recognition_ms: event.diagnostics?.wake_recognition_ms,
@@ -573,6 +634,10 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
           : current.phase,
       preRollMs: diagnostics?.pre_roll_ms ?? event.pre_roll_ms ?? current.preRollMs,
       transcriptionMs: diagnostics?.transcription_ms ?? current.transcriptionMs,
+      transcriptionCache: diagnostics?.transcription_cache ?? current.transcriptionCache,
+      decodeCount: diagnostics?.decode_count ?? current.decodeCount,
+      decodedAudioMs: diagnostics?.decoded_audio_ms ?? current.decodedAudioMs,
+      committedAudioMs: diagnostics?.committed_audio_ms ?? current.committedAudioMs,
       wakeRecognitionMs: diagnostics?.wake_recognition_ms ?? current.wakeRecognitionMs,
       wakeModel: diagnostics?.wake_model ?? current.wakeModel,
       wakeConfidence: event.confidence ?? current.wakeConfidence,
@@ -633,6 +698,19 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
         }
         const microphone = Math.round(normalized * 10) * 10
         setVoiceDiagnostics((current) => (current.microphone === microphone ? current : { ...current, microphone }))
+      },
+      onEcho: (diagnostics) => {
+        setVoiceDiagnostics((current) => ({
+          ...current,
+          echoReferencePercent: Math.round(Math.min(1, (diagnostics.echo_reference_rms ?? 0) / 0.09) * 100),
+          echoResidualPercent: Math.round(Math.min(1, (diagnostics.echo_residual_rms ?? 0) / 0.09) * 100),
+          echoCoherence: Math.round((diagnostics.echo_coherence ?? 0) * 100),
+          echoSuppressionDb: Math.round((diagnostics.echo_suppression_db ?? 0) * 10) / 10,
+          echoDelayMs: Math.round(diagnostics.echo_delay_ms ?? 0),
+        }))
+        if (performance.now() - lastEchoLogAt < 1_000) return
+        lastEchoLogAt = performance.now()
+        recordVoice("stt", "echo_reference_compared", { diagnostics })
       },
       onError: failRecognition,
     })
@@ -784,7 +862,7 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
     props.onStatusChange?.({
       state: current,
       text: status(),
-      diagnostics: current === "listening" || current === "speaking" ? voiceDiagnostics() : undefined,
+      diagnostics: current === "thinking" ? undefined : voiceDiagnostics(),
     })
   })
 
@@ -888,6 +966,39 @@ export function VoiceAgentChatStatus(props: { status: VoiceAgentStatus | undefin
                 </Show>
                 <Show when={diagnostics().transcriptionMs !== undefined}>
                   <span>{language.t("voice.diagnostics.latency")} {diagnostics().transcriptionMs} ms</span>
+                </Show>
+                <Show when={diagnostics().transcriptionCache}>
+                  {(value) => <span>{language.t("voice.diagnostics.cache")} {value()}</span>}
+                </Show>
+                <Show when={diagnostics().decodeCount !== undefined}>
+                  <span>
+                    {language.t("voice.diagnostics.incremental")} {diagnostics().decodeCount}
+                    {diagnostics().decodedAudioMs !== undefined ? ` · ${diagnostics().decodedAudioMs} ms` : ""}
+                    {diagnostics().committedAudioMs !== undefined ? ` → ${diagnostics().committedAudioMs} ms` : ""}
+                  </span>
+                </Show>
+                <Show when={diagnostics().ttsFirstChunkMs !== undefined}>
+                  <span>
+                    {language.t("voice.diagnostics.firstChunk")} {Math.round(diagnostics().ttsFirstChunkMs!)} ms
+                    {diagnostics().ttsChunks !== undefined ? ` · ${diagnostics().ttsChunks}` : ""}
+                  </span>
+                </Show>
+                <Show when={diagnostics().firstSoundMs !== undefined}>
+                  <span>{language.t("voice.diagnostics.firstSound")} {Math.round(diagnostics().firstSoundMs!)} ms</span>
+                </Show>
+                <Show when={diagnostics().ttsBufferedMs !== undefined}>
+                  <span>{language.t("voice.diagnostics.buffered")} {Math.round(diagnostics().ttsBufferedMs!)} ms</span>
+                </Show>
+                <Show when={diagnostics().ttsUnderruns !== undefined}>
+                  <span>{language.t("voice.diagnostics.underruns")} {diagnostics().ttsUnderruns}</span>
+                </Show>
+                <Show when={diagnostics().echoReferencePercent !== undefined}>
+                  <span>
+                    {language.t("voice.diagnostics.echo")} {diagnostics().echoReferencePercent}% → {diagnostics().echoResidualPercent}%
+                    {diagnostics().echoCoherence !== undefined ? ` · ${diagnostics().echoCoherence}%` : ""}
+                    {diagnostics().echoSuppressionDb !== undefined ? ` · ${diagnostics().echoSuppressionDb} dB` : ""}
+                    {diagnostics().echoDelayMs !== undefined ? ` · ${diagnostics().echoDelayMs} ms` : ""}
+                  </span>
                 </Show>
                 <Show when={diagnostics().wakeRecognitionMs !== undefined}>
                   <span>

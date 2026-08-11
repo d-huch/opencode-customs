@@ -53,9 +53,41 @@ export function isLikelySpeechEcho(transcript: string, spoken: string) {
       .split(/\s+/)
       .filter((word) => word.length > 1)
   const heard = words(transcript)
-  const output = new Set(words(spoken))
-  if (!heard.length || !output.size) return false
-  return heard.filter((word) => output.has(word)).length / heard.length >= 0.6
+  const output = words(spoken)
+  if (!heard.length || !output.length) return false
+  const overlap = heard.filter((word) => output.some((candidate) => sameSpeechWord(word, candidate))).length / heard.length
+  return overlap >= 0.6 || hasSpeechWordRun(heard, output, 4)
+}
+
+function hasSpeechWordRun(left: string[], right: string[], minimum: number) {
+  if (left.length < minimum || right.length < minimum) return false
+  return left.slice(0, left.length - minimum + 1).some((_, leftStart) =>
+    right.slice(0, right.length - minimum + 1).some((_, rightStart) =>
+      left
+        .slice(leftStart, leftStart + minimum)
+        .every((word, index) => sameSpeechWord(word, right[rightStart + index])),
+    ),
+  )
+}
+
+function sameSpeechWord(left: string, right: string) {
+  if (left === right) return true
+  if (Math.min(left.length, right.length) < 4) return false
+  const previous = Array.from({ length: right.length + 1 }, (_, index) => index)
+  const distance = [...left].reduce((row, character, leftIndex) => {
+    const next = [leftIndex + 1]
+    for (let rightIndex = 0; rightIndex < right.length; rightIndex++) {
+      next.push(
+        Math.min(
+          next[rightIndex] + 1,
+          row[rightIndex + 1] + 1,
+          row[rightIndex] + (character === right[rightIndex] ? 0 : 1),
+        ),
+      )
+    }
+    return next
+  }, previous)
+  return distance[right.length] <= Math.max(1, Math.floor(Math.max(left.length, right.length) * 0.2))
 }
 
 export function isDeliberateSpeechInterruption(value: string) {

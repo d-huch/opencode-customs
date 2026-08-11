@@ -1012,7 +1012,13 @@ routing. Every streaming event carries bounded diagnostics for microphone level,
 pre-roll duration, transcript stability, recognition latency, and the final endpoint reason. The chat status renders these
 signals while listening so audio and endpoint failures can be diagnosed without opening Docker logs.
 
-As assistant text streams, the first complete sentence or a bounded clause is sent through the desktop IPC bridge to the
+Partial cadence, maximum utterance length, and endpoint boundaries use received PCM frame time rather than wall-clock
+time, so slow local decoding cannot make an utterance expire early. An endpoint transcript is reused for the final event
+only when no additional speech frames arrived after it; resumed speech invalidates the candidate. Periodic partials are
+suspended while an endpoint candidate is pending, which avoids decoding the same silence-extended buffer twice without
+changing the recognizer or reducing transcription quality.
+
+As assistant text streams, the first complete sentence or a bounded clause is sent over a local WebSocket to the
 independent OpenAI-compatible backend in `services/ukrainian-tts`. Quality mode uses Silero V5 CIS Extended for
 Ukrainian, a contextual `stress-uk` accentor, a pronunciation dictionary, and a dedicated Silero English model. Complete
 English passages use that English model. Short Latin fragments inside predominantly Ukrainian text are first resolved by
@@ -1020,10 +1026,15 @@ the pronunciation dictionary and then adapted to Ukrainian phonetics when no exp
 applies the same short-fragment adaptation before Ukrainian Piper ONNX synthesis. Preparing the next clause while the
 current one plays reduces time to first audio. New assistant replies are spoken for typed prompts as well as voice-submitted
 prompts. Repeated synthesis and accent results are cached without placing WAV or base64 data in model context. Markdown
-presentation and fenced code are removed from the spoken form without modifying the stored response.
+presentation and fenced code are removed from the spoken form without modifying the stored response. The renderer decodes
+the returned raw mono PCM16 chunks into one persistent `AudioWorklet` queue instead of decoding a WAV container or
+creating one media element per clause.
+The next synthesis request runs while buffered audio is playing, a short adaptive jitter buffer grows only after an
+underrun, and barge-in clears the socket, PCM queue, active model turn, and playback generation together.
 
-Hands-free mode continues streaming recognition while a synthesized sentence is playing. Hardware/Chromium acoustic
-echo cancellation removes the playback reference first; transcripts that still overlap text already spoken in the
+Hands-free mode continues streaming recognition while a synthesized sentence is playing. Native WebRTC acoustic
+echo cancellation runs first. A renderer `AudioWorklet` then receives the exact TTS playback PCM on a separate reference
+input, estimates acoustic delay and correlation, and removes residual echo before VAD and streaming STT. Transcripts that still overlap text already spoken in the
 current response are treated as residual semantic echo, and short incidental fragments are ignored. A stable, distinct utterance cancels the active audio request and
 playback, interrupts an unfinished model turn, and immediately becomes the next user prompt. The recognizer then resumes
 after the response without another button press. Browser/macOS speech synthesis is not part of this path and is never used
@@ -1075,6 +1086,22 @@ can be saved as the baseline for that exact endpoint/model/voice tuple and compa
 HTML exports make results suitable for CI artifacts or manual comparison. These replay scenarios deliberately do not claim
 to validate live echo cancellation or barge-in; those remain observable through real duplex turns in the durable timeline.
 
+The separate **Live Duplex Regression Runner** exercises that duplex boundary without requiring a physical microphone.
+It synthesizes deterministic speech, injects mono PCM through the production `DuplexSession`, and evaluates the resulting
+events with the same client echo and deliberate-interruption rules used by the active voice loop. Its bounded suite covers
+self-echo rejection, user barge-in, the 1.5-second pre-roll, an internal semantic pause, wake phrase plus command, background
+noise, and a complete wake → response → interruption cycle. The report records transcripts, raw endpoint events, wake
+decisions, recognition latency, false and missed barge-ins, and false and missed wake detections. A baseline is scoped to
+the exact endpoint, synthesis mode, and voice; JSON and standalone HTML exports preserve both the evaluated result and raw
+backend evidence. The runner never selects a fallback voice, recognizer, or model: an unavailable component is a visible
+failed scenario or request error.
+
+Wake matching compares both spaced and collapsed normalized token windows, so recognizer boundaries such as `Джар віс`
+can match a configured single-token phrase without maintaining phrase-specific aliases. Semantic endpointing first requests
+a transcript after the short-silence threshold, but does not commit a completed utterance until the configurable endpoint
+commit threshold (1,000 ms by default). Speech that resumes before that boundary cancels the candidate and remains in the
+same utterance; genuinely incomplete text may continue to the longer semantic grace boundary.
+
 For deterministic STT debugging, the inspector can send an explicitly selected mono or stereo PCM16 WAV file to
 `POST /v1/audio/transcriptions/replay`. The backend converts it to mono 16 kHz PCM, runs the same recognizer used by the
 duplex stream, and returns the transcript plus source format and timing diagnostics. OpenCode Customs does not retain raw
@@ -1094,8 +1121,15 @@ docker compose up --build -d
 
 The first start downloads the selected Silero, Piper, and accentor artifacts into a persistent Docker volume. Silero V5
 CIS Extended is distributed under CC-NC-BY; Piper is GPL-3.0 and individual voices may have additional model-card terms.
-The backend accepts `POST /v1/audio/speech` and `WS /v1/audio/transcriptions/stream`, reports TTS and STT independently
-through `GET /health`, and binds port 8880 to localhost only. It never switches from quality to fast mode automatically.
+The backend accepts `POST /v1/audio/speech`, `WS /v1/audio/speech/stream`, and
+`WS /v1/audio/transcriptions/stream`, reports TTS and STT independently through `GET /health`, and binds port 8880 to
+localhost only. Streaming TTS emits bounded raw PCM16 chunks with explicit sample-rate, channel, and frame metadata, allowing playback to begin before the
+complete answer has been synthesized. Streaming STT keeps a per-utterance committed prefix and decodes only the unconfirmed
+audio tail instead of retranscribing the complete utterance for every partial result. The chat status renders the current
+partial transcript and the durable voice timeline exposes first-chunk, first-sound, buffered-audio, underrun,
+incremental-decode, committed-audio, cache, playback-reference level, residual level, echo coherence, suppression in dB,
+and estimated acoustic-delay diagnostics. The runtime never
+switches from quality to fast mode automatically.
 
 ## Current limitations
 

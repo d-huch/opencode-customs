@@ -7,11 +7,22 @@ export type DuplexSpeechDiagnostics = {
   silence_ms?: number
   pre_roll_ms?: number
   transcription_ms?: number
+  transcription_cache?: "hit" | "miss"
+  incremental_decode?: boolean
+  decode_count?: number
+  decoded_audio_ms?: number
+  committed_audio_ms?: number
   transcript_stability?: number
   endpoint_reason?: string
   wake_recognition_ms?: number
   wake_model?: string
   wake_armed?: boolean
+  echo_input_rms?: number
+  echo_reference_rms?: number
+  echo_residual_rms?: number
+  echo_coherence?: number
+  echo_suppression_db?: number
+  echo_delay_ms?: number
 }
 
 export type DuplexSpeechEvent = {
@@ -54,6 +65,7 @@ type DuplexSpeechOptions = {
   language: string
   onEvent: (event: DuplexSpeechEvent) => void
   onLevel: (level: number) => void
+  onEcho?: (diagnostics: DuplexSpeechDiagnostics) => void
   onError: (error: Error) => void
   wake?: DuplexWakeConfig
 }
@@ -87,13 +99,101 @@ export function resamplePCM16(input: Float32Array, sourceRate: number, targetRat
   return output
 }
 
+const echoProcessorSource = `
+class OpenCodeEchoProcessor extends AudioWorkletProcessor {
+  constructor() {
+    super()
+    this.reference = new Float32Array(Math.max(16384, Math.ceil(sampleRate * 0.35)))
+    this.referenceOffset = 0
+    this.pending = new Float32Array(2048)
+    this.pendingOffset = 0
+    this.delay = Math.round(sampleRate * 0.04)
+    this.gain = 0
+    this.tick = 0
+  }
+
+  referenceAt(blockLength, sample, delay) {
+    const index = this.referenceOffset - blockLength + sample - delay
+    return this.reference[(index % this.reference.length + this.reference.length) % this.reference.length]
+  }
+
+  process(inputs, outputs) {
+    const microphone = inputs[0][0]
+    const playback = inputs[1][0]
+    const output = outputs[0][0]
+    if (output) output.fill(0)
+    if (!microphone) return true
+    for (let index = 0; index < microphone.length; index += 1) {
+      this.reference[this.referenceOffset] = playback?.[index] ?? 0
+      this.referenceOffset = (this.referenceOffset + 1) % this.reference.length
+    }
+
+    let bestDelay = this.delay
+    let bestCoherence = 0
+    let bestGain = 0
+    let inputEnergy = 0
+    let referenceEnergy = 0
+    for (let index = 0; index < microphone.length; index += 1) inputEnergy += microphone[index] * microphone[index]
+    for (let delay = Math.round(sampleRate * 0.004); delay <= Math.round(sampleRate * 0.14); delay += 64) {
+      let dot = 0
+      let micEnergy = 0
+      let refEnergy = 0
+      for (let index = 0; index < microphone.length; index += 4) {
+        const mic = microphone[index]
+        const ref = this.referenceAt(microphone.length, index, delay)
+        dot += mic * ref
+        micEnergy += mic * mic
+        refEnergy += ref * ref
+      }
+      const coherence = Math.abs(dot) / Math.sqrt(Math.max(1e-12, micEnergy * refEnergy))
+      if (coherence <= bestCoherence) continue
+      bestCoherence = coherence
+      bestDelay = delay
+      bestGain = dot / Math.max(1e-12, refEnergy)
+      referenceEnergy = refEnergy
+    }
+    const active = bestCoherence >= 0.38 && referenceEnergy / Math.ceil(microphone.length / 4) >= 0.000009
+    this.delay = active ? Math.round(this.delay * 0.75 + bestDelay * 0.25) : this.delay
+    this.gain = active ? this.gain * 0.7 + Math.max(-2, Math.min(2, bestGain)) * 0.3 : this.gain * 0.6
+    let residualEnergy = 0
+    for (let index = 0; index < microphone.length; index += 1) {
+      const sample = microphone[index] - this.referenceAt(microphone.length, index, this.delay) * this.gain
+      residualEnergy += sample * sample
+      this.pending[this.pendingOffset++] = sample
+      if (this.pendingOffset !== this.pending.length) continue
+      const samples = this.pending
+      this.pending = new Float32Array(2048)
+      this.pendingOffset = 0
+      this.port.postMessage({ type: "audio", samples }, [samples.buffer])
+    }
+    this.tick += 1
+    if (this.tick % 32 !== 0) return true
+    const inputRms = Math.sqrt(inputEnergy / Math.max(1, microphone.length))
+    const referenceRms = Math.sqrt((referenceEnergy * 4) / Math.max(1, microphone.length))
+    const residualRms = Math.sqrt(residualEnergy / Math.max(1, microphone.length))
+    this.port.postMessage({
+      type: "echo",
+      inputRms,
+      referenceRms,
+      residualRms,
+      coherence: bestCoherence,
+      suppressionDb: 20 * Math.log10(Math.max(1e-6, inputRms) / Math.max(1e-6, residualRms)),
+      delayMs: this.delay / sampleRate * 1000,
+    })
+    return true
+  }
+}
+registerProcessor("opencode-echo-canceller", OpenCodeEchoProcessor)
+`
+
 export function createLocalDuplexSpeech(options: DuplexSpeechOptions) {
   let socket: WebSocket | undefined
   let stream: MediaStream | undefined
   let context: AudioContext | undefined
   let source: MediaStreamAudioSourceNode | undefined
-  let processor: ScriptProcessorNode | undefined
+  let processor: AudioWorkletNode | undefined
   let sink: GainNode | undefined
+  let playbackReference: AudioNode | undefined
   let mode: DuplexSpeechMode = "paused"
   let reference = ""
   let ready: Promise<void> | undefined
@@ -125,6 +225,7 @@ export function createLocalDuplexSpeech(options: DuplexSpeechOptions) {
     source = undefined
     processor = undefined
     sink = undefined
+    playbackReference = undefined
     ready = undefined
     preRoll.length = 0
     preRollSamples = 0
@@ -145,17 +246,45 @@ export function createLocalDuplexSpeech(options: DuplexSpeechOptions) {
       context = new AudioContext({ latencyHint: "interactive" })
       await context.resume()
       source = context.createMediaStreamSource(stream)
-      processor = context.createScriptProcessor(2048, 1, 1)
+      const processorURL = URL.createObjectURL(new Blob([echoProcessorSource], { type: "text/javascript" }))
+      await context.audioWorklet.addModule(processorURL).finally(() => URL.revokeObjectURL(processorURL))
+      processor = new AudioWorkletNode(context, "opencode-echo-canceller", {
+        numberOfInputs: 2,
+        numberOfOutputs: 1,
+        outputChannelCount: [1],
+      })
       sink = context.createGain()
       sink.gain.value = 0
-      source.connect(processor)
+      source.connect(processor, 0, 0)
+      playbackReference?.connect(processor, 0, 1)
       processor.connect(sink)
       sink.connect(context.destination)
 
       socket = new WebSocket(localSTTWebSocketURL(options.endpoint))
       socket.binaryType = "arraybuffer"
-      processor.onaudioprocess = (event) => {
-        const samples = event.inputBuffer.getChannelData(0)
+      processor.port.onmessage = (event: MessageEvent<{
+        type: "audio" | "echo"
+        samples?: Float32Array
+        inputRms?: number
+        referenceRms?: number
+        residualRms?: number
+        coherence?: number
+        suppressionDb?: number
+        delayMs?: number
+      }>) => {
+        if (event.data.type === "echo") {
+          options.onEcho?.({
+            echo_input_rms: event.data.inputRms,
+            echo_reference_rms: event.data.referenceRms,
+            echo_residual_rms: event.data.residualRms,
+            echo_coherence: event.data.coherence,
+            echo_suppression_db: event.data.suppressionDb,
+            echo_delay_ms: event.data.delayMs,
+          })
+          return
+        }
+        const samples = event.data.samples
+        if (!samples) return
         const rms = Math.sqrt(samples.reduce((sum, sample) => sum + sample * sample, 0) / samples.length)
         options.onLevel(Math.min(1, rms / 0.09))
         const pcm = resamplePCM16(samples, context?.sampleRate ?? 48_000)
@@ -214,6 +343,14 @@ export function createLocalDuplexSpeech(options: DuplexSpeechOptions) {
   return {
     start,
     stop,
+    audioContext() {
+      return context
+    },
+    setPlaybackReference(node: AudioNode | undefined) {
+      playbackReference = node
+      if (!processor || !playbackReference) return
+      playbackReference.connect(processor, 0, 1)
+    },
     setState(next: DuplexSpeechMode, spoken = "") {
       mode = next
       reference = spoken

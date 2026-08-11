@@ -5,6 +5,14 @@ import { usePlatform } from "@/context/platform"
 import { useSettings } from "@/context/settings"
 import { diagnosticLevelTrace, evaluateVoiceDiagnostics, type VoiceEvaluationPhase } from "@/utils/voice-evaluation"
 import {
+  compareDuplexRegression,
+  duplexRegressionHTML,
+  evaluateDuplexRegression,
+  type DuplexRegressionRawReport,
+  type DuplexRegressionReport,
+  type DuplexRegressionResult,
+} from "@/utils/voice-duplex-regression"
+import {
   compareVoiceRegression,
   runVoiceRegression,
   voiceRegressionHTML,
@@ -25,6 +33,9 @@ export function DialogVoiceInspector(props: { sessionID?: string }) {
   const [regressionProgress, setRegressionProgress] = createSignal(0)
   const [regressionReport, setRegressionReport] = createSignal<VoiceRegressionReport>()
   const [regressionBaseline, setRegressionBaseline] = createSignal<VoiceRegressionReport>()
+  const [duplexRunning, setDuplexRunning] = createSignal(false)
+  const [duplexReport, setDuplexReport] = createSignal<DuplexRegressionReport>()
+  const [duplexBaseline, setDuplexBaseline] = createSignal<DuplexRegressionReport>()
   const [replayResult, setReplayResult] = createSignal<{
     file: string
     text: string
@@ -42,9 +53,17 @@ export function DialogVoiceInspector(props: { sessionID?: string }) {
     if (!report) return
     return compareVoiceRegression(report, regressionBaseline())
   })
+  const duplexComparison = createMemo(() => {
+    const report = duplexReport()
+    if (!report) return
+    return compareDuplexRegression(report, duplexBaseline())
+  })
 
   const regressionKey = () =>
     `opencode.voice-regression.v1:${settings.voice.ttsEndpoint()}:${settings.voice.ttsModel()}:${settings.voice.ttsVoice()}`
+
+  const duplexKey = () =>
+    `opencode.voice-duplex-regression.v1:${settings.voice.ttsEndpoint()}:${settings.voice.ttsMode()}:${settings.voice.ttsVoice()}`
 
   const runRegression = async () => {
     if (!platform.synthesizeLocalSpeech) return
@@ -127,6 +146,71 @@ export function DialogVoiceInspector(props: { sessionID?: string }) {
     const anchor = document.createElement("a")
     anchor.href = url
     anchor.download = `opencode-voice-regression-${new Date().toISOString().replace(/[:.]/g, "-")}.${format}`
+    anchor.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const runDuplexRegression = async () => {
+    setDuplexRunning(true)
+    setDuplexBaseline(readDuplexBaseline(duplexKey()))
+    const report = await (async () => {
+      const url = new URL(settings.voice.ttsEndpoint())
+      url.pathname = "/v1/audio/duplex/regression"
+      url.search = ""
+      const response = await (platform.fetch ?? fetch)(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          voice: settings.voice.ttsVoice(),
+          mode: settings.voice.ttsMode(),
+          language: document.documentElement.lang || navigator.language,
+        }),
+      })
+      if (!response.ok) throw new Error(await response.text())
+      return evaluateDuplexRegression((await response.json()) as DuplexRegressionRawReport)
+    })().catch((error: unknown) => {
+      showToast({
+        variant: "error",
+        title: language.t("voice.inspector.duplex.failed"),
+        description: error instanceof Error ? error.message : String(error),
+      })
+    })
+    setDuplexRunning(false)
+    if (!report) return
+    setDuplexReport(report)
+    report.results.forEach((result) => {
+      void platform.appendVoiceDiagnostic?.({
+        sessionID: sessionID(),
+        source: "replay",
+        event: result.passed ? "duplex_regression_passed" : "duplex_regression_failed",
+        text: result.transcript,
+        error: result.error,
+        durationMs: result.latencyMs,
+        diagnostics: { scenario: result.id, suite: "live_duplex" },
+      })
+    })
+    setRefresh((value) => value + 1)
+  }
+
+  const saveDuplexBaseline = () => {
+    const report = duplexReport()
+    if (!report) return
+    localStorage.setItem(duplexKey(), JSON.stringify(report))
+    setDuplexBaseline(report)
+    showToast({ variant: "success", title: language.t("voice.inspector.duplex.baseline.saved") })
+  }
+
+  const exportDuplexRegression = (format: "json" | "html") => {
+    const report = duplexReport()
+    if (!report) return
+    const content =
+      format === "json"
+        ? JSON.stringify({ report, baseline: duplexBaseline() }, null, 2)
+        : duplexRegressionHTML(report, duplexBaseline())
+    const url = URL.createObjectURL(new Blob([content], { type: format === "json" ? "application/json" : "text/html" }))
+    const anchor = document.createElement("a")
+    anchor.href = url
+    anchor.download = `opencode-live-duplex-regression-${new Date().toISOString().replace(/[:.]/g, "-")}.${format}`
     anchor.click()
     URL.revokeObjectURL(url)
   }
@@ -219,6 +303,9 @@ export function DialogVoiceInspector(props: { sessionID?: string }) {
               ? language.t("voice.inspector.regression.running", { completed: regressionProgress(), total: 6 })
               : language.t("voice.inspector.regression.action")}
           </Button>
+          <Button type="button" variant="secondary" disabled={duplexRunning()} onClick={() => void runDuplexRegression()}>
+            {duplexRunning() ? language.t("voice.inspector.duplex.running") : language.t("voice.inspector.duplex.action")}
+          </Button>
           <Button
             type="button"
             variant="secondary"
@@ -295,6 +382,57 @@ export function DialogVoiceInspector(props: { sessionID?: string }) {
               </div>
               <div class="mt-3 max-h-52 overflow-y-auto rounded border border-border-weak-base">
                 <For each={report().results}>{(result) => <RegressionRow result={result} />}</For>
+              </div>
+            </div>
+          )}
+        </Show>
+
+        <Show when={duplexReport()}>
+          {(report) => (
+            <div class="shrink-0 rounded-md border border-border-weak-base bg-surface-raised-base p-3">
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <div class="text-12-medium text-text-strong">{language.t("voice.inspector.duplex.title")}</div>
+                  <div class="mt-1 text-11-regular text-text-weak">
+                    {language.t("voice.inspector.duplex.summary", {
+                      passed: report().passed,
+                      failed: report().failed,
+                      falseBarge: report().falseBargeIns,
+                      missedBarge: report().missedBargeIns,
+                      falseWake: report().falseWakes,
+                      missedWake: report().missedWakes,
+                      latency: Math.round(report().medianEndpointMs),
+                    })}
+                  </div>
+                  <Show when={duplexComparison()}>
+                    {(comparison) => (
+                      <div class="mt-1 text-11-regular text-text-weak">
+                        {language.t("voice.inspector.duplex.delta", {
+                          passed: signed(comparison().passed),
+                          falseBarge: signed(comparison().falseBargeIns),
+                          missedBarge: signed(comparison().missedBargeIns),
+                          falseWake: signed(comparison().falseWakes),
+                          missedWake: signed(comparison().missedWakes),
+                          latency: signed(Math.round(comparison().endpointMs)),
+                        })}
+                      </div>
+                    )}
+                  </Show>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                  <Button type="button" variant="secondary" onClick={saveDuplexBaseline}>
+                    {language.t("voice.inspector.duplex.baseline.action")}
+                  </Button>
+                  <Button type="button" variant="secondary" onClick={() => exportDuplexRegression("json")}>
+                    JSON
+                  </Button>
+                  <Button type="button" variant="secondary" onClick={() => exportDuplexRegression("html")}>
+                    HTML
+                  </Button>
+                </div>
+              </div>
+              <div class="mt-3 max-h-52 overflow-y-auto rounded border border-border-weak-base">
+                <For each={report().results}>{(result) => <DuplexRegressionRow result={result} />}</For>
               </div>
             </div>
           )}
@@ -470,6 +608,24 @@ function RegressionRow(props: { result: VoiceRegressionResult }) {
   )
 }
 
+function DuplexRegressionRow(props: { result: DuplexRegressionResult }) {
+  const language = useLanguage()
+  return (
+    <div class="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3 border-b border-border-weak-base px-3 py-2 last:border-b-0">
+      <div class="min-w-0">
+        <div class="truncate text-11-medium text-text-strong">
+          {language.t(`voice.inspector.duplex.scenario.${props.result.id}`)}
+        </div>
+        <div class="truncate text-11-regular text-text-weak">{props.result.transcript || props.result.error || "—"}</div>
+      </div>
+      <div class={props.result.passed ? "text-11-medium text-icon-success-base" : "text-11-medium text-error-base"}>
+        {props.result.passed ? "PASS" : "FAIL"}
+      </div>
+      <div class="font-mono text-11-regular text-text-weak">{formatDuration(props.result.latencyMs)}</div>
+    </div>
+  )
+}
+
 function formatDuration(value?: number) {
   if (value === undefined) return "—"
   if (value < 1_000) return `${Math.round(value)} ms`
@@ -481,6 +637,16 @@ function readBaseline(key: string) {
   if (!value) return
   try {
     return JSON.parse(value) as VoiceRegressionReport
+  } catch {
+    localStorage.removeItem(key)
+  }
+}
+
+function readDuplexBaseline(key: string) {
+  const value = localStorage.getItem(key)
+  if (!value) return
+  try {
+    return JSON.parse(value) as DuplexRegressionReport
   } catch {
     localStorage.removeItem(key)
   }

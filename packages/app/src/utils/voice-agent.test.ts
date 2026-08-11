@@ -45,6 +45,12 @@ describe("voice agent", () => {
 
   test("distinguishes output echo from a spoken interruption", () => {
     expect(isLikelySpeechEcho("Перше речення", "Ось перше речення для відповіді")).toBe(true)
+    expect(
+      isLikelySpeechEcho(
+        "Опин код кастом, свідповідає голосом і продовжує пояснення.",
+        "OpenCode Customs відповідає голосом і продовжує пояснення.",
+      ),
+    ).toBe(true)
     expect(isLikelySpeechEcho("Зупинись і покажи файл", "Ось перше речення для відповіді")).toBe(false)
   })
 

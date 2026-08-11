@@ -20,8 +20,16 @@ from piper import PiperVoice, SynthesisConfig
 from pydantic import BaseModel, Field
 
 from app.accent import UkrainianAccentor
+from app.duplex_regression import run_duplex_regression
 from app.language import adapt_mixed_latin, normalize_voice, segment_languages
-from app.streaming_stt import DuplexSession, StreamingRecognizer, WakeWordRecognizer, decode_wav_pcm16
+from app.streaming_stt import (
+    DuplexSession,
+    IncrementalRecognitionState,
+    STT_SAMPLE_RATE,
+    StreamingRecognizer,
+    WakeWordRecognizer,
+    decode_wav_pcm16,
+)
 
 
 QUALITY_MODEL_ID = os.getenv("TTS_QUALITY_MODEL_ID", "silero-v5-ukrainian")
@@ -49,6 +57,7 @@ PIPER_CONFIG_URL = os.getenv(
 CACHE_ROOT = Path(os.getenv("TTS_CACHE_ROOT", "/home/tts/.cache/opencode-customs"))
 MAX_INPUT_CHARS = int(os.getenv("TTS_MAX_INPUT_CHARS", "6000"))
 CHUNK_CHARS = int(os.getenv("TTS_CHUNK_CHARS", "350"))
+STREAM_CHUNK_CHARS = int(os.getenv("TTS_STREAM_CHUNK_CHARS", "110"))
 SAMPLE_RATE = int(os.getenv("TTS_SAMPLE_RATE", "48000"))
 CPU_THREADS = int(os.getenv("TTS_CPU_THREADS", "4"))
 DOWNLOAD_ATTEMPTS = int(os.getenv("TTS_DOWNLOAD_ATTEMPTS", "2"))
@@ -64,6 +73,12 @@ class SpeechRequest(BaseModel):
     mode: str = "quality"
     response_format: str = "wav"
     speed: float = Field(default=1, ge=0.5, le=2)
+
+
+class DuplexRegressionRequest(BaseModel):
+    voice: str = "kateryna"
+    mode: str = "quality"
+    language: str = "uk"
 
 
 class ModelUnavailableError(RuntimeError):
@@ -278,6 +293,39 @@ def split_text(text: str):
     return chunks or [text]
 
 
+def split_stream_text(text: str):
+    parts = [item.strip() for item in re.split(r"(?<=[.!?…;:])\s+|(?<=,)\s+", text) if item.strip()]
+    chunks = []
+    current = ""
+    for part in parts:
+        candidate = f"{current} {part}".strip()
+        if len(candidate) <= STREAM_CHUNK_CHARS:
+            current = candidate
+            continue
+        if current:
+            chunks.append(current)
+        words = part.split()
+        current = ""
+        for word in words:
+            candidate = f"{current} {word}".strip()
+            if len(candidate) <= STREAM_CHUNK_CHARS:
+                current = candidate
+                continue
+            if current:
+                chunks.append(current)
+            current = word
+    if current:
+        chunks.append(current)
+    return chunks or [text]
+
+
+def wav_pcm16(audio: bytes):
+    with wave.open(io.BytesIO(audio), "rb") as wav:
+        if wav.getnchannels() != 1 or wav.getsampwidth() != 2:
+            raise ValueError("Streaming TTS requires mono 16-bit PCM audio.")
+        return wav.readframes(wav.getnframes()), wav.getframerate()
+
+
 def resample(audio: np.ndarray, source_rate: int, target_rate: int):
     if source_rate == target_rate:
         return audio.astype(np.float32)
@@ -376,22 +424,7 @@ def models():
 
 @app.post("/v1/audio/speech")
 async def speech(request: SpeechRequest):
-    if engine is None:
-        raise HTTPException(status_code=503, detail="The local voice models are still loading.")
-    expected = QUALITY_MODEL_ID if request.mode == "quality" else FAST_MODEL_ID if request.mode == "fast" else None
-    if expected is None:
-        raise HTTPException(status_code=400, detail="Mode must be 'quality' or 'fast'.")
-    if request.model != expected:
-        raise HTTPException(status_code=400, detail=f"Mode '{request.mode}' requires model '{expected}'.")
-    voice = normalize_voice(request.mode, request.voice)
-    if request.mode == "quality" and voice not in UKRAINIAN_VOICES:
-        raise HTTPException(status_code=400, detail=f"Voice '{request.voice}' is unavailable for quality mode.")
-    if request.mode == "fast" and voice != "ukrainian_tts":
-        raise HTTPException(status_code=400, detail=f"Voice '{request.voice}' is unavailable for fast mode.")
-    if request.response_format != "wav":
-        raise HTTPException(status_code=400, detail="This backend supports response_format='wav' only.")
-    if len(request.input) > MAX_INPUT_CHARS:
-        raise HTTPException(status_code=413, detail=f"Input exceeds the {MAX_INPUT_CHARS}-character limit.")
+    voice = require_speech_request(request)
     started = time.perf_counter()
     async with generation_lock:
         try:
@@ -418,12 +451,88 @@ async def speech(request: SpeechRequest):
     )
 
 
+@app.websocket("/v1/audio/speech/stream")
+async def speech_stream(websocket: WebSocket):
+    await websocket.accept()
+    try:
+        request = SpeechRequest.model_validate_json(await websocket.receive_text())
+        voice = require_speech_request(request)
+        chunks = split_stream_text(request.input)
+        started = time.perf_counter()
+        await websocket.send_json(
+            {"type": "started", "chunks": len(chunks), "format": "pcm_s16le", "channels": 1}
+        )
+        for index, text in enumerate(chunks):
+            chunk_started = time.perf_counter()
+            async with generation_lock:
+                assert engine is not None
+                audio, cached, prepare_ms, synthesis_ms = await asyncio.to_thread(
+                    engine.synthesize,
+                    text,
+                    voice,
+                    request.mode,
+                    request.speed,
+                )
+            pcm, sample_rate = wav_pcm16(audio)
+            await websocket.send_json(
+                {
+                    "type": "chunk",
+                    "index": index,
+                    "text": text,
+                    "cache": "hit" if cached else "miss",
+                    "prepare_ms": round(prepare_ms, 1),
+                    "synthesis_ms": round(synthesis_ms, 1),
+                    "total_ms": round((time.perf_counter() - chunk_started) * 1000, 1),
+                    "format": "pcm_s16le",
+                    "sample_rate": sample_rate,
+                    "channels": 1,
+                    "frames": len(pcm) // 2,
+                }
+            )
+            await websocket.send_bytes(pcm)
+        await websocket.send_json(
+            {
+                "type": "done",
+                "chunks": len(chunks),
+                "total_ms": round((time.perf_counter() - started) * 1000, 1),
+            }
+        )
+    except WebSocketDisconnect:
+        return
+    except Exception as error:
+        detail = error.detail if isinstance(error, HTTPException) else str(error)
+        await websocket.send_json({"type": "error", "error": detail})
+    await websocket.close()
+
+
+def require_speech_request(request: SpeechRequest):
+    if engine is None:
+        raise HTTPException(status_code=503, detail="The local voice models are still loading.")
+    expected = QUALITY_MODEL_ID if request.mode == "quality" else FAST_MODEL_ID if request.mode == "fast" else None
+    if expected is None:
+        raise HTTPException(status_code=400, detail="Mode must be 'quality' or 'fast'.")
+    if request.model != expected:
+        raise HTTPException(status_code=400, detail=f"Mode '{request.mode}' requires model '{expected}'.")
+    voice = normalize_voice(request.mode, request.voice)
+    if request.mode == "quality" and voice not in UKRAINIAN_VOICES:
+        raise HTTPException(status_code=400, detail=f"Voice '{request.voice}' is unavailable for quality mode.")
+    if request.mode == "fast" and voice != "ukrainian_tts":
+        raise HTTPException(status_code=400, detail=f"Voice '{request.voice}' is unavailable for fast mode.")
+    if request.response_format != "wav":
+        raise HTTPException(status_code=400, detail="This backend supports response_format='wav' only.")
+    if len(request.input) > MAX_INPUT_CHARS:
+        raise HTTPException(status_code=413, detail=f"Input exceeds the {MAX_INPUT_CHARS}-character limit.")
+    return voice
+
+
 @app.websocket("/v1/audio/transcriptions/stream")
 async def transcriptions(websocket: WebSocket):
     await websocket.accept()
     session = DuplexSession()
     partial_task: asyncio.Task | None = None
+    partial_endpoint = False
     send_lock = asyncio.Lock()
+    recognition_state = IncrementalRecognitionState()
 
     async def send(payload: dict):
         async with send_lock:
@@ -437,16 +546,40 @@ async def transcriptions(websocket: WebSocket):
         generation: int,
         diagnostics: dict,
         wake: bool = False,
+        cached_text: str = "",
+        speech_frames: int | None = None,
+        incremental: bool = True,
     ):
-        if recognizer is None:
+        if recognizer is None and not cached_text:
             await send({"type": "error", "error": "The local STT runtime is unavailable."})
             return
         started = time.perf_counter()
-        try:
-            text = await recognizer.transcribe(pcm, session.language)
-        except Exception as error:
-            await send({"type": "error", "error": str(error)})
-            return
+        if cached_text:
+            text = cached_text
+            incremental_diagnostics = {
+                "incremental_decode": True,
+                "decode_count": recognition_state.decode_count,
+                "decoded_audio_ms": 0,
+                "committed_audio_ms": round(
+                    recognition_state.committed_bytes / 2 / STT_SAMPLE_RATE * 1000
+                ),
+            }
+        else:
+            try:
+                if incremental:
+                    text, incremental_diagnostics = await recognizer.transcribe_incremental(
+                        pcm,
+                        session.language,
+                        recognition_state,
+                        generation,
+                        kind == "final",
+                    )
+                else:
+                    text = await recognizer.transcribe(pcm, session.language)
+                    incremental_diagnostics = {"incremental_decode": False}
+            except Exception as error:
+                await send({"type": "error", "error": str(error)})
+                return
         if wake and not text.strip():
             await send(
                 {
@@ -455,7 +588,7 @@ async def transcriptions(websocket: WebSocket):
                 }
             )
             return
-        session.observe_transcript(text, generation)
+        session.observe_transcript(text, generation, speech_frames)
         await send(
             {
                 "type": kind,
@@ -466,7 +599,9 @@ async def transcriptions(websocket: WebSocket):
                 "wake": wake,
                 "diagnostics": {
                     **diagnostics,
-                    "transcription_ms": round((time.perf_counter() - started) * 1000),
+                    "transcription_ms": 0 if cached_text else round((time.perf_counter() - started) * 1000),
+                    "transcription_cache": "hit" if cached_text else "miss",
+                    **incremental_diagnostics,
                     "transcript_stability": max(
                         diagnostics.get("transcript_stability", 0),
                         session.transcript_stability,
@@ -538,6 +673,7 @@ async def transcriptions(websocket: WebSocket):
             generation,
             {**wake_diagnostics, "endpoint_reason": "wake_command"},
             True,
+            incremental=False,
         )
 
     try:
@@ -611,12 +747,26 @@ async def transcriptions(websocket: WebSocket):
                 if command.get("type") == "flush":
                     wake_armed = session.wake_armed
                     phrases = list(session.wake_phrases)
+                    if partial_task and not partial_task.done():
+                        if partial_endpoint:
+                            await partial_task
+                        else:
+                            partial_task.cancel()
+                    cached_text = session.cached_transcript()
                     pcm, mode, reference, generation, diagnostics = session.finish("manual_flush")
                     if pcm:
                         if wake_armed:
                             await send_wake_candidate(pcm, mode, reference, generation, diagnostics, phrases)
                         else:
-                            await send_transcript("final", pcm, mode, reference, generation, diagnostics)
+                            await send_transcript(
+                                "final",
+                                pcm,
+                                mode,
+                                reference,
+                                generation,
+                                diagnostics,
+                                cached_text=cached_text,
+                            )
                     continue
             data = message.get("bytes")
             if not data:
@@ -629,6 +779,7 @@ async def transcriptions(websocket: WebSocket):
                     if event["type"] == "partial_ready":
                         if partial_task and not partial_task.done():
                             continue
+                        partial_endpoint = False
                         partial_task = asyncio.create_task(
                             send_transcript(
                                 "partial",
@@ -637,12 +788,14 @@ async def transcriptions(websocket: WebSocket):
                                 session.reference,
                                 event["generation"],
                                 session.diagnostics(),
+                                speech_frames=session.speech_frames,
                             )
                         )
                         continue
                     if event["type"] == "endpoint_ready":
                         if partial_task and not partial_task.done():
                             continue
+                        partial_endpoint = True
                         partial_task = asyncio.create_task(
                             send_transcript(
                                 "partial",
@@ -651,6 +804,7 @@ async def transcriptions(websocket: WebSocket):
                                 session.reference,
                                 event["generation"],
                                 session.diagnostics("endpoint_candidate"),
+                                speech_frames=session.speech_frames,
                             )
                         )
                         continue
@@ -659,13 +813,25 @@ async def transcriptions(websocket: WebSocket):
                         continue
                     wake_armed = session.wake_armed
                     phrases = list(session.wake_phrases)
-                    pcm, mode, reference, generation, diagnostics = session.finish(event.get("reason", "silence"))
                     if partial_task and not partial_task.done():
-                        partial_task.cancel()
+                        if partial_endpoint:
+                            await partial_task
+                        else:
+                            partial_task.cancel()
+                    cached_text = session.cached_transcript()
+                    pcm, mode, reference, generation, diagnostics = session.finish(event.get("reason", "silence"))
                     if wake_armed:
                         await send_wake_candidate(pcm, mode, reference, generation, diagnostics, phrases)
                         continue
-                    await send_transcript("final", pcm, mode, reference, generation, diagnostics)
+                    await send_transcript(
+                        "final",
+                        pcm,
+                        mode,
+                        reference,
+                        generation,
+                        diagnostics,
+                        cached_text=cached_text,
+                    )
     except WebSocketDisconnect:
         return
     finally:
@@ -697,3 +863,44 @@ async def replay_transcription(request: Request, language: str = "uk"):
             "endpoint_reason": "replay",
         },
     }
+
+
+@app.post("/v1/audio/duplex/regression")
+async def duplex_regression(request: DuplexRegressionRequest):
+    if engine is None or recognizer is None:
+        raise HTTPException(status_code=503, detail="The local voice runtime is unavailable.")
+    if not engine.status(request.mode)["ready"]:
+        raise HTTPException(
+            status_code=503,
+            detail=engine.status(request.mode).get("error") or f"The '{request.mode}' voice model is loading.",
+        )
+    if not recognizer.status()["ready"]:
+        raise HTTPException(status_code=503, detail=recognizer.status().get("error") or "The local STT model is loading.")
+
+    async def synthesize(text: str):
+        wav, _cached, _prepare_ms, _synthesis_ms = await asyncio.to_thread(
+            engine.synthesize,
+            text,
+            request.voice,
+            request.mode,
+            1,
+        )
+        pcm, _diagnostics = decode_wav_pcm16(wav)
+        return pcm
+
+    async def transcribe(pcm: bytes, language: str):
+        return await recognizer.transcribe(pcm, language.split("-", 1)[0].lower() or None)
+
+    async def detect_wake(pcm: bytes, language: str, phrases: list[str]):
+        if wake_recognizer is None or not wake_recognizer.status()["ready"]:
+            error = wake_recognizer.status().get("error") if wake_recognizer else None
+            return {"matched": False, "text": "", "error": error or "The wake-word recognizer is unavailable."}
+        return await wake_recognizer.detect(pcm, language.split("-", 1)[0].lower() or None, phrases)
+
+    return await run_duplex_regression(
+        synthesize,
+        transcribe,
+        detect_wake,
+        request.language.split("-", 1)[0].lower() or "uk",
+        f"{request.mode}:{request.voice}",
+    )

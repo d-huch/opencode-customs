@@ -4,6 +4,10 @@
 <h1 align="center">OpenCode Customs</h1>
 <p align="center">A desktop-focused, repository-aware customization of OpenCode.</p>
 
+OpenCode Customs includes an optional local duplex voice runtime. Its streaming path incrementally recognizes microphone
+audio and begins playing bounded raw PCM chunks before the full response is ready. The selected local STT and TTS
+models remain explicit: the voice runtime does not silently switch to Apple services or another local model.
+
 > [!NOTE]
 > OpenCode Customs is an independent customization built on the open-source
 > [OpenCode](https://github.com/anomalyco/opencode) project. It is not an official OpenCode release and is not
@@ -43,6 +47,10 @@ model:
   restoration, pinning, expiration, conflict resolution, usage-history inspection, deletion, and clearing. A
   deterministic preview-before-apply consolidation pass merges duplicates, reviews conflicts, ages stale confidence,
   strengthens independently reconfirmed reusable rules, archives unused records, and never mutates pinned memory.
+- A local full-duplex voice path with incremental tail-only STT, live partial transcripts, streamed bilingual TTS, and
+  gapless `AudioWorklet` PCM playback. Exact playback PCM feeds a residual echo canceller after native WebRTC echo
+  cancellation, so barge-in does not depend on volume or recognized-text overlap alone. Adaptive buffering absorbs synthesis jitter, durable diagnostics expose time to
+  first sound and underruns, and barge-in cancels playback and the active turn without an Apple or hidden model fallback.
 - Resource-aware prompt admission for custom models, including conservative fallback limits, full-request preflight,
   budgeted tool/system context, bounded history compaction, a live context-usage indicator, and protection from duplicate
   title-generation requests on the active model. Interactive turns degrade to a smaller context under critical macOS
@@ -136,7 +144,8 @@ model:
 - A desktop voice agent with push-to-talk dictation and a hands-free Jarvis conversation mode. A persistent local
   full-duplex stream uses WebRTC echo cancellation, a 1.5-second pre-roll buffer, VAD, and streaming Whisper STT. Live partial
   transcription is visible in the composer, and two-stage semantic endpointing distinguishes a finished request from a
-  short pause inside an unfinished phrase before submitting it. In-chat voice diagnostics expose microphone activity,
+  short pause inside an unfinished phrase before submitting it. Endpoint timing follows received audio rather than model
+  processing time, and unchanged endpoint transcripts are reused for final delivery instead of being decoded twice. In-chat voice diagnostics expose microphone activity,
   VAD state, STT phase, pre-roll, recognition latency, and the endpoint decision. Completed response sentences are spoken
   while the model is still generating. Speaking over the response
   interrupts both playback and the active model turn, then submits the new utterance through the same durable request
@@ -148,7 +157,11 @@ model:
   total latency, identifies the bottleneck, and renders bounded microphone-level waveforms. A built-in Voice Regression
   Runner exercises Ukrainian and English TTS-to-STT round trips plus silence and deterministic background-noise cases,
   reports WER/CER, language, punctuation, and latency, compares a saved baseline, and exports JSON or HTML reports. Raw
-  microphone audio is not retained automatically. An optional configurable wake-phrase gate keeps background
+  microphone audio is not retained automatically. A separate Live Duplex Regression Runner injects deterministic PCM
+  through the production VAD, semantic endpointing, pre-roll, streaming STT, wake-word, and client echo/barge-in rules.
+  It covers self-echo rejection, interruption, preserved speech starts, internal pauses, wake commands, background noise,
+  and the complete wake-to-interruption cycle, with durable diagnostics and baseline comparison.
+  An optional configurable wake-phrase gate keeps background
   conversation out of the request pipeline, strips the activation phrase from the submitted command, and opens a bounded
   follow-up window for natural conversation. The wake listener can be started automatically only after the user enables
   that setting; no secondary or fallback model is selected for activation.

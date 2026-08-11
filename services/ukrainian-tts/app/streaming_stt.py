@@ -1,7 +1,6 @@
 import asyncio
 import io
 import os
-import time
 import wave
 from collections import deque
 from difflib import SequenceMatcher
@@ -20,9 +19,12 @@ STT_FRAME_MS = 20
 STT_FRAME_BYTES = STT_SAMPLE_RATE * STT_FRAME_MS // 1000 * 2
 STT_PRE_ROLL_MS = int(os.getenv("STT_PRE_ROLL_MS", "1500"))
 STT_SILENCE_MS = int(os.getenv("STT_SILENCE_MS", "700"))
+STT_ENDPOINT_COMMIT_MS = max(STT_SILENCE_MS, int(os.getenv("STT_ENDPOINT_COMMIT_MS", "1000")))
 STT_SEMANTIC_GRACE_MS = int(os.getenv("STT_SEMANTIC_GRACE_MS", "1800"))
 STT_PARTIAL_MS = int(os.getenv("STT_PARTIAL_MS", "900"))
 STT_MAX_UTTERANCE_MS = int(os.getenv("STT_MAX_UTTERANCE_MS", "20000"))
+STT_STREAM_WINDOW_MS = int(os.getenv("STT_STREAM_WINDOW_MS", "6000"))
+STT_STREAM_COMMIT_MARGIN_MS = int(os.getenv("STT_STREAM_COMMIT_MARGIN_MS", "1600"))
 STT_MIN_SPEECH_MS = int(os.getenv("STT_MIN_SPEECH_MS", "180"))
 STT_VAD_MODE = int(os.getenv("STT_VAD_MODE", "2"))
 STT_WAKE_MATCH_THRESHOLD = float(os.getenv("STT_WAKE_MATCH_THRESHOLD", "0.78"))
@@ -142,15 +144,23 @@ def find_wake_phrase(words: list[dict], phrases: list[str]):
         (
             phrase,
             start,
-            start + len(tokens),
-            SequenceMatcher(
-                None,
-                " ".join(item["normalized"] for item in words[start : start + len(tokens)]),
-                " ".join(tokens),
-            ).ratio(),
+            start + length,
+            max(
+                SequenceMatcher(
+                    None,
+                    " ".join(item["normalized"] for item in words[start : start + length]),
+                    " ".join(tokens),
+                ).ratio(),
+                SequenceMatcher(
+                    None,
+                    "".join(item["normalized"] for item in words[start : start + length]),
+                    "".join(tokens),
+                ).ratio(),
+            ),
         )
         for phrase, tokens in candidates
-        for start in range(max(0, len(words) - len(tokens) + 1))
+        for length in range(max(1, len(tokens) - 1), min(len(words), len(tokens) + 2) + 1)
+        for start in range(len(words) - length + 1)
     ]
     if not windows:
         return None
@@ -200,6 +210,7 @@ class StreamingRecognizer:
             "frame_ms": STT_FRAME_MS,
             "pre_roll_ms": STT_PRE_ROLL_MS,
             "silence_ms": STT_SILENCE_MS,
+            "endpoint_commit_ms": STT_ENDPOINT_COMMIT_MS,
             "semantic_grace_ms": STT_SEMANTIC_GRACE_MS,
         }
 
@@ -219,6 +230,61 @@ class StreamingRecognizer:
                 word_timestamps=False,
             )
             return " ".join(segment.text.strip() for segment in segments if segment.text.strip()).strip()
+
+    async def transcribe_incremental(
+        self,
+        pcm: bytes,
+        language: str | None,
+        state: "IncrementalRecognitionState",
+        generation: int,
+        final: bool = False,
+    ):
+        if self.model is None:
+            raise RuntimeError(self.error or "The local STT model is still loading.")
+        if state.generation != generation or state.committed_bytes > len(pcm):
+            state.reset(generation)
+        pending = pcm[state.committed_bytes :]
+        samples = np.frombuffer(pending, dtype="<i2").astype(np.float32) / 32768
+        async with self.lock:
+            segments, _info = await asyncio.to_thread(
+                self.model.transcribe,
+                samples,
+                language=language,
+                beam_size=1,
+                best_of=1,
+                condition_on_previous_text=False,
+                initial_prompt=state.committed_text[-500:] or None,
+                vad_filter=False,
+                word_timestamps=False,
+            )
+            materialized = list(segments)
+        state.decode_count += 1
+        pending_ms = round(len(pending) / 2 / STT_SAMPLE_RATE * 1000)
+        commit_before = max(0, pending_ms - STT_STREAM_COMMIT_MARGIN_MS) / 1000
+        commit_count = 0
+        if not final and pending_ms >= STT_STREAM_WINDOW_MS:
+            for segment in materialized:
+                if segment.end is None or segment.end > commit_before:
+                    break
+                commit_count += 1
+        committed = materialized[:commit_count]
+        if committed:
+            state.committed_text = " ".join(
+                item for item in [state.committed_text, *(segment.text.strip() for segment in committed)] if item
+            ).strip()
+            advance = int(committed[-1].end * STT_SAMPLE_RATE * 2)
+            advance -= advance % STT_FRAME_BYTES
+            state.committed_bytes += max(0, advance)
+        tail = materialized[commit_count:]
+        text = " ".join(
+            item for item in [state.committed_text, *(segment.text.strip() for segment in tail)] if item
+        ).strip()
+        return text, {
+            "incremental_decode": True,
+            "decode_count": state.decode_count,
+            "decoded_audio_ms": pending_ms,
+            "committed_audio_ms": round(state.committed_bytes / 2 / STT_SAMPLE_RATE * 1000),
+        }
 
     async def transcribe_words(self, pcm: bytes, language: str | None):
         if self.model is None:
@@ -269,6 +335,20 @@ class WakeWordRecognizer(StreamingRecognizer):
         }
 
 
+class IncrementalRecognitionState:
+    def __init__(self):
+        self.generation = 0
+        self.committed_bytes = 0
+        self.committed_text = ""
+        self.decode_count = 0
+
+    def reset(self, generation: int):
+        self.generation = generation
+        self.committed_bytes = 0
+        self.committed_text = ""
+        self.decode_count = 0
+
+
 class DuplexSession:
     def __init__(self):
         self.vad = webrtcvad.Vad(STT_VAD_MODE)
@@ -278,12 +358,14 @@ class DuplexSession:
         self.pending = bytearray()
         self.pre_roll: deque[bytes] = deque(maxlen=max(1, STT_PRE_ROLL_MS // STT_FRAME_MS))
         self.utterance = bytearray()
+        self.utterance_frames = 0
         self.speech_frames = 0
         self.silence_frames = 0
-        self.started_at = 0.0
-        self.partial_at = 0.0
+        self.partial_frame = 0
         self.generation = 0
         self.transcript = ""
+        self.transcript_text = ""
+        self.transcript_speech_frames = 0
         self.transcript_stability = 0
         self.endpoint_candidate = False
         self.wake_enabled = False
@@ -328,10 +410,10 @@ class DuplexSession:
             if not voiced:
                 return []
             self.utterance.extend(b"".join(self.pre_roll))
+            self.utterance_frames = 1
             self.speech_frames = 1
             self.silence_frames = 0
-            self.started_at = time.monotonic()
-            self.partial_at = self.started_at
+            self.partial_frame = 1
             self.generation += 1
             return [
                 {
@@ -343,16 +425,22 @@ class DuplexSession:
             ]
 
         self.utterance.extend(frame)
+        self.utterance_frames += 1
         self.speech_frames += 1 if voiced else 0
         self.silence_frames = 0 if voiced else self.silence_frames + 1
         if voiced and self.endpoint_candidate:
             self.endpoint_candidate = False
             self.transcript = ""
+            self.transcript_text = ""
+            self.transcript_speech_frames = 0
             self.transcript_stability = 0
-        elapsed_ms = (time.monotonic() - self.started_at) * 1000
         events = []
-        if not self.wake_armed and (time.monotonic() - self.partial_at) * 1000 >= STT_PARTIAL_MS:
-            self.partial_at = time.monotonic()
+        if (
+            not self.wake_armed
+            and not self.endpoint_candidate
+            and (self.utterance_frames - self.partial_frame) * STT_FRAME_MS >= STT_PARTIAL_MS
+        ):
+            self.partial_frame = self.utterance_frames
             events.append({"type": "partial_ready", "generation": self.generation})
         enough_speech = self.speech_frames * STT_FRAME_MS >= STT_MIN_SPEECH_MS
         silence_ms = self.silence_frames * STT_FRAME_MS
@@ -361,7 +449,7 @@ class DuplexSession:
             diagnostics = self.diagnostics("noise_discarded")
             self.reset_utterance()
             return [{"type": "discard", "diagnostics": diagnostics}]
-        if elapsed_ms >= STT_MAX_UTTERANCE_MS:
+        if self.utterance_frames * STT_FRAME_MS >= STT_MAX_UTTERANCE_MS:
             events.append(
                 {
                     "type": "final_ready",
@@ -381,7 +469,11 @@ class DuplexSession:
                 }
             )
             return events
-        if semantic_complete(self.transcript, self.language, self.transcript_stability):
+        if silence_ms >= STT_ENDPOINT_COMMIT_MS and semantic_complete(
+            self.transcript_text,
+            self.language,
+            self.transcript_stability,
+        ):
             events.append(
                 {
                     "type": "final_ready",
@@ -401,17 +493,27 @@ class DuplexSession:
             return events
         if not self.endpoint_candidate:
             self.endpoint_candidate = True
+            events = [event for event in events if event["type"] != "partial_ready"]
             events.append({"type": "endpoint_ready", "generation": self.generation})
         return events
 
-    def observe_transcript(self, text: str, generation: int):
+    def observe_transcript(self, text: str, generation: int, speech_frames: int | None = None):
         if generation != self.generation or not self.utterance:
+            return
+        if speech_frames is not None and speech_frames != self.speech_frames:
             return
         normalized = normalize_transcript(text)
         if not normalized:
             return
         self.transcript_stability = self.transcript_stability + 1 if normalized == self.transcript else 1
         self.transcript = normalized
+        self.transcript_text = text.strip()
+        self.transcript_speech_frames = speech_frames if speech_frames is not None else self.speech_frames
+
+    def cached_transcript(self):
+        if not self.transcript_text or self.transcript_speech_frames != self.speech_frames:
+            return ""
+        return self.transcript_text
 
     def diagnostics(self, reason: str | None = None):
         return {
@@ -421,6 +523,7 @@ class DuplexSession:
             "silence_ms": self.silence_frames * STT_FRAME_MS,
             "pre_roll_ms": STT_PRE_ROLL_MS,
             "transcript_stability": self.transcript_stability,
+            "transcript_cache_ready": bool(self.cached_transcript()),
             "endpoint_reason": reason,
             "wake_armed": self.wake_armed,
         }
@@ -439,10 +542,12 @@ class DuplexSession:
 
     def reset_utterance(self):
         self.utterance.clear()
+        self.utterance_frames = 0
         self.speech_frames = 0
         self.silence_frames = 0
-        self.started_at = 0.0
-        self.partial_at = 0.0
+        self.partial_frame = 0
         self.transcript = ""
+        self.transcript_text = ""
+        self.transcript_speech_frames = 0
         self.transcript_stability = 0
         self.endpoint_candidate = False
