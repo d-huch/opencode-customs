@@ -52,6 +52,19 @@ export type Decision = {
 
 export type EvidenceState = "missing" | "completed" | "failed"
 
+export function classifierModel<T extends { readonly providerID: string; readonly id: string }>(input: {
+  readonly primary: T
+  readonly utility: T | undefined
+}) {
+  if (
+    input.utility &&
+    (input.utility.providerID !== input.primary.providerID || input.utility.id !== input.primary.id)
+  )
+    return input.utility
+  if (input.primary.providerID === "lmstudio") return
+  return input.primary
+}
+
 const memoryCategories = new Set<MemoryCategory>(["identity", "preference", "constraint", "decision", "context"])
 const memoryScopes = new Set<MemoryScope>(["global", "cross-project", "project", "session", "pattern"])
 const classifierCache = new Map<string, { readonly expires: number; readonly decision: Decision }>()
@@ -166,16 +179,13 @@ export function classify(input: {
     maxOutputTokens: 140,
     abortSignal: input.signal,
     providerOptions: input.providerOptions,
-  }).then(
-    (result): Decision => {
-      const decision = parse(result.text, query)
-      if (decision.source !== "model") return decision
-      classifierCache.set(key, { expires: Date.now() + CLASSIFIER_CACHE_MS, decision })
-      if (classifierCache.size > CLASSIFIER_CACHE_SIZE) classifierCache.delete(classifierCache.keys().next().value!)
-      return decision
-    },
-    () => conservative(query),
-  )
+  }).then((result): Decision => {
+    const decision = parse(result.text, query)
+    if (decision.source !== "model") return decision
+    classifierCache.set(key, { expires: Date.now() + CLASSIFIER_CACHE_MS, decision })
+    if (classifierCache.size > CLASSIFIER_CACHE_SIZE) classifierCache.delete(classifierCache.keys().next().value!)
+    return decision
+  })
 }
 
 export function parse(value: string, query: string): Decision {

@@ -8,7 +8,7 @@ import { acquireModel } from "@/local-agent-runtime/resource-governor"
 import type { Provider } from "@/provider/provider"
 
 describe("LM Studio model switcher", () => {
-  test("keeps the selected model and performs no routing calls when global routing is disabled", async () => {
+  test("keeps a capable selected model without switching when global routing is disabled", async () => {
     const requests: string[] = []
     const selected = model("selected", "selected-instance")
     const result = await ModelSwitcher.activate({
@@ -23,10 +23,7 @@ describe("LM Studio model switcher", () => {
       preferredModel: selected,
       requestShape: { textCharacters: 2_000, files: 1, images: 0, tools: 5 },
       resources: healthyResources(),
-      request: async (input, init) => {
-        requests.push(`${init?.method ?? "GET"} ${new URL(String(input)).pathname}`)
-        return Response.json({})
-      },
+      request: bridge([native("selected", "selected-instance", { tools: true })], requests),
     })
 
     expect(result.model).toBe(selected)
@@ -37,7 +34,67 @@ describe("LM Studio model switcher", () => {
       failover: false,
     })
     expect(result.plan.reason).toContain("routing.disabled")
-    expect(requests).toEqual([])
+    expect(requests).toEqual(["GET /api/v1/models"])
+    expect(requests.some((request) => request.startsWith("POST "))).toBe(false)
+  })
+
+  test("caps a manually selected model to the independent chat context", async () => {
+    const result = await ModelSwitcher.activate({
+      config: {
+        provider: {
+          lmstudio: {
+            auto_route: false,
+            options: { baseURL: "http://switch-chat-context.test/v1" },
+          },
+        },
+      },
+      preferredModel: {
+        ...model("selected", "selected-instance"),
+        limit: { context: 91_648, output: 1_024 },
+      },
+      contextLimit: 32_768,
+      requestShape: { textCharacters: 30, files: 0, images: 0, tools: 0 },
+      resources: healthyResources(),
+      request: bridge([native("selected", "selected-instance", {}, 91_648, 20 * 1024 ** 3)], []),
+    })
+
+    expect(result.model.limit.context).toBe(32_768)
+  })
+
+  test("reapplies a chat context cap to a model restored from a durable checkpoint", () => {
+    expect(
+      ModelSwitcher.withContextLimit(
+        {
+          ...model("selected", "selected-instance"),
+          limit: { context: 91_648, input: 80_000, output: 8_192 },
+        },
+        16_384,
+      ).limit,
+    ).toEqual({ context: 16_384, input: 16_384, output: 4_096 })
+  })
+
+  test("rejects a weak primary model instead of silently using it when routing is disabled", async () => {
+    const requests: string[] = []
+    const result = await ModelSwitcher.activate({
+      config: {
+        provider: {
+          lmstudio: {
+            auto_route: false,
+            options: { baseURL: "http://switch-disabled-weak.test/v1" },
+          },
+        },
+      },
+      preferredModel: model("small", "small-instance"),
+      requestShape: { textCharacters: 2_000, files: 1, images: 0, tools: 5 },
+      resources: healthyResources(),
+      request: bridge([native("small", "small-instance", { tools: true }, 16_384, 4 * 1024 ** 3)], requests),
+    })
+
+    expect(result.plan.activation).toMatchObject({ status: "failed", attempts: 0, failover: false })
+    expect(result.plan.activation?.reason).toContain("routing.disabled")
+    expect(result.plan.activation?.reason).toContain("manual.primary_too_small")
+    expect(ModelSwitcher.failureMessage(result)).toContain("below the configured minimum size")
+    expect(requests.some((request) => request.startsWith("POST "))).toBe(false)
   })
 
   test("hands a session to an already loaded compatible model without a load request", async () => {
@@ -152,8 +209,7 @@ describe("LM Studio model switcher", () => {
     let loadBody: Record<string, unknown> | undefined
     const request: LmStudioRequest = async (input, init) => {
       const url = new URL(String(input))
-      if (url.pathname === "/v1/models")
-        return Response.json({ data: [...loaded.values()].map((id) => ({ id })) })
+      if (url.pathname === "/v1/models") return Response.json({ data: [...loaded.values()].map((id) => ({ id })) })
       if (url.pathname === "/api/v1/models")
         return Response.json({
           models: [native("target", loaded.get("target"), { tools: true, reasoning: true }, 12_288)],
@@ -513,7 +569,7 @@ function native(
   instanceID?: string,
   capabilities: { tools?: boolean; reasoning?: boolean; vision?: boolean } = {},
   context = 32_768,
-  sizeBytes?: number,
+  sizeBytes = 16 * 1024 ** 3,
 ) {
   return {
     key,

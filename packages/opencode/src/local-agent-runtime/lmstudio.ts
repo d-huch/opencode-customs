@@ -49,6 +49,8 @@ export type LmStudioModel = LmStudioProbe["models"][number]
 
 const cache = new Map<string, { expires: number; value: Promise<LmStudioProbe> }>()
 const requestCache = new WeakMap<LmStudioRequest, Map<string, { expires: number; value: Promise<LmStudioProbe> }>>()
+const refreshCache = new Map<string, { expires: number; value: Promise<LmStudioProbe> }>()
+const requestRefreshCache = new WeakMap<LmStudioRequest, Map<string, { expires: number; value: Promise<LmStudioProbe> }>>()
 
 export function probeLmStudio(input: {
   baseURL: unknown
@@ -64,13 +66,14 @@ export function probeLmStudio(input: {
     input.onCache?.("bypass")
     return Promise.resolve(unconfigured())
   }
-  if (input.refresh) {
-    input.onCache?.("bypass")
-    return executeProbe(endpoints, input)
-  }
-
   const key = `${endpoints.baseURL}\0${typeof input.apiKey === "string" ? input.apiKey : ""}`
-  const bucket = input.request ? requestProbeCache(input.request) : cache
+  const bucket = input.refresh
+    ? input.request
+      ? requestProbeCache(input.request, requestRefreshCache)
+      : refreshCache
+    : input.request
+      ? requestProbeCache(input.request, requestCache)
+      : cache
   const hit = bucket.get(key)
   if (hit && hit.expires > Date.now()) {
     input.onCache?.("hit")
@@ -79,7 +82,10 @@ export function probeLmStudio(input: {
 
   input.onCache?.("miss")
   const value = executeProbe(endpoints, input)
-  bucket.set(key, { expires: Date.now() + (input.cacheMs ?? 30_000), value })
+  bucket.set(key, {
+    expires: Date.now() + (input.refresh ? Math.min(input.cacheMs ?? 1_000, 1_000) : (input.cacheMs ?? 30_000)),
+    value,
+  })
   return value
 }
 
@@ -163,10 +169,10 @@ async function executeProbe(
 ) {
   const started = Date.now()
   const headers = typeof input.apiKey === "string" ? { Authorization: `Bearer ${input.apiKey}` } : undefined
-  const [native, openai] = await Promise.all([
-    requestJSON(endpoints.native, headers, input.request, input.timeoutMs),
-    requestJSON(endpoints.openai, headers, input.request, input.timeoutMs),
-  ])
+  const native = await requestJSON(endpoints.native, headers, input.request, input.timeoutMs)
+  const openai = native.ok
+    ? { ok: true, status: native.status, body: undefined, inferred: true as const }
+    : await requestJSON(endpoints.openai, headers, input.request, input.timeoutMs)
   const nativeModels = parseNativeModels(native.body)
   const known = new Set(nativeModels.flatMap((model) => [model.id, ...model.instances]))
   const models: LmStudioModel[] = [
@@ -185,7 +191,7 @@ async function executeProbe(
   ]
   const available = native.ok || openai.ok
   const unauthorized = !available && [native.status, openai.status].some((status) => status === 401 || status === 403)
-  const status = native.ok && openai.ok ? "ready" : available ? "degraded" : unauthorized ? "unauthorized" : "offline"
+  const status = native.ok ? "ready" : available ? "degraded" : unauthorized ? "unauthorized" : "offline"
 
   return {
     provider: "lmstudio" as const,
@@ -363,18 +369,25 @@ function managementError(action: "load" | "unload", response: { status?: number;
   return `LM Studio model ${action} failed${response.status ? ` (HTTP ${response.status})` : ""}${detail ? `: ${detail}` : response.error ? `: ${response.error}` : ""}`
 }
 
-function requestProbeCache(request: LmStudioRequest) {
-  const existing = requestCache.get(request)
+function requestProbeCache(
+  request: LmStudioRequest,
+  store: WeakMap<LmStudioRequest, Map<string, { expires: number; value: Promise<LmStudioProbe> }>>,
+) {
+  const existing = store.get(request)
   if (existing) return existing
   const created = new Map<string, { expires: number; value: Promise<LmStudioProbe> }>()
-  requestCache.set(request, created)
+  store.set(request, created)
   return created
 }
 
 function clearProbeCache(baseURL: string, request?: LmStudioRequest) {
-  const bucket = request ? requestCache.get(request) : cache
-  if (!bucket) return
-  for (const key of bucket.keys()) if (key.startsWith(`${baseURL}\0`)) bucket.delete(key)
+  const buckets = request
+    ? [requestCache.get(request), requestRefreshCache.get(request)]
+    : [cache, refreshCache]
+  for (const bucket of buckets) {
+    if (!bucket) continue
+    for (const key of bucket.keys()) if (key.startsWith(`${baseURL}\0`)) bucket.delete(key)
+  }
 }
 
 function positiveInt(value: unknown) {

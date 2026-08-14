@@ -24,7 +24,7 @@ export type TimelineRowMap = {
     group: PartGroup
     previousAssistantPart: boolean
   }
-  Thinking: { userMessageID: string; reasoningHeading?: string; status: SessionStatus["type"] }
+  Thinking: { userMessageID: string; reasoningHeading?: string; status: SessionStatus }
   Retry: { userMessageID: string }
   DiffSummary: { userMessageID: string; diffs: SummaryDiff[] }
   Error: { userMessageID: string; text: string }
@@ -37,7 +37,7 @@ export namespace Timeline {
     assistantMessages: AssistantMessage[],
     index: number,
     showReasoning: boolean,
-    status: SessionStatus["type"],
+    status: SessionStatus,
     isActive: boolean,
     // v2 renders comments inside the user message attachments row instead of a strip row
     inlineComments: boolean,
@@ -124,11 +124,7 @@ export namespace Timeline {
       assistantGroupIndex += 1
     })
 
-    if (
-      isActive &&
-      ["busy", "verifying", "repairing", "verified"].includes(status) &&
-      !error
-    ) {
+    if (isActive && ["busy", "cache_restore", "verifying", "repairing", "verified"].includes(status.type) && !error) {
       const heading = assistantMessages
         .flatMap((message) => getMessageParts(message.id))
         .map((part) => (part.type === "reasoning" && part.text ? reasoningHeading(part.text) : undefined))
@@ -143,10 +139,10 @@ export namespace Timeline {
       )
     }
 
-    if (isActive && status === "retry") rows.push(new TimelineRow.Retry({ userMessageID: userMessage.id }))
+    if (isActive && status.type === "retry") rows.push(new TimelineRow.Retry({ userMessageID: userMessage.id }))
 
     const diffs = uniqueSummaryDiffs(userMessage.summary?.diffs)
-    if (diffs.length > 0 && (status === "idle" || !isActive)) {
+    if (diffs.length > 0 && (status.type === "idle" || !isActive)) {
       rows.push(
         new TimelineRow.DiffSummary({
           userMessageID: userMessage.id,

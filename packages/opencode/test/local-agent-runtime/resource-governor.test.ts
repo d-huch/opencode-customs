@@ -4,6 +4,7 @@ import {
   isLocalModelCrash,
   minimumManagedContext,
   parseMacAvailableMemory,
+  providerContextBudget,
   rejectForPressure,
   safeContextBudget,
   snapshot,
@@ -110,6 +111,25 @@ Anonymous pages:                            1240000.`),
     expect(healthy.safeInputTokens).toBe(10_649)
     expect(pressured.safeInputTokens).toBe(8_192)
     expect(critical.safeInputTokens).toBe(4_915)
+  })
+
+  test("counts provider cache tokens when deciding whether a response chain can continue", () => {
+    expect(
+      providerContextBudget({
+        contextLimit: 16_384,
+        providerTokens: 13_100,
+        cachedTokens: 11_000,
+        currentTokens: 500,
+      }),
+    ).toEqual({ usedTokens: 13_600, headroom: 1_638, remainingTokens: 1_146, allowed: true })
+    expect(
+      providerContextBudget({
+        contextLimit: 16_384,
+        providerTokens: 14_500,
+        cachedTokens: 12_000,
+        currentTokens: 500,
+      }).allowed,
+    ).toBe(false)
   })
 
   test("keeps interactive requests available while background work remains pressure-gated", () => {

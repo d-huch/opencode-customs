@@ -16,11 +16,21 @@ import { createUpdaterSubscriptions } from "./updater-subscriptions"
 import { createNativeVoiceController } from "./native-voice"
 import { synthesizeLocalSpeech, type LocalTTSInput } from "./local-tts"
 import {
+  clearFishAudioLocalReference,
+  getFishAudioLocalReference,
+  getFishAudioLocalStatus,
+  setFishAudioLocalReference,
+  type FishAudioLocalReferenceInput,
+} from "./fish-audio"
+import {
   appendVoiceDiagnostic,
   clearVoiceDiagnostics,
   exportVoiceDiagnostics,
   getVoiceDiagnostics,
+  getVoiceTurnAudio,
+  storeVoiceTurnAudio,
   type VoiceDiagnosticInput,
+  type VoiceTurnAudioInput,
 } from "./voice-diagnostics"
 
 const pickerFilters = (ext?: string[]) => {
@@ -39,6 +49,7 @@ type Deps = {
   setDefaultServerUrl: (url: string | null) => Promise<void> | void
   isFirstLaunchOnboardingPending: () => Promise<boolean> | boolean
   finishFirstLaunchOnboarding: (createDefaultProject: boolean) => Promise<string | null> | string | null
+  ensureChatWorkspace: () => Promise<string> | string
   isOldLayoutEligible: () => Promise<boolean> | boolean
   getDisplayBackend: () => Promise<string | null>
   setDisplayBackend: (backend: string | null) => Promise<void> | void
@@ -72,6 +83,7 @@ export function registerIpcHandlers(deps: Deps) {
   ipcMain.handle("finish-first-launch-onboarding", (_event: IpcMainInvokeEvent, createDefaultProject: boolean) =>
     deps.finishFirstLaunchOnboarding(createDefaultProject),
   )
+  ipcMain.handle("ensure-chat-workspace", () => deps.ensureChatWorkspace())
   ipcMain.handle("is-old-layout-eligible", () => deps.isOldLayoutEligible())
   ipcMain.handle("get-display-backend", () => deps.getDisplayBackend())
   ipcMain.handle("set-display-backend", (_event: IpcMainInvokeEvent, backend: string | null) =>
@@ -242,6 +254,14 @@ export function registerIpcHandlers(deps: Deps) {
       localSpeech.delete(event.sender.id)
     })
   })
+  ipcMain.handle("get-fish-audio-local-reference", () => getFishAudioLocalReference())
+  ipcMain.handle("get-fish-audio-local-status", (_event: IpcMainInvokeEvent, endpoint: string) =>
+    getFishAudioLocalStatus(endpoint),
+  )
+  ipcMain.handle("set-fish-audio-local-reference", (_event: IpcMainInvokeEvent, input: FishAudioLocalReferenceInput) =>
+    setFishAudioLocalReference(input),
+  )
+  ipcMain.handle("clear-fish-audio-local-reference", () => clearFishAudioLocalReference())
   ipcMain.handle("cancel-local-speech", (event: IpcMainInvokeEvent) => {
     localSpeech.get(event.sender.id)?.abort()
     localSpeech.delete(event.sender.id)
@@ -257,6 +277,12 @@ export function registerIpcHandlers(deps: Deps) {
   )
   ipcMain.handle("export-voice-diagnostics", (_event: IpcMainInvokeEvent, sessionID: string) =>
     exportVoiceDiagnostics(sessionID),
+  )
+  ipcMain.handle("store-voice-turn-audio", (_event: IpcMainInvokeEvent, input: VoiceTurnAudioInput) =>
+    storeVoiceTurnAudio(input),
+  )
+  ipcMain.handle("get-voice-turn-audio", (_event: IpcMainInvokeEvent, sessionID: string, turnID: string) =>
+    getVoiceTurnAudio(sessionID, turnID),
   )
 
   ipcMain.on("show-notification", (_event: IpcMainEvent, title: string, body?: string) => {

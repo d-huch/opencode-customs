@@ -80,6 +80,20 @@ describe("session freshness", () => {
     source: "model",
   }
 
+  test("never reuses the primary LM Studio model for hidden classification", () => {
+    const primary = { providerID: "lmstudio", id: "primary-26b" }
+    expect(SessionFreshness.classifierModel({ primary, utility: undefined })).toBeUndefined()
+    expect(SessionFreshness.classifierModel({ primary, utility: primary })).toBeUndefined()
+
+    const utility = { providerID: "lmstudio", id: "utility-1b" }
+    expect(SessionFreshness.classifierModel({ primary, utility })).toBe(utility)
+  })
+
+  test("preserves the existing classifier path for non-local providers", () => {
+    const primary = { providerID: "test-provider", id: "primary" }
+    expect(SessionFreshness.classifierModel({ primary, utility: undefined })).toBe(primary)
+  })
+
   test("persists and restores a decision on the genuine user text", () => {
     const part: SessionV1.TextPart = {
       id: PartID.make("prt_user"),

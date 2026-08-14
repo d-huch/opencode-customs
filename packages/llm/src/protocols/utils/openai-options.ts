@@ -50,6 +50,11 @@ export const store = (request: LLMRequest): boolean | undefined => {
   return typeof value === "boolean" ? value : undefined
 }
 
+export const previousResponseId = (request: LLMRequest) => {
+  const value = options(request)?.previousResponseId
+  return typeof value === "string" ? value : undefined
+}
+
 export const reasoningEffort = (request: LLMRequest): ReasoningEffort | undefined => {
   const value = options(request)?.reasoningEffort
   return isAnyReasoningEffort(value) ? value : undefined

@@ -7,7 +7,7 @@ import { useSpring } from "@opencode-ai/ui/motion-spring"
 import { TextReveal } from "@opencode-ai/ui/text-reveal"
 import { TextStrikethrough } from "@opencode-ai/ui/text-strikethrough"
 import { createResizeObserver } from "@solid-primitives/resize-observer"
-import { Index, createEffect, createMemo } from "solid-js"
+import { Index, createEffect, createMemo, onCleanup } from "solid-js"
 import { createStore } from "solid-js/store"
 import { useLanguage } from "@/context/language"
 
@@ -83,11 +83,19 @@ export function SessionTodoDock(props: {
   createEffect(() => {
     const el = contentRef
     if (!el) return
+    let frame: number | undefined
     const update = () => {
-      setStore("height", (height) => Math.max(height, el.scrollHeight))
+      if (frame !== undefined) return
+      frame = requestAnimationFrame(() => {
+        frame = undefined
+        setStore("height", (height) => Math.max(height, el.scrollHeight))
+      })
     }
     update()
     createResizeObserver(el, update)
+    onCleanup(() => {
+      if (frame !== undefined) cancelAnimationFrame(frame)
+    })
   })
 
   return (

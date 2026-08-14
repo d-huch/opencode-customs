@@ -22,8 +22,18 @@ export type VoiceDiagnosticEntry = VoiceDiagnosticInput & {
 
 const directory = () => join(app.getPath("userData"), "voice-diagnostics")
 const safeSessionID = (sessionID: string) => sessionID.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 160) || "default"
+const safeTurnID = (turnID: string) => turnID.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 160) || "turn"
 const pathFor = (sessionID: string) => join(directory(), `${safeSessionID(sessionID)}.jsonl`)
+const audioDirectoryFor = (sessionID: string) => join(directory(), "audio", safeSessionID(sessionID))
+const audioPathFor = (sessionID: string, turnID: string) => join(audioDirectoryFor(sessionID), `${safeTurnID(turnID)}.wav`)
 const pending = new Map<string, Promise<void>>()
+
+export type VoiceTurnAudioInput = {
+  sessionID: string
+  turnID: string
+  pcm: ArrayBuffer
+  sampleRate: number
+}
 
 export async function appendVoiceDiagnostic(input: VoiceDiagnosticInput) {
   const path = pathFor(input.sessionID)
@@ -58,13 +68,72 @@ export async function getVoiceDiagnostics(sessionID: string) {
   return { path, entries }
 }
 
+export async function storeVoiceTurnAudio(input: VoiceTurnAudioInput) {
+  if (!Number.isFinite(input.sampleRate) || input.sampleRate < 8_000 || input.sampleRate > 192_000) {
+    throw new Error("Invalid voice diagnostic sample rate.")
+  }
+  if (input.pcm.byteLength === 0 || input.pcm.byteLength > 16 * 1024 * 1024 || input.pcm.byteLength % 2 !== 0) {
+    throw new Error("Invalid voice diagnostic PCM payload.")
+  }
+  const path = audioPathFor(input.sessionID, input.turnID)
+  const pcm = Buffer.from(input.pcm)
+  const wav = Buffer.alloc(44 + pcm.byteLength)
+  wav.write("RIFF", 0)
+  wav.writeUInt32LE(36 + pcm.byteLength, 4)
+  wav.write("WAVE", 8)
+  wav.write("fmt ", 12)
+  wav.writeUInt32LE(16, 16)
+  wav.writeUInt16LE(1, 20)
+  wav.writeUInt16LE(1, 22)
+  wav.writeUInt32LE(input.sampleRate, 24)
+  wav.writeUInt32LE(input.sampleRate * 2, 28)
+  wav.writeUInt16LE(2, 32)
+  wav.writeUInt16LE(16, 34)
+  wav.write("data", 36)
+  wav.writeUInt32LE(pcm.byteLength, 40)
+  pcm.copy(wav, 44)
+  await mkdir(audioDirectoryFor(input.sessionID), { recursive: true })
+  await writeFile(path, wav)
+  const files = await readdir(audioDirectoryFor(input.sessionID))
+  const dated = await Promise.all(
+    files.map(async (file) => ({ file, modified: (await stat(join(audioDirectoryFor(input.sessionID), file))).mtimeMs })),
+  )
+  await Promise.all(
+    dated
+      .sort((a, b) => b.modified - a.modified)
+      .slice(200)
+      .map((item) => rm(join(audioDirectoryFor(input.sessionID), item.file), { force: true })),
+  )
+  return {
+    path,
+    bytes: wav.byteLength,
+    durationMs: Math.round((pcm.byteLength / 2 / input.sampleRate) * 1_000),
+    sampleRate: input.sampleRate,
+  }
+}
+
+export async function getVoiceTurnAudio(sessionID: string, turnID: string) {
+  const path = audioPathFor(sessionID, turnID)
+  const contents = await readFile(path).catch(() => undefined)
+  if (!contents) return
+  return {
+    path,
+    contentType: "audio/wav",
+    audio: contents.buffer.slice(contents.byteOffset, contents.byteOffset + contents.byteLength) as ArrayBuffer,
+  }
+}
+
 export async function clearVoiceDiagnostics(sessionID?: string) {
   if (sessionID) {
     const path = pathFor(sessionID)
     await pending.get(path)
-    const bytes = await stat(path).then((value) => value.size, () => 0)
-    const removed = await rm(path, { force: true }).then(() => bytes > 0)
-    return { files: removed ? 1 : 0, bytes }
+    const audioFiles = await readdir(audioDirectoryFor(sessionID)).catch(() => [])
+    const sizes = await Promise.all([
+      stat(path).then((value) => value.size, () => 0),
+      ...audioFiles.map((file) => stat(join(audioDirectoryFor(sessionID), file)).then((value) => value.size, () => 0)),
+    ])
+    await Promise.all([rm(path, { force: true }), rm(audioDirectoryFor(sessionID), { recursive: true, force: true })])
+    return { files: sizes.filter((size) => size > 0).length, bytes: sizes.reduce((total, size) => total + size, 0) }
   }
   await Promise.all(pending.values())
   const files = await readdir(directory()).catch(() => [])

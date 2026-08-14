@@ -554,6 +554,7 @@ describe("OpenAI Responses route", () => {
           prompt: "think",
           providerOptions: {
             openai: {
+              previousResponseId: "resp_123",
               promptCacheKey: "session_123",
               reasoningEffort: "high",
               reasoningSummary: "auto",
@@ -564,6 +565,7 @@ describe("OpenAI Responses route", () => {
       )
 
       expect(prepared.body.store).toBe(false)
+      expect(prepared.body.previous_response_id).toBe("resp_123")
       expect(prepared.body.prompt_cache_key).toBe("session_123")
       expect(prepared.body.include).toEqual(["reasoning.encrypted_content"])
       expect(prepared.body.reasoning).toEqual({ effort: "high", summary: "auto" })

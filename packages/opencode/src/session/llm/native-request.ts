@@ -32,6 +32,7 @@ export type RequestInput = {
   readonly maxOutputTokens?: number
   readonly providerOptions?: LLMRequest["providerOptions"]
   readonly headers?: Record<string, string>
+  readonly responses?: boolean
 }
 
 const providerMetadata = (value: unknown): ProviderMetadata | undefined => {
@@ -168,6 +169,8 @@ export const model = (input: Provider.Model | RequestInput, headers?: Record<str
   if (model.api.npm === "@ai-sdk/anthropic") return Anthropic.configure(options).model(model.api.id)
   if (model.api.npm === "@ai-sdk/google") return Google.configure(options).model(model.api.id)
   if (model.api.npm === "@ai-sdk/amazon-bedrock") return AmazonBedrock.configure(options).model(model.api.id)
+  if (model.api.npm === "@ai-sdk/openai-compatible" && "responses" in input && input.responses)
+    return OpenAI.configure({ ...options, baseURL: requireBaseURL(model, url) }).responses(model.api.id)
   if (model.api.npm === "@ai-sdk/openai-compatible")
     return OpenAICompatible.configure({
       ...options,

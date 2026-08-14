@@ -12,6 +12,7 @@ from app.streaming_stt import (
     DuplexSession,
     IncrementalRecognitionState,
     StreamingRecognizer,
+    clean_transcript,
     decode_wav_pcm16,
     find_wake_phrase,
     semantic_complete,
@@ -35,15 +36,30 @@ class FakeWhisperModel:
         if len(self.calls) == 1:
             return iter(
                 [
-                    SimpleNamespace(text=" Перше.", end=1.0),
-                    SimpleNamespace(text=" Друге.", end=3.0),
-                    SimpleNamespace(text=" Незавершене", end=6.5),
+                    SimpleNamespace(text=" Перше.", end=1.0, avg_logprob=-0.1, no_speech_prob=0.05),
+                    SimpleNamespace(text=" Друге.", end=3.0, avg_logprob=-0.1, no_speech_prob=0.05),
+                    SimpleNamespace(text=" Незавершене", end=6.5, avg_logprob=-0.1, no_speech_prob=0.05),
                 ]
-            ), None
-        return iter([SimpleNamespace(text=" Завершення.", end=4.5)]), None
+            ), SimpleNamespace(language_probability=0.94)
+        return iter(
+            [SimpleNamespace(text=" Завершення.", end=4.5, avg_logprob=-0.2, no_speech_prob=0.1)]
+        ), SimpleNamespace(language_probability=0.9)
 
 
 class DuplexSessionTest(unittest.TestCase):
+    def test_final_recognition_reports_confidence_for_admission(self):
+        recognizer = StreamingRecognizer()
+        recognizer.model = FakeWhisperModel()
+        recognizer.loading = False
+
+        text, diagnostics = asyncio.run(
+            recognizer.transcribe_final(np.zeros(STT_SAMPLE_RATE, dtype="<i2").tobytes(), "uk")
+        )
+
+        self.assertEqual(text, "Перше. Друге. Незавершене")
+        self.assertGreater(diagnostics["final_confidence"], 0.8)
+        self.assertEqual(diagnostics["language_probability"], 0.94)
+
     def test_incremental_recognition_commits_stable_audio_and_decodes_only_the_tail(self):
         recognizer = StreamingRecognizer()
         recognizer.model = FakeWhisperModel()
@@ -58,10 +74,11 @@ class DuplexSessionTest(unittest.TestCase):
         self.assertEqual(text, "Перше. Друге. Незавершене")
         self.assertEqual(state.committed_text, "Перше. Друге.")
         self.assertEqual(diagnostics["committed_audio_ms"], 3000)
-        self.assertEqual(final, "Перше. Друге. Завершення.")
+        self.assertEqual(final, "Завершення.")
         self.assertEqual(recognizer.model.calls[0][0], STT_SAMPLE_RATE * 7)
-        self.assertEqual(recognizer.model.calls[1][0], STT_SAMPLE_RATE * 5)
-        self.assertEqual(recognizer.model.calls[1][1]["initial_prompt"], "Перше. Друге.")
+        self.assertEqual(recognizer.model.calls[1][0], STT_SAMPLE_RATE * 8)
+        self.assertIsNone(recognizer.model.calls[1][1]["initial_prompt"])
+        self.assertEqual(recognizer.model.calls[1][1]["beam_size"], 5)
         self.assertEqual(final_diagnostics["decode_count"], 2)
 
     def test_incremental_recognition_resets_state_for_a_new_utterance(self):
@@ -100,6 +117,16 @@ class DuplexSessionTest(unittest.TestCase):
         )
         self.assertEqual(len(pcm), 320)
 
+    def test_cleans_repeated_sentences_and_phrase_blocks(self):
+        self.assertEqual(
+            clean_transcript("Добре. Це тестова фраза. Це тестова фраза. Далі."),
+            "Добре. Це тестова фраза. Далі.",
+        )
+        self.assertEqual(
+            clean_transcript("Покажи мені останні логи Покажи мені останні логи"),
+            "Покажи мені останні логи",
+        )
+
     def test_decode_wav_pcm16_rejects_invalid_input(self):
         with self.assertRaisesRegex(ValueError, "valid WAV"):
             decode_wav_pcm16(b"not a wav")
@@ -107,6 +134,7 @@ class DuplexSessionTest(unittest.TestCase):
     def test_semantic_endpoint_keeps_an_open_ukrainian_phrase_listening(self):
         self.assertFalse(semantic_complete("Розкажи мені про.", "uk", 3))
         self.assertTrue(semantic_complete("Як мене звати?", "uk", 1))
+        self.assertFalse(semantic_complete("Технічно складна, але цікава. Не, ну, був.", "uk", 3))
 
     def test_semantic_endpoint_accepts_a_stable_unpunctuated_phrase(self):
         self.assertFalse(semantic_complete("покажи останні логи", "uk", 1))
@@ -148,10 +176,10 @@ class DuplexSessionTest(unittest.TestCase):
     def test_short_pause_requests_endpoint_transcription_before_finalizing(self):
         session = DuplexSession()
         session.set_mode("listening")
-        session.vad = VoiceActivity([*([True] * 10), *([False] * 35)])
+        session.vad = VoiceActivity([*([True] * 20), *([False] * 35)])
         frame = bytes([1]) * STT_FRAME_BYTES
 
-        for _ in range(10):
+        for _ in range(20):
             session.push(frame)
         events = []
         for _ in range(35):
@@ -163,29 +191,42 @@ class DuplexSessionTest(unittest.TestCase):
     def test_partial_cadence_uses_received_audio_instead_of_wall_clock(self):
         session = DuplexSession()
         session.set_mode("listening")
-        session.vad = VoiceActivity([True] * 46)
+        session.vad = VoiceActivity([True] * 121)
         frame = bytes([1]) * STT_FRAME_BYTES
 
         events = []
-        for _ in range(46):
+        for _ in range(121):
             events.extend(session.push(frame))
 
         self.assertEqual(sum(event["type"] == "partial_ready" for event in events), 1)
-        self.assertEqual(session.diagnostics()["speech_ms"], 920)
+        self.assertEqual(session.diagnostics()["speech_ms"], 2420)
+
+    def test_limits_expensive_partial_decodes_for_a_long_utterance(self):
+        session = DuplexSession()
+        session.set_mode("listening")
+        session.vad = VoiceActivity([True] * 600)
+        frame = bytes([1]) * STT_FRAME_BYTES
+
+        events = []
+        for _ in range(600):
+            events.extend(session.push(frame))
+
+        self.assertEqual(sum(event["type"] == "partial_ready" for event in events), 2)
+        self.assertEqual(session.diagnostics()["partial_count"], 2)
 
     def test_endpoint_transcript_can_be_reused_after_only_more_silence(self):
         session = DuplexSession()
         session.set_mode("listening")
-        session.vad = VoiceActivity([*([True] * 10), *([False] * 50)])
+        session.vad = VoiceActivity([*([True] * 60), *([False] * 65)])
         frame = bytes([1]) * STT_FRAME_BYTES
 
-        for _ in range(10):
+        for _ in range(60):
             session.push(frame)
         for _ in range(35):
             session.push(bytes(STT_FRAME_BYTES))
-        session.observe_transcript("Як мене звати?", 1, 10)
+        session.observe_transcript("Як мене звати?", 1, 60)
         events = []
-        for _ in range(15):
+        for _ in range(30):
             events.extend(session.push(bytes(STT_FRAME_BYTES)))
             if any(event["type"] == "final_ready" for event in events):
                 break
@@ -194,13 +235,33 @@ class DuplexSessionTest(unittest.TestCase):
         self.assertEqual(events[-1]["type"], "final_ready")
         self.assertEqual(events[-1]["reason"], "semantic_complete")
 
+    def test_short_punctuated_fragment_waits_for_semantic_grace(self):
+        session = DuplexSession()
+        session.set_mode("listening")
+        session.vad = VoiceActivity([*([True] * 35), *([False] * 90)])
+        frame = bytes([1]) * STT_FRAME_BYTES
+
+        for _ in range(35):
+            session.push(frame)
+        for _ in range(35):
+            session.push(bytes(STT_FRAME_BYTES))
+        session.observe_transcript("Добре.", 1, 35)
+        before_grace = []
+        for _ in range(54):
+            before_grace.extend(session.push(bytes(STT_FRAME_BYTES)))
+        self.assertFalse(any(event["type"] == "final_ready" for event in before_grace))
+
+        final = session.push(bytes(STT_FRAME_BYTES))
+        self.assertEqual(final[-1]["type"], "final_ready")
+        self.assertEqual(final[-1]["reason"], "semantic_grace_elapsed")
+
     def test_speech_resuming_before_endpoint_commit_keeps_one_utterance(self):
         session = DuplexSession()
         session.set_mode("listening")
-        session.vad = VoiceActivity([*([True] * 10), *([False] * 45), True])
+        session.vad = VoiceActivity([*([True] * 20), *([False] * 45), True])
         frame = bytes([1]) * STT_FRAME_BYTES
 
-        for _ in range(10):
+        for _ in range(20):
             session.push(frame)
         events = []
         for _ in range(45):
@@ -209,7 +270,7 @@ class DuplexSessionTest(unittest.TestCase):
         resumed = session.push(frame)
 
         self.assertFalse(any(event["type"] == "final_ready" for event in events))
-        self.assertEqual(resumed, [{"type": "partial_ready", "generation": 1}])
+        self.assertEqual(resumed, [])
         self.assertEqual(session.generation, 1)
         self.assertEqual(session.transcript, "")
         self.assertEqual(session.cached_transcript(), "")
@@ -231,11 +292,11 @@ class DuplexSessionTest(unittest.TestCase):
         session = DuplexSession()
         session.set_mode("listening")
         session.set_wake(True, True, ["джарвіс"])
-        session.vad = VoiceActivity([*([True] * 10), *([False] * 35)])
+        session.vad = VoiceActivity([*([True] * 20), *([False] * 35)])
         frame = bytes([1]) * STT_FRAME_BYTES
 
         events = []
-        for _ in range(10):
+        for _ in range(20):
             events.extend(session.push(frame))
         for _ in range(35):
             events.extend(session.push(bytes(STT_FRAME_BYTES)))

@@ -2,7 +2,7 @@ import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { Image } from "@/image/image"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
-import { Cause, Deferred, Effect, Exit, Layer, Context, Scope, Schema } from "effect"
+import { Cause, Deferred, Effect, Exit, Fiber, Layer, Context, Scope, Schema } from "effect"
 import * as Stream from "effect/Stream"
 import { Config } from "@/config/config"
 import { Plugin } from "@/plugin"
@@ -33,6 +33,7 @@ import { SessionExecutionBudget } from "./execution-budget"
 import { SessionMutation } from "./mutation"
 
 const DOOM_LOOP_THRESHOLD = 3
+const CACHE_RESTORE_DIAGNOSTIC_DELAY_MS = 1_500
 export type Result = "compact" | "stop" | "continue"
 
 export interface Handle {
@@ -81,11 +82,15 @@ interface ProcessorContext extends Input {
   blocked: boolean
   needsCompaction: boolean
   currentText: SessionV1.TextPart | undefined
+  lastText: SessionV1.TextPart | undefined
   reasoningMap: Record<string, SessionV1.ReasoningPart>
   budgetedToolCalls: Set<string>
   stepToolCalls: number
   mutatedFiles: Set<string>
   firstOutput: boolean
+  modelRequestStartedAt: number | undefined
+  cacheRestoreActive: boolean
+  providerChainContext: number | undefined
 }
 
 type StreamEvent = LLMEvent
@@ -122,11 +127,15 @@ const layer = Layer.effect(
         blocked: false,
         needsCompaction: false,
         currentText: undefined,
+        lastText: undefined,
         reasoningMap: {},
         budgetedToolCalls: new Set(),
         stepToolCalls: 0,
         mutatedFiles: new Set(),
         firstOutput: false,
+        modelRequestStartedAt: undefined,
+        cacheRestoreActive: false,
+        providerChainContext: undefined,
       }
       let aborted = false
 
@@ -390,15 +399,35 @@ const layer = Layer.effect(
           )
         ) {
           ctx.firstOutput = true
-          yield* Effect.sync(() => {
-            void SessionLog.write({
+          if (ctx.cacheRestoreActive && ctx.modelRequestStartedAt !== undefined) {
+            const modelRequestStartedAt = ctx.modelRequestStartedAt
+            ctx.cacheRestoreActive = false
+            yield* status.set(ctx.sessionID, { type: "busy" })
+            yield* Effect.promise(() =>
+              SessionLog.write({
+                sessionID: input.sessionID,
+                type: "model.cache_restore.finished",
+                messageID: input.assistantMessage.id,
+                executionID: input.checkpoint?.executionID,
+                data: {
+                  step: input.step,
+                  startedAt: modelRequestStartedAt,
+                  durationMs: Date.now() - modelRequestStartedAt,
+                  outcome: "first_output",
+                  inferred: true,
+                },
+              }),
+            )
+          }
+          yield* Effect.promise(() =>
+            SessionLog.write({
               sessionID: input.sessionID,
               type: "model.first_output",
               messageID: input.assistantMessage.id,
               executionID: input.checkpoint?.executionID,
               data: { step: input.step, outputType: value.type },
-            })
-          })
+            }),
+          )
         }
         switch (value.type) {
           case "reasoning-start":
@@ -654,6 +683,7 @@ const layer = Layer.effect(
           }
 
           case "text-start":
+            ctx.lastText = undefined
             ctx.currentText = {
               id: PartID.ascending(),
               messageID: ctx.assistantMessage.id,
@@ -699,10 +729,29 @@ const layer = Layer.effect(
             }
             if (value.providerMetadata) ctx.currentText.metadata = value.providerMetadata
             yield* session.updatePart(ctx.currentText)
+            ctx.lastText = ctx.currentText
             ctx.currentText = undefined
             return
 
           case "finish":
+            if (!ctx.lastText) return
+            ctx.lastText.metadata = Object.fromEntries(
+              Object.entries({ ...ctx.lastText.metadata, ...value.providerMetadata }).map(([provider, metadata]) => {
+                const current = ctx.lastText?.metadata?.[provider]
+                return [provider, isRecord(current) && isRecord(metadata) ? { ...current, ...metadata } : metadata]
+              }),
+            )
+            if (ctx.providerChainContext !== undefined) {
+              const current = ctx.lastText.metadata?.opencode
+              ctx.lastText.metadata = {
+                ...ctx.lastText.metadata,
+                opencode: {
+                  ...(isRecord(current) ? current : {}),
+                  chatContextLimit: ctx.providerChainContext,
+                },
+              }
+            }
+            yield* session.updatePart(ctx.lastText)
             return
         }
       })
@@ -834,6 +883,8 @@ const layer = Layer.effect(
 
       const process = Effect.fn("SessionProcessor.process")(function* (streamInput: LLM.StreamInput) {
         ctx.firstOutput = false
+        ctx.modelRequestStartedAt = undefined
+        ctx.cacheRestoreActive = false
         yield* Effect.promise(() =>
           SessionLog.write({
             sessionID: input.sessionID,
@@ -858,14 +909,70 @@ const layer = Layer.effect(
         return yield* Effect.gen(function* () {
           yield* Effect.gen(function* () {
             ctx.currentText = undefined
+            ctx.lastText = undefined
             ctx.reasoningMap = {}
+            ctx.providerChainContext = streamInput.providerChainContext
             yield* status.set(ctx.sessionID, { type: "busy" })
+            ctx.modelRequestStartedAt = Date.now()
+            const cacheRestoreWatch =
+              input.model.providerID === "lmstudio"
+                ? yield* Effect.sleep(`${CACHE_RESTORE_DIAGNOSTIC_DELAY_MS} millis`).pipe(
+                    Effect.flatMap(() => {
+                      if (ctx.firstOutput || ctx.modelRequestStartedAt === undefined) return Effect.void
+                      ctx.cacheRestoreActive = true
+                      return Effect.all([
+                        status.set(ctx.sessionID, {
+                          type: "cache_restore",
+                          startedAt: ctx.modelRequestStartedAt,
+                        }),
+                        Effect.promise(() =>
+                          SessionLog.write({
+                            sessionID: input.sessionID,
+                            type: "model.cache_restore.started",
+                            messageID: input.assistantMessage.id,
+                            executionID: input.checkpoint?.executionID,
+                            data: {
+                              step: input.step,
+                              startedAt: ctx.modelRequestStartedAt,
+                              thresholdMs: CACHE_RESTORE_DIAGNOSTIC_DELAY_MS,
+                              inferred: true,
+                            },
+                          }),
+                        ),
+                      ]).pipe(Effect.asVoid)
+                    }),
+                    Effect.forkChild,
+                  )
+                : undefined
             const stream = llm.stream(streamInput)
 
             yield* stream.pipe(
               Stream.tap((event) => handleEvent(event)),
               Stream.takeUntil(() => ctx.needsCompaction),
               Stream.runDrain,
+              Effect.ensuring(
+                Effect.gen(function* () {
+                  if (cacheRestoreWatch) yield* Fiber.interrupt(cacheRestoreWatch)
+                  if (!ctx.cacheRestoreActive || ctx.modelRequestStartedAt === undefined) return
+                  const modelRequestStartedAt = ctx.modelRequestStartedAt
+                  ctx.cacheRestoreActive = false
+                  yield* Effect.promise(() =>
+                    SessionLog.write({
+                      sessionID: input.sessionID,
+                      type: "model.cache_restore.finished",
+                      messageID: input.assistantMessage.id,
+                      executionID: input.checkpoint?.executionID,
+                      data: {
+                        step: input.step,
+                        startedAt: modelRequestStartedAt,
+                        durationMs: Date.now() - modelRequestStartedAt,
+                        outcome: "stream_ended",
+                        inferred: true,
+                      },
+                    }),
+                  )
+                }),
+              ),
             )
           }).pipe(
             Effect.onInterrupt(() =>

@@ -7,6 +7,7 @@ export type { OpenAIResponseIncludable, OpenAIServiceTier } from "../protocols/u
 export interface OpenAIOptionsInput {
   readonly [key: string]: unknown
   readonly store?: boolean
+  readonly previousResponseId?: string
   readonly promptCacheKey?: string
   readonly reasoningEffort?: ReasoningEffort
   readonly reasoningSummary?: "auto"
@@ -29,6 +30,7 @@ const openAIProviderOptions = (options: OpenAIOptionsInput | undefined): Provide
   const openai = Object.fromEntries(
     definedEntries({
       store: options?.store,
+      previousResponseId: options?.previousResponseId,
       promptCacheKey: options?.promptCacheKey,
       reasoningEffort: options?.reasoningEffort,
       reasoningSummary: options?.reasoningSummary,

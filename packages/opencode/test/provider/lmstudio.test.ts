@@ -40,7 +40,7 @@ describe("discoverLmStudioContextLimits", () => {
       },
     })
 
-    expect(requests).toEqual(["http://127.0.0.1:1234/api/v1/models", "http://127.0.0.1:1234/v1/models"])
+    expect(requests).toEqual(["http://127.0.0.1:1234/api/v1/models"])
     expect(result).toEqual({
       "qwen/qwen3-coder": 65_536,
       "qwen-local": 65_536,
@@ -112,7 +112,7 @@ describe("discoverLmStudioContextLimits", () => {
       },
     })
 
-    expect(requests).toHaveLength(2)
+    expect(requests).toHaveLength(1)
     expect(result.status).toBe("ready")
     expect(result.api).toEqual({
       native: true,
@@ -229,7 +229,7 @@ describe("discoverLmStudioContextLimits", () => {
     expect(result.models).toEqual([])
   })
 
-  test("coalesces repeated probes for the same requester and allows an explicit refresh", async () => {
+  test("coalesces ordinary and explicit refresh probes for the same requester", async () => {
     const requests: string[] = []
     const request = async (input: string | URL | RequestInfo) => {
       requests.push(String(input))
@@ -244,9 +244,10 @@ describe("discoverLmStudioContextLimits", () => {
 
     await Promise.all([probeLmStudio(input), probeLmStudio(input)])
     await probeLmStudio(input)
-    expect(requests).toHaveLength(2)
+    expect(requests).toHaveLength(1)
 
+    await Promise.all([probeLmStudio({ ...input, refresh: true }), probeLmStudio({ ...input, refresh: true })])
     await probeLmStudio({ ...input, refresh: true })
-    expect(requests).toHaveLength(4)
+    expect(requests).toHaveLength(2)
   })
 })

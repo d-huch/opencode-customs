@@ -20,6 +20,7 @@ import { clearDebugLogs, exportDebugLogs, initCrashReporter, initLogging, startN
 import { parseMarkdown } from "./markdown"
 import { createMenu } from "./menu"
 import {
+  ensureChatWorkspace,
   finishFirstLaunchOnboarding,
   initializeOldLayoutEligibility,
   isFirstLaunchOnboardingPending,
@@ -288,6 +289,7 @@ const main = Effect.gen(function* () {
     setDefaultServerUrl: (url) => setDefaultServerUrl(url),
     isFirstLaunchOnboardingPending,
     finishFirstLaunchOnboarding,
+    ensureChatWorkspace,
     isOldLayoutEligible,
     getDisplayBackend: async () => null,
     setDisplayBackend: async () => undefined,

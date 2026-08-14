@@ -21,7 +21,7 @@ describe("LM Studio capability router", () => {
         api: { native: true, openai: true, chatCompletions: true, responses: true, embeddings: true },
         models: [
           model("model-a", "llm", 2 * 1024 ** 3, { tools: true, vision: true }),
-          model("model-b", "llm", 8 * 1024 ** 3, { tools: true, reasoning: true }),
+          model("model-b", "llm", 16 * 1024 ** 3, { tools: true, reasoning: true }),
           model("model-c", "embedding", 512 * 1024 ** 2, { embeddings: true }),
         ],
       },
@@ -66,6 +66,32 @@ describe("LM Studio capability router", () => {
 
     expect(CapabilityRouter.selection(CapabilityRouter.latest(config)!, "coding")?.modelID).toBe("large")
     expect(CapabilityRouter.latest(config)).toEqual(interactive)
+  })
+
+  test("keeps a small loaded model auxiliary and routes the interactive turn to a strong loaded model", async () => {
+    const config = {
+      provider: { lmstudio: { options: { baseURL: "http://router-primary.test/v1" } } },
+    } satisfies ConfigV1.Info
+    const plan = await CapabilityRouter.route({
+      config,
+      preferredModelID: "utility",
+      requestShape: { textCharacters: 100, files: 0, images: 0, tools: 0 },
+      probe: {
+        provider: "lmstudio",
+        status: "ready",
+        baseURL: "http://router-primary.test",
+        checkedAt: 1,
+        latencyMs: 1,
+        api: { native: true, openai: true, chatCompletions: true, responses: true, embeddings: false },
+        models: [
+          model("utility", "llm", 2 * 1024 ** 3, { tools: true, reasoning: true }),
+          model("primary", "llm", 16 * 1024 ** 3, { tools: true, reasoning: true }),
+        ],
+      },
+    })
+
+    expect(CapabilityRouter.selection(plan, "utility")?.modelID).toBe("utility")
+    expect(CapabilityRouter.selection(plan, "coding")?.modelID).toBe("primary")
   })
 
   test("removes legacy fallback selections before publishing runtime state", async () => {

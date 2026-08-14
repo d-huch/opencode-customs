@@ -95,7 +95,7 @@ import { useComposerCommands } from "@/pages/session/use-composer-commands"
 import { useSessionCommands } from "@/pages/session/use-session-commands"
 import { useSessionHashScroll } from "@/pages/session/use-session-hash-scroll"
 import { Identifier } from "@/utils/id"
-import { isDefaultProjectDirectory } from "@/utils/project"
+import { isNonRepositoryDirectory } from "@/utils/project"
 import { diffs as list } from "@/utils/diffs"
 import { Persist, persisted } from "@/utils/persist"
 import { extractPromptFromParts } from "@/utils/prompt"
@@ -448,8 +448,8 @@ export default function Page() {
 
   const isDesktop = createMediaQuery("(min-width: 768px)")
   const size = createSizing()
-  const defaultProject = createMemo(() => isDefaultProjectDirectory(sdk().directory))
-  const desktopReviewOpen = createMemo(() => isDesktop() && !defaultProject() && view().reviewPanel.opened())
+  const nonRepository = createMemo(() => isNonRepositoryDirectory(sdk().directory))
+  const desktopReviewOpen = createMemo(() => isDesktop() && !nonRepository() && view().reviewPanel.opened())
   const desktopV2ReviewOpen = createMemo(() => newSessionDesign() && desktopReviewOpen() && !!params.id)
   const terminalOpen = createMemo(() => view().terminal.opened())
   const desktopTerminalOpen = createMemo(() => isDesktop() && terminalOpen())
@@ -472,7 +472,10 @@ export default function Page() {
   const [panelRowWidth, setPanelRowWidth] = createSignal<number>()
   createResizeObserver(
     () => panelRow,
-    ({ width }) => setPanelRowWidth(width),
+    ({ width }) => {
+      const next = Math.round(width)
+      setPanelRowWidth((current) => (current === next ? current : next))
+    },
   )
   const splitReview = createMemo(
     () => (newSessionDesign() ? desktopV2ReviewOpen() : desktopReviewOpen()) && layout.review.diffStyle() === "split",
@@ -536,8 +539,8 @@ export default function Page() {
   const info = createMemo(() => (params.id ? sync().session.get(params.id) : undefined))
   const isChildSession = createMemo(() => !!info()?.parentID)
   const diffs = createMemo(() => (params.id ? list(sync().data.session_diff[params.id]) : []))
-  const canReview = createMemo(() => !!sync().project && !defaultProject())
-  const reviewTab = createMemo(() => isDesktop() && !defaultProject())
+  const canReview = createMemo(() => !!sync().project && !nonRepository())
+  const reviewTab = createMemo(() => isDesktop() && !nonRepository())
   const tabState = createSessionTabs({
     tabs,
     pathFromTab: file.pathFromTab,
@@ -1982,27 +1985,37 @@ export default function Page() {
     void sendFollowup(sessionID, item.id)
   })
 
+  let promptDockResizeFrame: number | undefined
+  let pendingPromptDockHeight: number | undefined
+
   createResizeObserver(
     () => promptDock,
     ({ height }) => {
-      const next = Math.ceil(height)
+      pendingPromptDockHeight = Math.ceil(height)
+      if (promptDockResizeFrame !== undefined) return
+      promptDockResizeFrame = requestAnimationFrame(() => {
+        promptDockResizeFrame = undefined
+        const next = pendingPromptDockHeight
+        pendingPromptDockHeight = undefined
+        if (next === undefined || next === dockHeight) return
 
-      if (next === dockHeight) return
+        const el = scroller
+        const delta = next - dockHeight
+        const stick = el
+          ? !autoScroll.userScrolled() || el.scrollHeight - el.clientHeight - el.scrollTop < 10 + Math.max(0, delta)
+          : false
 
-      const el = scroller
-      const delta = next - dockHeight
-      const stick = el
-        ? !autoScroll.userScrolled() || el.scrollHeight - el.clientHeight - el.scrollTop < 10 + Math.max(0, delta)
-        : false
-
-      dockHeight = next
-
-      if (stick) scrollToEnd()
-
-      if (el) scheduleScrollState(el)
-      fill()
+        dockHeight = next
+        if (stick) scrollToEnd()
+        if (el) scheduleScrollState(el)
+        fill()
+      })
     },
   )
+
+  onCleanup(() => {
+    if (promptDockResizeFrame !== undefined) cancelAnimationFrame(promptDockResizeFrame)
+  })
 
   const { clearMessageHash, scrollToMessage } = useSessionHashScroll({
     sessionKey,

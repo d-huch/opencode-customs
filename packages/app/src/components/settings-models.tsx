@@ -11,6 +11,7 @@ import { popularProviders } from "@/hooks/use-providers"
 import { SettingsList } from "./settings-list"
 import { SettingsServerPicker, SettingsServerScope } from "./settings-server-picker"
 import { SettingsModelContextLimit } from "./settings-model-context-limit"
+import { useServerSync } from "@/context/server-sync"
 
 type ModelItem = ReturnType<ReturnType<typeof useModels>["list"]>[number]
 
@@ -44,6 +45,7 @@ export const SettingsModels: Component = () => {
 const SettingsModelsContent: Component = () => {
   const language = useLanguage()
   const models = useModels()
+  const serverSync = useServerSync()
 
   const list = useFilteredList<ModelItem>({
     items: (_filter) => models.list(),
@@ -136,6 +138,19 @@ const SettingsModelsContent: Component = () => {
                                 input={item.limit.input}
                                 output={item.limit.output}
                               />
+                              <Show when={item.provider.id === "lmstudio"}>
+                                <SettingsModelContextLimit
+                                  providerID={item.provider.id}
+                                  modelID={item.id}
+                                  context={Math.min(
+                                    item.limit.context,
+                                    serverSync().data.config.provider?.lmstudio?.models?.[item.id]?.chat_context ??
+                                      32_768,
+                                  )}
+                                  output={item.limit.output}
+                                  scope="chat"
+                                />
+                              </Show>
                               <Switch
                                 checked={models.visible(key)}
                                 onChange={(checked) => {

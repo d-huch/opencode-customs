@@ -12,11 +12,21 @@ export type DuplexSpeechDiagnostics = {
   decode_count?: number
   decoded_audio_ms?: number
   committed_audio_ms?: number
+  partial_count?: number
+  frame_rms?: number
+  peak_rms?: number
+  min_rms?: number
+  recognition_model?: string
   transcript_stability?: number
   endpoint_reason?: string
   wake_recognition_ms?: number
   wake_model?: string
   wake_armed?: boolean
+  final_confidence?: number
+  average_log_probability?: number
+  no_speech_probability?: number
+  language_probability?: number
+  alternatives?: { text: string; confidence?: number }[]
   echo_input_rms?: number
   echo_reference_rms?: number
   echo_residual_rms?: number
@@ -43,6 +53,8 @@ export type DuplexSpeechEvent = {
   mode?: DuplexSpeechMode
   reference?: string
   generation?: number
+  turn_id?: string
+  turn_generation?: number
   ready?: boolean
   pre_roll_ms?: number
   phrase?: string
@@ -66,8 +78,16 @@ type DuplexSpeechOptions = {
   onEvent: (event: DuplexSpeechEvent) => void
   onLevel: (level: number) => void
   onEcho?: (diagnostics: DuplexSpeechDiagnostics) => void
+  onUtteranceAudio?: (input: {
+    turnID: string
+    turnGeneration?: number
+    pcm: ArrayBuffer
+    sampleRate: number
+    terminalEvent: "final" | "discard" | "wake_ignored"
+  }) => void
   onError: (error: Error) => void
   wake?: DuplexWakeConfig
+  turn?: { id: string; generation: number }
 }
 
 export function localSTTWebSocketURL(endpoint: string) {
@@ -198,12 +218,24 @@ export function createLocalDuplexSpeech(options: DuplexSpeechOptions) {
   let reference = ""
   let ready: Promise<void> | undefined
   let wake = options.wake ?? { enabled: false, armed: false, phrases: [] }
+  let turn = options.turn
   const preRoll: Int16Array[] = []
   let preRollSamples = 0
+  let utterance: Int16Array[] = []
+  let utteranceSamples = 0
+  let utteranceTurn: { id: string; generation?: number } | undefined
 
   const sendState = () => {
     if (socket?.readyState !== WebSocket.OPEN) return
-    socket.send(JSON.stringify({ type: "state", mode, reference }))
+    socket.send(
+      JSON.stringify({
+        type: "state",
+        mode,
+        reference,
+        turn_id: turn?.id,
+        turn_generation: turn?.generation,
+      }),
+    )
   }
 
 
@@ -229,6 +261,9 @@ export function createLocalDuplexSpeech(options: DuplexSpeechOptions) {
     ready = undefined
     preRoll.length = 0
     preRollSamples = 0
+    utterance = []
+    utteranceSamples = 0
+    utteranceTurn = undefined
     options.onLevel(0)
   }
 
@@ -291,6 +326,10 @@ export function createLocalDuplexSpeech(options: DuplexSpeechOptions) {
         preRoll.push(pcm)
         preRollSamples += pcm.length
         while (preRollSamples > 24_000 && preRoll.length > 1) preRollSamples -= preRoll.shift()!.length
+        if (utteranceTurn && utteranceSamples < 16_000 * 120) {
+          utterance.push(pcm)
+          utteranceSamples += pcm.length
+        }
         if (socket?.readyState === WebSocket.OPEN) socket.send(pcm)
       }
 
@@ -306,6 +345,8 @@ export function createLocalDuplexSpeech(options: DuplexSpeechOptions) {
               wake_enabled: wake.enabled,
               wake_armed: wake.armed,
               wake_phrases: wake.phrases,
+              turn_id: turn?.id,
+              turn_generation: turn?.generation,
             }),
           )
           preRoll.forEach((chunk) => socket?.send(chunk))
@@ -314,7 +355,33 @@ export function createLocalDuplexSpeech(options: DuplexSpeechOptions) {
         socket.onmessage = (message) => {
           if (typeof message.data !== "string") return
           const event = JSON.parse(message.data) as DuplexSpeechEvent
+          if (event.type === "speech_start") {
+            utterance = preRoll.map((chunk) => chunk.slice())
+            utteranceSamples = utterance.reduce((total, chunk) => total + chunk.length, 0)
+            const id = event.turn_id ?? turn?.id
+            utteranceTurn = id ? { id, generation: event.turn_generation ?? turn?.generation } : undefined
+          }
           options.onEvent(event)
+          if (
+            utteranceTurn &&
+            (event.type === "final" || event.type === "discard" || event.type === "wake_ignored")
+          ) {
+            const pcm = new Int16Array(utteranceSamples)
+            utterance.reduce((offset, chunk) => {
+              pcm.set(chunk, offset)
+              return offset + chunk.length
+            }, 0)
+            options.onUtteranceAudio?.({
+              turnID: utteranceTurn.id,
+              turnGeneration: utteranceTurn.generation,
+              pcm: pcm.buffer,
+              sampleRate: 16_000,
+              terminalEvent: event.type,
+            })
+            utterance = []
+            utteranceSamples = 0
+            utteranceTurn = undefined
+          }
           if (event.type !== "ready") return
           if (event.ready === false) {
             clearTimeout(timeout)
@@ -354,6 +421,10 @@ export function createLocalDuplexSpeech(options: DuplexSpeechOptions) {
     setState(next: DuplexSpeechMode, spoken = "") {
       mode = next
       reference = spoken
+      sendState()
+    },
+    setTurn(next: { id: string; generation: number } | undefined) {
+      turn = next
       sendState()
     },
     setWake(next: DuplexWakeConfig) {

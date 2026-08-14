@@ -14,6 +14,7 @@ import PROMPT_COMPACTION from "./prompt/compaction.txt"
 import PROMPT_EXPLORE from "./prompt/explore.txt"
 import PROMPT_SUMMARY from "./prompt/summary.txt"
 import PROMPT_TITLE from "./prompt/title.txt"
+import PROMPT_CHAT from "./prompt/chat.txt"
 import { Permission } from "@/permission"
 import { mergeDeep, pipe, sortBy, values } from "remeda"
 import { Global } from "@opencode-ai/core/global"
@@ -163,6 +164,23 @@ const layer = Layer.effect(
               Permission.fromConfig({
                 question: "allow",
                 plan_enter: "allow",
+              }),
+              user,
+            ),
+            mode: "primary",
+            native: true,
+          },
+          chat: {
+            name: "chat",
+            description: "General conversation without repository inspection or coding-agent behavior.",
+            options: {},
+            prompt: PROMPT_CHAT,
+            permission: Permission.merge(
+              defaults,
+              Permission.fromConfig({
+                "*": "deny",
+                websearch: "allow",
+                webfetch: "allow",
               }),
               user,
             ),

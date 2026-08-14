@@ -369,6 +369,19 @@ describe("session.llm-native.request", () => {
     expect(compatible.route.id).toBe("openai-compatible-chat")
     expect(compatible.route.endpoint.baseURL).toBe("https://ai.example.test/v1")
 
+    const compatibleResponses = LLMNative.model({
+      model: {
+        ...baseModel,
+        providerID: ProviderV2.ID.make("lmstudio"),
+        api: { ...baseModel.api, url: "http://127.0.0.1:1234/v1", npm: "@ai-sdk/openai-compatible" },
+      },
+      apiKey: "lm-studio",
+      messages: [],
+      responses: true,
+    })
+    expect(compatibleResponses.route.id).toBe("openai-responses")
+    expect(compatibleResponses.route.endpoint.baseURL).toBe("http://127.0.0.1:1234/v1")
+
     const openrouter = LLMNative.model({
       model: { ...baseModel, api: { ...baseModel.api, url: "", npm: "@openrouter/ai-sdk-provider" } },
       apiKey: "test-key",
@@ -423,6 +436,22 @@ describe("session.llm-native.request", () => {
         auth: undefined,
       }),
     ).toEqual({ type: "unsupported", reason: "provider is not openai, opencode, or anthropic" })
+    expect(
+      LLMNativeRuntime.status({
+        model: {
+          ...baseModel,
+          providerID: ProviderV2.ID.make("lmstudio"),
+          api: { ...baseModel.api, npm: "@ai-sdk/openai-compatible" },
+        },
+        provider: {
+          ...providerInfo,
+          id: ProviderV2.ID.make("lmstudio"),
+          options: { baseURL: "http://127.0.0.1:1234/v1" },
+        },
+        auth: undefined,
+        statefulResponses: true,
+      }),
+    ).toMatchObject({ type: "supported", apiKey: "lm-studio" })
     expect(
       LLMNativeRuntime.status({
         model: baseModel,

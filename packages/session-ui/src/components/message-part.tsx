@@ -201,13 +201,15 @@ export interface MessagePartProps {
   virtualizeDiff?: boolean
   onContentRendered?: () => void
   showAssistantCopyPartID?: string | null
+  speakingResponsePartID?: string
+  onSpeakResponse?: (input: { partID: string; text: string }) => void
   turnDurationMs?: number
   useV2Actions?: boolean
 }
 
 function MessageActionButton(
   props: Pick<ComponentProps<"button">, "disabled" | "onMouseDown" | "onClick" | "aria-label"> & {
-    icon: "check" | "copy" | "reset"
+    icon: "check" | "copy" | "reset" | "speaker" | "stop"
     label: JSX.Element
     useV2?: boolean
   },
@@ -1737,6 +1739,12 @@ PART_MAPPING["text"] = function TextPartDisplay(props) {
     }
   }
 
+  const handleSpeak = () => {
+    const content = text()
+    if (!content) return
+    props.onSpeakResponse?.({ partID: part().id, text: content })
+  }
+
   return (
     <Show when={text()}>
       <div data-component="text-part" data-timeline-part-id={part().id}>
@@ -1755,6 +1763,24 @@ PART_MAPPING["text"] = function TextPartDisplay(props) {
               onClick={handleCopy}
               aria-label={copied() ? i18n.t("ui.message.copied") : i18n.t("ui.message.copyResponse")}
             />
+            <Show when={props.message.role === "assistant" && props.onSpeakResponse && !streaming()}>
+              <MessageActionButton
+                icon={props.speakingResponsePartID === part().id ? "stop" : "speaker"}
+                label={
+                  props.speakingResponsePartID === part().id
+                    ? i18n.t("ui.message.stopSpeaking")
+                    : i18n.t("ui.message.speakResponse")
+                }
+                useV2={props.useV2Actions}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={handleSpeak}
+                aria-label={
+                  props.speakingResponsePartID === part().id
+                    ? i18n.t("ui.message.stopSpeaking")
+                    : i18n.t("ui.message.speakResponse")
+                }
+              />
+            </Show>
             <Show when={meta()}>
               <span data-slot="text-part-meta" class="text-12-regular text-text-weak cursor-default">
                 {meta()}

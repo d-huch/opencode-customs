@@ -95,9 +95,20 @@ export function createSessionComposerRegionController(input: {
   createEffect(() => {
     const el = store.body
     if (!el) return
-    const update = () => setStore("height", el.getBoundingClientRect().height)
+    let resizeFrame: number | undefined
+    const update = () => {
+      if (resizeFrame !== undefined) return
+      resizeFrame = requestAnimationFrame(() => {
+        resizeFrame = undefined
+        const height = Math.round(el.getBoundingClientRect().height)
+        setStore("height", (current) => (current === height ? current : height))
+      })
+    }
     createResizeObserver(el, update)
     update()
+    onCleanup(() => {
+      if (resizeFrame !== undefined) cancelAnimationFrame(resizeFrame)
+    })
   })
 
   onCleanup(clear)

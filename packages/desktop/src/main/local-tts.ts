@@ -1,12 +1,25 @@
 import { write as writeLog } from "./logging"
+import { synthesizeFishAudioLocal } from "./fish-audio"
 
 export type LocalTTSInput = {
+  provider?: "local" | "fish-local"
   endpoint: string
   model: string
   voice: string
   mode: "quality" | "fast"
   speed?: number
   text: string
+  latency?: "normal" | "balanced"
+  language?: "auto" | "uk" | "en" | "mixed"
+  temperature?: number
+  topP?: number
+  repetitionPenalty?: number
+  seed?: number | null
+  chunkLength?: number
+  normalize?: boolean
+  streaming?: boolean
+  useMemoryCache?: boolean
+  maxNewTokens?: number
 }
 
 const maximumAudioBytes = 25 * 1024 * 1024
@@ -14,6 +27,26 @@ const requestTimeout = 45_000
 const qualityVoices = ["kateryna", "lada", "mykyta", "oleksa", "tetiana"]
 
 export async function synthesizeLocalSpeech(input: LocalTTSInput, signal?: AbortSignal) {
+  if (input.provider === "fish-local") {
+    return synthesizeFishAudioLocal(
+      {
+        endpoint: input.endpoint,
+        text: input.text,
+        latency: input.latency,
+        language: input.language,
+        temperature: input.temperature,
+        topP: input.topP,
+        repetitionPenalty: input.repetitionPenalty,
+        seed: input.seed,
+        chunkLength: input.chunkLength,
+        normalize: input.normalize,
+        streaming: input.streaming,
+        useMemoryCache: input.useMemoryCache,
+        maxNewTokens: input.maxNewTokens,
+      },
+      signal,
+    )
+  }
   const endpoint = new URL(input.endpoint)
   const local = endpoint.hostname === "localhost" || endpoint.hostname === "127.0.0.1" || endpoint.hostname === "[::1]"
   if (!local || (endpoint.protocol !== "http:" && endpoint.protocol !== "https:")) {

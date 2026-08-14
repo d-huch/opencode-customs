@@ -54,6 +54,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
   bypassAgentCheck: boolean
   messages: SessionV1.WithParts[]
   promptOps: TaskPromptOps
+  toolIDs?: readonly string[]
 }) {
   const tools: Record<string, AITool> = {}
   const run = yield* EffectBridge.make()
@@ -109,6 +110,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
     providerID: input.model.providerID,
     agent: input.agent,
     permission: input.session.permission,
+    ids: input.toolIDs,
   })) {
     const schema = ProviderTransform.schema(input.model, ToolJsonSchema.fromTool(item))
     capabilities.set(item.id, item.execution ?? { access: "write" })
@@ -149,6 +151,8 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
       },
     })
   }
+
+  if (input.toolIDs) return tools
 
   const hasMcpResourceServer = Object.values(yield* mcp.clients()).some(
     (client) => !!client.getServerCapabilities()?.resources,

@@ -249,6 +249,30 @@ const emptyToolCallsLLM = Layer.succeed(
 const emptyToolCallsEnv = LayerNode.compile(root, [...replacements, [LLM.node, emptyToolCallsLLM]])
 const itEmptyToolCalls = testEffect(emptyToolCallsEnv)
 
+const responseMetadataLLM = Layer.succeed(
+  LLM.Service,
+  LLM.Service.of({
+    stream: () =>
+      Stream.make(
+        LLMEvent.stepStart({ index: 0 }),
+        LLMEvent.textStart({ id: "text-1" }),
+        LLMEvent.textDelta({ id: "text-1", text: "hello" }),
+        LLMEvent.textEnd({ id: "text-1" }),
+        LLMEvent.stepFinish({
+          index: 0,
+          reason: "stop",
+          providerMetadata: { openai: { responseId: "resp_123" } },
+        }),
+        LLMEvent.finish({
+          reason: "stop",
+          providerMetadata: { openai: { responseId: "resp_123" } },
+        }),
+      ),
+  }),
+)
+const responseMetadataEnv = LayerNode.compile(root, [...replacements, [LLM.node, responseMetadataLLM]])
+const itResponseMetadata = testEffect(responseMetadataEnv)
+
 const boot = Effect.fn("test.boot")(function* () {
   const processors = yield* SessionProcessor.Service
   const session = yield* Session.Service
@@ -305,6 +329,36 @@ it.live("session.processor effect tests capture llm input cleanly", () =>
         expect(parts.some((part) => part.type === "text" && part.text === "hello")).toBe(true)
       }),
     { config: (url) => providerCfg(url) },
+  ),
+)
+
+itResponseMetadata.live("session.processor preserves finish metadata on the final text part", () =>
+  provideTmpdirInstance(
+    (dir) =>
+      Effect.gen(function* () {
+        const { processors, session, provider } = yield* boot()
+        const chat = yield* session.create({})
+        const parent = yield* user(chat.id, "hi")
+        const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
+        const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
+        const handle = yield* processors.create({ assistantMessage: msg, sessionID: chat.id, model: mdl })
+
+        yield* handle.process({
+          user: parent,
+          sessionID: chat.id,
+          model: mdl,
+          agent: agent(),
+          system: [],
+          messages: [{ role: "user", content: "hi" }],
+          tools: {},
+        })
+
+        const text = (yield* MessageV2.parts(msg.id)).find(
+          (part): part is SessionV1.TextPart => part.type === "text",
+        )
+        expect(text?.metadata).toEqual({ openai: { responseId: "resp_123" } })
+      }),
+    { config: cfg },
   ),
 )
 

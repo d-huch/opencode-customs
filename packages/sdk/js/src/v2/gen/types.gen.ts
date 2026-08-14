@@ -693,6 +693,10 @@ export type SessionStatus =
       type: "busy"
     }
   | {
+      type: "cache_restore"
+      startedAt: number
+    }
+  | {
       type: "verifying"
       attempt: number
       checks: number
@@ -1762,6 +1766,7 @@ export type ProviderConfig = {
   id?: string
   npm?: string
   auto_route?: boolean
+  primary_min_size_gb?: number
   whitelist?: Array<string>
   blacklist?: Array<string>
   options?: {
@@ -1818,6 +1823,7 @@ export type ProviderConfig = {
       }
       experimental?: boolean
       preserve_context?: boolean
+      chat_context?: number
       auto_route?: boolean
       status?: "alpha" | "beta" | "deprecated" | "active"
       provider?: {
@@ -2605,6 +2611,17 @@ export type ResourceGovernorSnapshot = {
     requestedContext: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
     runtimeContext?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
     safeInputTokens: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    reason: string
+  }
+  providerContext?: {
+    time: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    providerID: string
+    modelID: string
+    contextLimit: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    providerTokens: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    cachedTokens: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    currentTokens: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    remainingTokens: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
     reason: string
   }
 }
@@ -10450,6 +10467,7 @@ export type SessionInspectResponses = {
           | "memory"
           | "capability_probe"
           | "model_activation"
+          | "cache_restore"
           | "context_compilation"
           | "prompt_processing"
           | "generation"
@@ -10476,6 +10494,7 @@ export type SessionInspectResponses = {
           | "memory"
           | "capability_probe"
           | "model_activation"
+          | "cache_restore"
           | "context_compilation"
           | "prompt_processing"
           | "generation"
@@ -10493,6 +10512,7 @@ export type SessionInspectResponses = {
           | "memory"
           | "capability_probe"
           | "model_activation"
+          | "cache_restore"
           | "context_compilation"
           | "prompt_processing"
           | "generation"

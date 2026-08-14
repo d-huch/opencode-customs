@@ -20,6 +20,8 @@ import { setCursorPosition } from "./editor-dom"
 import { formatServerError } from "@/utils/server-errors"
 import { ScopedKey } from "@/utils/server-scope"
 import { createPromptSubmissionState } from "./submission-state"
+import { useSettings } from "@/context/settings"
+import { agentPersonalizationInstruction } from "@/utils/agent-personalization"
 
 type PendingPrompt = {
   abort: AbortController
@@ -36,6 +38,7 @@ export type FollowupDraft = {
   agent: string
   model: { providerID: string; modelID: string }
   variant?: string
+  personalizationInstruction?: string
 }
 
 type FollowupSendInput = {
@@ -112,6 +115,7 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
     sessionID: input.draft.sessionID,
     messageID,
     sessionDirectory: input.draft.sessionDirectory,
+    personalizationInstruction: input.draft.personalizationInstruction,
   })
 
   const message: Message = {
@@ -204,6 +208,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
   const prompt = input.prompt
   const layout = useLayout()
   const language = useLanguage()
+  const settings = useSettings()
   const params = useParams()
   const [search] = useSearchParams<{ draftId?: string }>()
   const tabs = useTabs()
@@ -414,6 +419,19 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       agent,
       model,
       variant,
+      personalizationInstruction: agentPersonalizationInstruction({
+        enabled: settings.personalization.enabled(),
+        assistantName: settings.personalization.assistantName(),
+        userName: settings.personalization.userName(),
+        addressAs: settings.personalization.addressAs(),
+        language: settings.personalization.language(),
+        tone: settings.personalization.tone(),
+        detail: settings.personalization.detail(),
+        proactivity: settings.personalization.proactivity(),
+        humor: settings.personalization.humor(),
+        catchphrases: settings.personalization.catchphrases(),
+        customInstructions: settings.personalization.customInstructions(),
+      }),
     }
 
     const clearInput = () => {

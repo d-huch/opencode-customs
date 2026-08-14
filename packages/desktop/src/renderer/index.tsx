@@ -281,6 +281,8 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
       await window.api.setDefaultServerUrl(url)
     },
 
+    ensureChatWorkspace: () => window.api.ensureChatWorkspace(),
+
     wslServers: wslServersApi,
 
     getDisplayBackend: async () => {
@@ -323,11 +325,17 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
       const result = await window.api.synthesizeLocalSpeech(input)
       return { audio: new Blob([result.audio], { type: result.contentType }), metrics: result.metrics }
     },
+    getFishAudioLocalReference: () => window.api.getFishAudioLocalReference(),
+    getFishAudioLocalStatus: (endpoint) => window.api.getFishAudioLocalStatus(endpoint),
+    setFishAudioLocalReference: (input) => window.api.setFishAudioLocalReference(input),
+    clearFishAudioLocalReference: () => window.api.clearFishAudioLocalReference(),
     cancelLocalSpeech: () => window.api.cancelLocalSpeech(),
     appendVoiceDiagnostic: (input) => window.api.appendVoiceDiagnostic(input),
     getVoiceDiagnostics: (sessionID) => window.api.getVoiceDiagnostics(sessionID),
     clearVoiceDiagnostics: (sessionID) => window.api.clearVoiceDiagnostics(sessionID),
     exportVoiceDiagnostics: (sessionID) => window.api.exportVoiceDiagnostics(sessionID),
+    storeVoiceTurnAudio: (input) => window.api.storeVoiceTurnAudio(input),
+    getVoiceTurnAudio: (sessionID, turnID) => window.api.getVoiceTurnAudio(sessionID, turnID),
   }
 }
 

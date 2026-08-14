@@ -131,6 +131,8 @@ export function plan(input: {
   readonly needsTools?: boolean
   readonly allowUnloaded?: boolean
   readonly disabledModelIDs?: readonly string[]
+  readonly minimumPrimarySizeBytes?: number
+  readonly primaryLoadedOnly?: boolean
 }): Plan {
   const eligible = input.candidates.filter(
     (candidate) => candidate.loaded || (input.allowUnloaded === true && input.pressure !== "critical"),
@@ -138,7 +140,19 @@ export function plan(input: {
   const disabled = new Set(input.disabledModelIDs ?? [])
   const automatic = eligible.filter((candidate) => !disabled.has(candidate.modelID))
   const llms = automatic.filter((candidate) => candidate.type !== "embedding" && !candidate.capabilities.embeddings)
-  const coding = eligible.filter((candidate) => candidate.type !== "embedding" && !candidate.capabilities.embeddings)
+  // Older LM Studio catalogs can omit downloaded models while they are unloaded. Only an explicit
+  // unknown-size preference may cross the size gate so the guarded switcher can probe it after loading.
+  const primary = eligible.filter(
+    (candidate) =>
+      candidate.type !== "embedding" &&
+      !candidate.capabilities.embeddings &&
+      (input.primaryLoadedOnly !== true || candidate.loaded) &&
+      (input.minimumPrimarySizeBytes === undefined ||
+        (candidate.modelID === input.preferredModelID && candidate.sizeBytes === undefined) ||
+        (candidate.sizeBytes !== undefined && candidate.sizeBytes >= input.minimumPrimarySizeBytes)),
+  )
+  const explicit = primary.filter((candidate) => candidate.modelID === input.preferredModelID)
+  const coding = explicit.length > 0 ? explicit : primary.filter((candidate) => !disabled.has(candidate.modelID))
   const selections = [
     select("embedding", automatic, input),
     select("utility", llms, input),
@@ -191,12 +205,7 @@ function select(
     .toSorted(
       (left, right) => right.score - left.score || left.candidate.modelID.localeCompare(right.candidate.modelID),
     )
-  // The selected coding model is an explicit user choice. Context size and memory
-  // efficiency rank auxiliary roles, but must not silently replace that choice.
-  const selected =
-    role === "coding" && input.preferredModelID
-      ? ranked.find((candidate) => candidate.candidate.modelID === input.preferredModelID)
-      : ranked[0]
+  const selected = ranked[0]
   if (!selected) return
   return {
     role,

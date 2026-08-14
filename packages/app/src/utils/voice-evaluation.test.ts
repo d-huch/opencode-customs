@@ -66,4 +66,64 @@ describe("voice evaluation", () => {
       ),
     ).toEqual([0, 0.25, 1])
   })
+
+  test("assembles a durable inspector turn with audio, transcripts, timings, and corrections", () => {
+    const result = evaluateVoiceDiagnostics([
+      entry({ timestamp: "2026-08-11T10:00:00.000Z", source: "stt", event: "speech_start" }),
+      entry({ timestamp: "2026-08-11T10:00:00.100Z", source: "stt", event: "partial", text: "відкрий про" }),
+      entry({
+        timestamp: "2026-08-11T10:00:01.000Z",
+        source: "stt",
+        event: "final",
+        text: "Відкрий проєкт",
+        diagnostics: {
+          final_confidence: 0.92,
+          endpoint_reason: "semantic_complete",
+          audio_ms: 1_400,
+          speech_ms: 900,
+          silence_ms: 320,
+          pre_roll_ms: 180,
+          transcription_ms: 240,
+        },
+      }),
+      entry({
+        timestamp: "2026-08-11T10:00:01.010Z",
+        source: "agent",
+        event: "transcript_assessed",
+        diagnostics: {
+          decision: "accepted",
+          reason: "high_confidence",
+          corrections: "проэкт → проєкт, terminal → термінал",
+        },
+      }),
+      entry({
+        timestamp: "2026-08-11T10:00:01.020Z",
+        source: "ui",
+        event: "audio_saved",
+        durationMs: 1_400,
+      }),
+      entry({
+        timestamp: "2026-08-11T10:00:01.030Z",
+        source: "replay",
+        event: "turn_redecoded",
+        text: "Відкрий потрібний проєкт",
+      }),
+    ])
+
+    expect(result.turns[0]).toMatchObject({
+      preview: "відкрий про",
+      finalTranscript: "Відкрий проєкт",
+      correctedTranscript: "Відкрий потрібний проєкт",
+      confidence: 0.92,
+      corrections: ["проэкт → проєкт", "terminal → термінал"],
+      sendReason: "accepted: high_confidence",
+      endpointReason: "semantic_complete",
+      audioMs: 1_400,
+      speechMs: 900,
+      silenceMs: 320,
+      preRollMs: 180,
+      transcriptionMs: 240,
+      hasAudio: true,
+    })
+  })
 })

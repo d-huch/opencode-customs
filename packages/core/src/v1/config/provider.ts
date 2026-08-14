@@ -57,6 +57,9 @@ export const Model = Schema.Struct({
   preserve_context: Schema.optional(Schema.Boolean).annotate({
     description: "Keep the LM Studio context configured outside OpenCode instead of applying an automatic context size",
   }),
+  chat_context: Schema.optional(PositiveInt).annotate({
+    description: "Context length used for ordinary Chat mode sessions with this model",
+  }),
   auto_route: Schema.optional(Schema.Boolean).annotate({
     description: "Allow the Local Agent Runtime to select this model automatically for capability-based routing",
   }),
@@ -86,8 +89,10 @@ export const Info = Schema.Struct({
   id: Schema.optional(Schema.String),
   npm: Schema.optional(Schema.String),
   auto_route: Schema.optional(Schema.Boolean).annotate({
-    description:
-      "Allow the Local Agent Runtime to switch between this provider's models automatically (default: true)",
+    description: "Allow the Local Agent Runtime to switch between this provider's models automatically (default: true)",
+  }),
+  primary_min_size_gb: Schema.optional(Schema.Finite).annotate({
+    description: "Minimum installed size in GiB for an LM Studio model to answer interactive requests (default: 12)",
   }),
   whitelist: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
   blacklist: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),

@@ -18,6 +18,7 @@ export type LatencyPhase =
   | "memory"
   | "capability_probe"
   | "model_activation"
+  | "cache_restore"
   | "context_compilation"
   | "prompt_processing"
   | "generation"
@@ -475,8 +476,7 @@ function summarizeLatency(
   })
   const currentPrefixHash = contextHashes.at(-1)
   const baselinePrefixHash = contextHashes.length > 1 ? contextHashes[0] : input.previousPrefixHash
-  const prefixPreserved =
-    currentPrefixHash && baselinePrefixHash ? currentPrefixHash === baselinePrefixHash : undefined
+  const prefixPreserved = currentPrefixHash && baselinePrefixHash ? currentPrefixHash === baselinePrefixHash : undefined
   const compacted = records.some((record) => record.type === "compaction.started")
   const rawPhases: LatencyMetric[] = [
     ...pipelineWithoutReadiness,
@@ -564,25 +564,54 @@ function prefixHash(records: readonly Record<string, unknown>[]) {
 function modelIntervals(records: readonly Record<string, unknown>[]) {
   const starts = records.filter((record) => record.type === "execution.started")
   const firstOutputs = records.filter((record) => record.type === "model.first_output")
+  const cacheStarts = records.filter((record) => record.type === "model.cache_restore.started")
+  const cacheFinishes = records.filter((record) => record.type === "model.cache_restore.finished")
   const finishes = records.filter((record) => record.type === "execution.finished" || record.type === "execution.error")
+  const restores: ReturnType<typeof metric>[] = []
   const prompt: ReturnType<typeof metric>[] = []
   const generation: ReturnType<typeof metric>[] = []
   for (const start of starts) {
     const startedAt = timestamp(start)
     if (startedAt === undefined) continue
     const messageID = typeof start.messageID === "string" ? start.messageID : undefined
-    const first = firstOutputs.find(
-      (record) => timestamp(record)! >= startedAt && (!messageID || record.messageID === messageID),
-    )
-    const finish = finishes.find(
-      (record) => timestamp(record)! >= startedAt && (!messageID || record.messageID === messageID),
-    )
+    const executionID = typeof start.executionID === "string" ? start.executionID : undefined
+    const matches = (record: Record<string, unknown>) =>
+      (!messageID || record.messageID === messageID) && (!executionID || record.executionID === executionID)
+    const first = firstOutputs.find((record) => timestamp(record)! >= startedAt && matches(record))
+    const finish = finishes.find((record) => timestamp(record)! >= startedAt && matches(record))
     const firstAt = timestamp(first)
     const completedAt = timestamp(finish)
+    const cacheStart = cacheStarts.find((record) => timestamp(record)! >= startedAt && matches(record))
+    const cacheStartData = object(cacheStart?.data)
+    const cacheStartedAt = number(cacheStartData?.startedAt) ?? (cacheStart ? startedAt : undefined)
+    const cacheFinish = cacheFinishes.find(
+      (record) =>
+        cacheStartedAt !== undefined &&
+        timestamp(record)! >= (timestamp(cacheStart) ?? cacheStartedAt) &&
+        matches(record),
+    )
+    const cacheFinishData = object(cacheFinish?.data)
+    const cacheDurationMs = number(cacheFinishData?.durationMs)
+    const cacheCompletedAt =
+      cacheStartedAt === undefined
+        ? undefined
+        : cacheDurationMs !== undefined
+          ? cacheStartedAt + cacheDurationMs
+          : (timestamp(cacheFinish) ?? firstAt ?? completedAt)
+    if (cacheStartedAt !== undefined)
+      restores.push(
+        metric({
+          phase: "cache_restore",
+          startedAt: cacheStartedAt,
+          completedAt: cacheCompletedAt,
+          cache: "unknown",
+          detail: "Inferred while waiting for the first LM Studio output",
+        }),
+      )
     prompt.push(
       metric({
         phase: "prompt_processing",
-        startedAt,
+        startedAt: cacheCompletedAt ?? startedAt,
         completedAt: firstAt ?? completedAt,
         cache: "unknown",
         detail: firstAt === undefined ? "No model output observed" : "Time to first model output",
@@ -599,9 +628,11 @@ function modelIntervals(records: readonly Record<string, unknown>[]) {
         }),
       )
   }
-  return [aggregate("prompt_processing", prompt), aggregate("generation", generation)].filter(
-    (item): item is NonNullable<typeof item> => item !== undefined,
-  )
+  return [
+    aggregate("cache_restore", restores),
+    aggregate("prompt_processing", prompt),
+    aggregate("generation", generation),
+  ].filter((item): item is NonNullable<typeof item> => item !== undefined)
 }
 
 function toolIntervals(records: readonly Record<string, unknown>[]) {
@@ -694,7 +725,13 @@ function aggregate(phase: LatencyPhase, items: readonly LatencyMetric[]) {
     startedAt: started.length ? Math.min(...started) : undefined,
     completedAt: completed.length ? Math.max(...completed) : undefined,
     durationMs: items.reduce((sum, item) => sum + (item.durationMs ?? 0), 0),
-    cache: "bypass",
+    cache: items.some((item) => item.cache === "miss")
+      ? "miss"
+      : items.some((item) => item.cache === "hit")
+        ? "hit"
+        : items.every((item) => item.cache === "bypass")
+          ? "bypass"
+          : "unknown",
     detail: items.length === 1 ? items[0]?.detail : `${items.length} provider turns`,
   })
 }
@@ -883,27 +920,31 @@ function detail(type: string, value: unknown) {
   const values =
     type === "prompt.received"
       ? [data.text]
-      : type === "model.cache"
-        ? [data.read, data.write, data.reusePercent]
-        : type === "freshness.routed"
-        ? [data.scope, data.reason]
-        : type === "repository.recalled"
-          ? [
-              data.cached === true ? "cached" : "retrieved",
-              data.available === true ? "available" : "empty",
-              data.characters,
-            ]
-          : type === "memory.recalled"
-            ? [data.count]
-            : type.startsWith("model.")
-              ? [data.modelID, data.instanceID, errorText(data.error)]
-              : type.startsWith("tool.")
-                ? [data.tool, data.callID, data.reason, errorText(data.error)]
-                : type.startsWith("compaction.")
-                  ? [data.reason, data.result]
-                  : type.startsWith("execution.")
-                    ? [data.result, data.counter, errorText(data.error)]
-                    : []
+      : type === "model.cache_restore.started"
+        ? [data.inferred === true ? "inferred" : undefined, data.thresholdMs]
+        : type === "model.cache_restore.finished"
+          ? [data.durationMs, data.outcome]
+          : type === "model.cache"
+            ? [data.read, data.write, data.reusePercent]
+            : type === "freshness.routed"
+              ? [data.scope, data.reason]
+              : type === "repository.recalled"
+                ? [
+                    data.cached === true ? "cached" : "retrieved",
+                    data.available === true ? "available" : "empty",
+                    data.characters,
+                  ]
+                : type === "memory.recalled"
+                  ? [data.count]
+                  : type.startsWith("model.")
+                    ? [data.modelID, data.instanceID, errorText(data.error)]
+                    : type.startsWith("tool.")
+                      ? [data.tool, data.callID, data.reason, errorText(data.error)]
+                      : type.startsWith("compaction.")
+                        ? [data.reason, data.result]
+                        : type.startsWith("execution.")
+                          ? [data.result, data.counter, errorText(data.error)]
+                          : []
   const text = values
     .filter((item) => item !== undefined && item !== null && item !== "")
     .map(String)

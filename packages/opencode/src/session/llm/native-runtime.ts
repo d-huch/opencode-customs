@@ -41,18 +41,28 @@ type StreamInput = {
   readonly providerOptions?: Record<string, any>
   readonly headers: Record<string, string>
   readonly abort: AbortSignal
+  readonly statefulResponses?: boolean
+  readonly previousResponseID?: string
 }
 
-export function status(input: Pick<StreamInput, "model" | "provider" | "auth">): RuntimeStatus {
+export function status(
+  input: Pick<StreamInput, "model" | "provider" | "auth"> & Partial<Pick<StreamInput, "statefulResponses">>,
+): RuntimeStatus {
   return statusWithFetch(input, providerFetch(input))
 }
 
 function statusWithFetch(
-  input: Pick<StreamInput, "model" | "provider" | "auth">,
+  input: Pick<StreamInput, "model" | "provider" | "auth"> & Partial<Pick<StreamInput, "statefulResponses">>,
   fetch: typeof globalThis.fetch | undefined,
 ): RuntimeStatus {
   const providerID = input.model.providerID
-  if (providerID !== "openai" && providerID !== "anthropic" && !providerID.startsWith("opencode"))
+  const lmStudioResponses = input.statefulResponses === true && providerID === "lmstudio"
+  if (
+    !lmStudioResponses &&
+    providerID !== "openai" &&
+    providerID !== "anthropic" &&
+    !providerID.startsWith("opencode")
+  )
     return { type: "unsupported", reason: "provider is not openai, opencode, or anthropic" }
   const npm = input.model.api.npm
   if (npm !== "@ai-sdk/openai" && npm !== "@ai-sdk/openai-compatible" && npm !== "@ai-sdk/anthropic")
@@ -61,7 +71,10 @@ function statusWithFetch(
     return { type: "unsupported", reason: "OAuth auth requires a provider fetch override" }
   }
 
-  const apiKey = typeof input.provider.options.apiKey === "string" ? input.provider.options.apiKey : input.provider.key
+  const apiKey =
+    typeof input.provider.options.apiKey === "string"
+      ? input.provider.options.apiKey
+      : (input.provider.key ?? (lmStudioResponses ? "lm-studio" : undefined))
   if (!apiKey) return { type: "unsupported", reason: "API key is not configured" }
 
   return {
@@ -87,6 +100,7 @@ export function stream(input: StreamInput): StreamResult {
   // — if a field ever needs to differ between the two surfaces, the
   // translation belongs here, not split across both packages.
   const tools = nativeTools(input.tools, input)
+  const openai = isRecord(input.providerOptions?.openai) ? input.providerOptions.openai : {}
   const request = LLMNative.request({
     model: input.model,
     apiKey: current.apiKey,
@@ -97,8 +111,18 @@ export function stream(input: StreamInput): StreamResult {
     topP: input.topP,
     topK: input.topK,
     maxOutputTokens: input.maxOutputTokens,
-    providerOptions: ProviderTransform.providerOptions(input.model, input.providerOptions ?? {}),
+    providerOptions: input.statefulResponses
+      ? {
+          ...ProviderTransform.providerOptions(input.model, input.providerOptions ?? {}),
+          openai: {
+            ...openai,
+            store: true,
+            ...(input.previousResponseID ? { previousResponseId: input.previousResponseID } : {}),
+          },
+        }
+      : ProviderTransform.providerOptions(input.model, input.providerOptions ?? {}),
     headers: { ...providerHeaders(input.provider.options.headers), ...input.headers },
+    responses: input.statefulResponses,
   })
   const stream = Stream.scoped(
     Stream.unwrap(

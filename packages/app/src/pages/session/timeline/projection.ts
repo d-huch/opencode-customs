@@ -58,7 +58,7 @@ export function createTimelineProjection(input: {
             assistantMessagesByParent().get(userMessage.id) ?? emptyAssistantMessages,
             indexAccessor(),
             input.showReasoningSummaries(),
-            input.status().type,
+            input.status(),
             activeMessageID() === userMessage.id,
             input.inlineComments(),
           ),

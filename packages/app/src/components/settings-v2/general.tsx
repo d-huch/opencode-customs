@@ -1,9 +1,10 @@
-import { Component, Show, createMemo, createResource, createSignal, onMount } from "solid-js"
+import { Component, For, Show, createMemo, createResource, createSignal, onMount } from "solid-js"
 import { createMediaQuery } from "@solid-primitives/media"
 import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
 import { SelectV2 } from "@opencode-ai/ui/v2/select-v2"
 import { Switch } from "@opencode-ai/ui/v2/switch-v2"
 import { TextInputV2 } from "@opencode-ai/ui/v2/text-input-v2"
+import { TextareaV2 } from "@opencode-ai/ui/v2/textarea-v2"
 import { useTheme, type ColorScheme } from "@opencode-ai/ui/theme/context"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { useLanguage } from "@/context/language"
@@ -96,10 +97,45 @@ export const SettingsGeneralV2: Component<{
 
   const updater = useUpdaterAction()
   const [voiceTest, setVoiceTest] = createSignal<"idle" | "running" | string>("idle")
+  const [fishVoiceTranscript, setFishVoiceTranscript] = createSignal("")
+  const [fishVoiceState, setFishVoiceState] = createSignal<"idle" | "saving" | string>("idle")
+  const [fishReferenceFile, setFishReferenceFile] = createSignal<File>()
+  const [fishSavedReference, setFishSavedReference] = createSignal<{
+    filename: string
+    contentType: string
+    transcript: string
+    bytes: number
+  }>()
+  const [fishDebugText, setFishDebugText] = createSignal(language.t("settings.general.voice.test.phrase"))
+  const [fishDebugState, setFishDebugState] = createSignal<"idle" | "running">("idle")
+  const [fishServerState, setFishServerState] = createSignal<{
+    status: "idle" | "checking" | "ready" | "offline" | "error"
+    latencyMs?: number
+    detail?: string
+  }>({ status: "idle" })
+  const [fishDebugLog, setFishDebugLog] = createSignal<
+    Array<{ at: string; kind: "info" | "success" | "error"; text: string }>
+  >([])
+  const voiceProviders = [
+    { value: "local" as const, label: language.t("settings.general.voice.provider.local") },
+    { value: "fish-local" as const, label: language.t("settings.general.voice.provider.fish") },
+  ]
+  const fishLatencies = [
+    { value: "balanced" as const, label: language.t("settings.general.voice.fish.latency.balanced") },
+    { value: "normal" as const, label: language.t("settings.general.voice.fish.latency.normal") },
+  ]
+  const fishLanguages = ["auto", "uk", "en", "mixed"].map((value) => ({
+    value: value as "auto" | "uk" | "en" | "mixed",
+    label: language.t(`settings.general.voice.fish.language.${value}`),
+  }))
   const voiceModes = [
     { value: "quality" as const, label: language.t("settings.general.voice.mode.quality") },
     { value: "fast" as const, label: language.t("settings.general.voice.mode.fast") },
   ]
+  const personalityModes = ["normal", "work", "night", "emergency"].map((value) => ({
+    value: value as "normal" | "work" | "night" | "emergency",
+    label: language.t(`settings.general.voice.personality.mode.${value}`),
+  }))
   const qualityVoices = [
     { value: "kateryna", label: language.t("settings.general.voice.voice.kateryna") },
     { value: "lada", label: language.t("settings.general.voice.voice.lada") },
@@ -110,6 +146,31 @@ export const SettingsGeneralV2: Component<{
   const fastVoices = [{ value: "ukrainian_tts", label: language.t("settings.general.voice.voice.piper") }]
   const voiceOptions = createMemo(() => (settings.voice.ttsMode() === "quality" ? qualityVoices : fastVoices))
 
+  const checkFishServer = async () => {
+    if (!platform.getFishAudioLocalStatus) {
+      setFishServerState({ status: "error", detail: language.t("settings.general.voice.fish.status.unavailable") })
+      return
+    }
+    setFishServerState({ status: "checking" })
+    const result = await platform.getFishAudioLocalStatus(settings.voice.fishEndpoint()).catch((error: unknown) => ({
+      status: "error" as const,
+      detail: error instanceof Error ? error.message : String(error),
+    }))
+    setFishServerState(result)
+  }
+
+  onMount(() => {
+    void platform.getFishAudioLocalReference?.().then((reference) => {
+      setFishSavedReference(reference)
+      if (reference) setFishVoiceTranscript(reference.transcript)
+    })
+    if (settings.voice.ttsProvider() === "fish-local") void checkFishServer()
+  })
+  const openAgentPersonalization = async () => {
+    const module = await import("@/components/dialog-agent-personalization")
+    void dialog.show(() => <module.DialogAgentPersonalization />)
+  }
+
   const testVoice = async () => {
     if (!platform.synthesizeLocalSpeech) {
       setVoiceTest(language.t("settings.general.voice.test.unavailable"))
@@ -119,10 +180,25 @@ export const SettingsGeneralV2: Component<{
     const started = performance.now()
     const result = await platform
       .synthesizeLocalSpeech({
-        endpoint: settings.voice.ttsEndpoint(),
+        provider: settings.voice.ttsProvider(),
+        endpoint:
+          settings.voice.ttsProvider() === "fish-local"
+            ? settings.voice.fishEndpoint()
+            : settings.voice.ttsEndpoint(),
         model: settings.voice.ttsModel(),
         voice: settings.voice.ttsVoice(),
         mode: settings.voice.ttsMode(),
+        latency: settings.voice.fishLatency(),
+        language: settings.voice.fishLanguage(),
+        temperature: settings.voice.fishTemperature(),
+        topP: settings.voice.fishTopP(),
+        repetitionPenalty: settings.voice.fishRepetitionPenalty(),
+        seed: settings.voice.fishSeed(),
+        chunkLength: settings.voice.fishChunkLength(),
+        normalize: settings.voice.fishNormalize(),
+        streaming: settings.voice.fishStreaming(),
+        useMemoryCache: settings.voice.fishMemoryCache(),
+        maxNewTokens: settings.voice.fishMaxNewTokens(),
         text: language.t("settings.general.voice.test.phrase"),
       })
       .catch((error: unknown) => {
@@ -132,6 +208,10 @@ export const SettingsGeneralV2: Component<{
     if (!result) return
     const url = URL.createObjectURL(result.audio)
     const audio = new Audio(url)
+    if (settings.voice.ttsProvider() === "fish-local") {
+      audio.playbackRate = settings.voice.fishPlaybackRate()
+      audio.volume = settings.voice.fishVolume()
+    }
     audio.onended = () => URL.revokeObjectURL(url)
     audio.onerror = () => URL.revokeObjectURL(url)
     const played = await audio.play().then(
@@ -152,6 +232,178 @@ export const SettingsGeneralV2: Component<{
       }),
     )
   }
+
+  const addFishDebug = (text: string, kind: "info" | "success" | "error" = "info") => {
+    setFishDebugLog((entries) => [...entries.slice(-39), { at: new Date().toLocaleTimeString(), kind, text }])
+  }
+
+  const fishContentType = (file: File) => {
+    if (file.type) return file.type
+    const extension = file.name.split(".").at(-1)?.toLowerCase()
+    return (
+      {
+        wav: "audio/wav",
+        mp3: "audio/mpeg",
+        m4a: "audio/mp4",
+        mp4: "audio/mp4",
+        ogg: "audio/ogg",
+        oga: "audio/ogg",
+        flac: "audio/flac",
+        aac: "audio/aac",
+      }[extension ?? ""] ?? "application/octet-stream"
+    )
+  }
+
+  const chooseFishReference = async () => {
+    if (!platform.openAttachmentPickerDialog) {
+      setFishVoiceState(language.t("settings.general.voice.fish.clone.unavailable"))
+      return
+    }
+    await platform.openAttachmentPickerDialog(
+      {
+        title: language.t("settings.general.voice.fish.clone.choose"),
+        extensions: ["wav", "mp3", "m4a", "mp4", "ogg", "oga", "flac", "aac"],
+      },
+      async (file) => {
+        setFishReferenceFile(file)
+        setFishVoiceState("idle")
+        addFishDebug(
+          language.t("settings.general.voice.fish.debug.selected", {
+            name: file.name,
+            type: fishContentType(file),
+            size: (file.size / 1024 / 1024).toFixed(2),
+          }),
+        )
+      },
+    )
+  }
+
+  const saveFishReference = async () => {
+    const file = fishReferenceFile()
+    if (!file || !platform.setFishAudioLocalReference) {
+      setFishVoiceState(language.t("settings.general.voice.fish.clone.unavailable"))
+      return undefined
+    }
+    if (!fishVoiceTranscript().trim()) {
+      setFishVoiceState(language.t("settings.general.voice.fish.debug.missingTranscript"))
+      return undefined
+    }
+    setFishVoiceState("saving")
+    addFishDebug(language.t("settings.general.voice.fish.debug.cloning"))
+    return platform
+      .setFishAudioLocalReference({
+        filename: file.name,
+        contentType: fishContentType(file),
+        audio: await file.arrayBuffer(),
+        transcript: fishVoiceTranscript(),
+      })
+      .then(
+        (result) => {
+          setFishSavedReference(result)
+          setFishVoiceState(language.t("settings.general.voice.fish.clone.created", { name: result.filename }))
+          addFishDebug(language.t("settings.general.voice.fish.debug.cloned", { name: result.filename }), "success")
+          return result
+        },
+        (error: unknown) => {
+          const message = error instanceof Error ? error.message : String(error)
+          setFishVoiceState(message)
+          addFishDebug(message, "error")
+          return undefined
+        },
+      )
+  }
+
+  const playFishReference = async () => {
+    const file = fishReferenceFile()
+    if (!file) return
+    const url = URL.createObjectURL(file)
+    const audio = new Audio(url)
+    audio.onended = () => URL.revokeObjectURL(url)
+    audio.onerror = () => {
+      URL.revokeObjectURL(url)
+      addFishDebug(language.t("settings.general.voice.fish.debug.referencePlaybackFailed"), "error")
+    }
+    await audio.play().then(
+      () => addFishDebug(language.t("settings.general.voice.fish.debug.referencePlayback")),
+      (error: unknown) => {
+        URL.revokeObjectURL(url)
+        addFishDebug(error instanceof Error ? error.message : String(error), "error")
+      },
+    )
+  }
+
+  const testFishVoice = async () => {
+    if (!platform.synthesizeLocalSpeech) {
+      addFishDebug(language.t("settings.general.voice.test.unavailable"), "error")
+      return
+    }
+    if (!fishDebugText().trim()) {
+      addFishDebug(language.t("settings.general.voice.fish.debug.emptyText"), "error")
+      return
+    }
+    setFishDebugState("running")
+    const started = performance.now()
+    const reference = fishReferenceFile() ? await saveFishReference() : fishSavedReference()
+    if (!reference) {
+      addFishDebug(language.t("settings.general.voice.fish.debug.missingReference"), "error")
+      setFishDebugState("idle")
+      return
+    }
+    addFishDebug(language.t("settings.general.voice.fish.debug.synthesizing", { name: reference.filename }))
+    const result = await platform
+      .synthesizeLocalSpeech({
+        provider: "fish-local",
+        endpoint: settings.voice.fishEndpoint(),
+        model: settings.voice.ttsModel(),
+        voice: settings.voice.ttsVoice(),
+        mode: settings.voice.ttsMode(),
+        latency: settings.voice.fishLatency(),
+        language: settings.voice.fishLanguage(),
+        temperature: settings.voice.fishTemperature(),
+        topP: settings.voice.fishTopP(),
+        repetitionPenalty: settings.voice.fishRepetitionPenalty(),
+        seed: settings.voice.fishSeed(),
+        chunkLength: settings.voice.fishChunkLength(),
+        normalize: settings.voice.fishNormalize(),
+        streaming: settings.voice.fishStreaming(),
+        useMemoryCache: settings.voice.fishMemoryCache(),
+        maxNewTokens: settings.voice.fishMaxNewTokens(),
+        text: fishDebugText().trim(),
+      })
+      .catch((error: unknown) => {
+        addFishDebug(error instanceof Error ? error.message : String(error), "error")
+        return undefined
+      })
+    if (!result) {
+      setFishDebugState("idle")
+      return
+    }
+    const url = URL.createObjectURL(result.audio)
+    const audio = new Audio(url)
+    audio.playbackRate = settings.voice.fishPlaybackRate()
+    audio.volume = settings.voice.fishVolume()
+    audio.onended = () => URL.revokeObjectURL(url)
+    audio.onerror = () => URL.revokeObjectURL(url)
+    const played = await audio.play().then(
+      () => true,
+      (error: unknown) => {
+        URL.revokeObjectURL(url)
+        addFishDebug(error instanceof Error ? error.message : String(error), "error")
+        return false
+      },
+    )
+    setFishDebugState("idle")
+    if (!played) return
+    addFishDebug(
+      language.t("settings.general.voice.fish.debug.playing", {
+        first: Math.round(performance.now() - started),
+        total: Math.round(result.metrics.totalMs),
+        bytes: result.audio.size,
+        type: result.audio.type || "audio/mpeg",
+      }),
+      "success",
+    )
+  }
   const openVoiceInspector = async () => {
     const module = await import("../dialog-voice-inspector")
     void dialog.show(() => <module.DialogVoiceInspector sessionID={props.sessionID} />)
@@ -161,6 +413,10 @@ export const SettingsGeneralV2: Component<{
     if (!props.sessionID) return undefined
     return serverSync().session.lineage.peek(props.sessionID)?.session.directory
   })
+  const openVoiceDictionary = async () => {
+    const module = await import("../dialog-voice-dictionary")
+    void dialog.show(() => <module.DialogVoiceDictionary project={dir()} sessionID={props.sessionID} />)
+  }
   const accepting = createMemo(() => {
     const value = dir()
     if (!value || !props.sessionID) return false
@@ -331,6 +587,22 @@ export const SettingsGeneralV2: Component<{
             label={(o) => o.label}
             onSelect={(option) => option && language.setLocale(option.value)}
           />
+        </SettingsRowV2>
+
+        <SettingsRowV2
+          title={language.t("settings.general.row.personalization.title")}
+          description={language.t("settings.general.row.personalization.description")}
+        >
+          <div class="flex items-center gap-2">
+            <Switch checked={settings.personalization.enabled()} onChange={settings.personalization.setEnabled} />
+            <ButtonV2
+              data-action="settings-agent-personalization"
+              variant="neutral"
+              onClick={() => void openAgentPersonalization()}
+            >
+              {language.t("settings.general.row.personalization.configure")}
+            </ButtonV2>
+          </div>
         </SettingsRowV2>
 
         <SettingsRowV2
@@ -720,6 +992,61 @@ export const SettingsGeneralV2: Component<{
         </SettingsRowV2>
 
         <SettingsRowV2
+          title={language.t("settings.general.voice.personality.title")}
+          description={language.t("settings.general.voice.personality.description")}
+        >
+          <SelectV2
+            appearance="inline"
+            data-action="settings-voice-personality"
+            options={personalityModes}
+            current={personalityModes.find((option) => option.value === settings.voice.personalityMode())}
+            placement="bottom-end"
+            gutter={6}
+            value={(option) => option.value}
+            label={(option) => option.label}
+            onSelect={(option) => option && settings.voice.setPersonalityMode(option.value)}
+          />
+        </SettingsRowV2>
+
+        <SettingsRowV2
+          title={language.t("settings.general.voice.contextualCorrection.title")}
+          description={language.t("settings.general.voice.contextualCorrection.description")}
+        >
+          <Switch
+            checked={settings.voice.contextualCorrection()}
+            disabled={!settings.voice.enabled()}
+            onChange={settings.voice.setContextualCorrection}
+          />
+        </SettingsRowV2>
+
+        <SettingsRowV2
+          title={language.t("settings.general.voice.confirmRisky.title")}
+          description={language.t("settings.general.voice.confirmRisky.description")}
+        >
+          <Switch
+            checked={settings.voice.confirmRiskyCommands()}
+            disabled={!settings.voice.enabled()}
+            onChange={settings.voice.setConfirmRiskyCommands}
+          />
+        </SettingsRowV2>
+
+        <SettingsRowV2
+          title={language.t("settings.general.voice.dictionary.title")}
+          description={language.t("settings.general.voice.dictionary.description")}
+        >
+          <ButtonV2
+            data-action="settings-voice-dictionary"
+            variant="neutral"
+            onClick={() => void openVoiceDictionary()}
+          >
+            {language.t("settings.general.voice.dictionary.manage", {
+              confirmed: settings.voice.dictionaryEntries().filter((entry) => entry.confirmed).length,
+              pending: settings.voice.dictionaryEntries().filter((entry) => !entry.confirmed).length,
+            })}
+          </ButtonV2>
+        </SettingsRowV2>
+
+        <SettingsRowV2
           title={language.t("settings.general.voice.speakResponses.title")}
           description={language.t("settings.general.voice.speakResponses.description")}
         >
@@ -732,77 +1059,499 @@ export const SettingsGeneralV2: Component<{
 
         <Show when={settings.voice.speakResponses()}>
           <SettingsRowV2
-            title={language.t("settings.general.voice.ttsEndpoint.title")}
-            description={language.t("settings.general.voice.ttsEndpoint.description")}
-          >
-            <div class="w-full sm:w-[320px]">
-              <TextInputV2
-                data-action="settings-voice-tts-endpoint"
-                type="url"
-                appearance="base"
-                value={settings.voice.ttsEndpoint()}
-                onInput={(event) => settings.voice.setTTSEndpoint(event.currentTarget.value)}
-                placeholder="http://127.0.0.1:8880/v1/audio/speech"
-                spellcheck={false}
-                autocomplete="off"
-                aria-label={language.t("settings.general.voice.ttsEndpoint.title")}
-              />
-            </div>
-          </SettingsRowV2>
-
-          <SettingsRowV2
-            title={language.t("settings.general.voice.mode.title")}
-            description={language.t("settings.general.voice.mode.description")}
+            title={language.t("settings.general.voice.provider.title")}
+            description={language.t("settings.general.voice.provider.description")}
           >
             <SelectV2
               appearance="inline"
-              data-action="settings-voice-tts-mode"
-              options={voiceModes}
-              current={voiceModes.find((option) => option.value === settings.voice.ttsMode())}
+              data-action="settings-voice-provider"
+              options={voiceProviders}
+              current={voiceProviders.find((option) => option.value === settings.voice.ttsProvider())}
               placement="bottom-end"
               gutter={6}
               value={(option) => option.value}
               label={(option) => option.label}
-              onSelect={(option) => option && settings.voice.setTTSMode(option.value)}
+              onSelect={(option) => option && settings.voice.setTTSProvider(option.value)}
             />
           </SettingsRowV2>
 
-          <SettingsRowV2
-            title={language.t("settings.general.voice.ttsVoice.title")}
-            description={language.t("settings.general.voice.ttsVoice.description")}
-          >
-            <SelectV2
-              appearance="inline"
-              data-action="settings-voice-tts-voice"
-              options={voiceOptions()}
-              current={voiceOptions().find((option) => option.value === settings.voice.ttsVoice()) ?? voiceOptions()[0]}
-              placement="bottom-end"
-              gutter={6}
-              value={(option) => option.value}
-              label={(option) => option.label}
-              onSelect={(option) => option && settings.voice.setTTSVoice(option.value)}
-            />
-          </SettingsRowV2>
+          <Show
+            when={settings.voice.ttsProvider() === "local"}
+            fallback={
+              <>
+                <SettingsRowV2
+                  title={language.t("settings.general.voice.fish.endpoint.title")}
+                  description={language.t("settings.general.voice.fish.endpoint.description")}
+                >
+                  <div class="grid w-full gap-2 sm:w-[520px]">
+                    <TextInputV2
+                      data-action="settings-voice-fish-endpoint"
+                      appearance="base"
+                      value={settings.voice.fishEndpoint()}
+                      onInput={(event) => settings.voice.setFishEndpoint(event.currentTarget.value)}
+                      placeholder="http://127.0.0.1:8080/v1/tts"
+                      spellcheck={false}
+                      autocomplete="off"
+                      aria-label={language.t("settings.general.voice.fish.endpoint.title")}
+                    />
+                    <div class="flex flex-wrap items-center gap-2">
+                      <ButtonV2
+                        data-action="settings-voice-fish-status"
+                        variant="ghost"
+                        disabled={fishServerState().status === "checking"}
+                        onClick={() => void checkFishServer()}
+                      >
+                        {fishServerState().status === "checking"
+                          ? language.t("settings.general.voice.fish.status.checking")
+                          : language.t("settings.general.voice.fish.status.check")}
+                      </ButtonV2>
+                      <Show when={fishServerState().status !== "idle" && fishServerState().status !== "checking"}>
+                        <span
+                          classList={{
+                            "text-12-regular text-icon-success-base": fishServerState().status === "ready",
+                            "text-12-regular text-icon-critical-base": fishServerState().status !== "ready",
+                          }}
+                        >
+                          {fishServerState().status === "ready"
+                            ? language.t("settings.general.voice.fish.status.ready", {
+                                latency: fishServerState().latencyMs ?? 0,
+                              })
+                            : fishServerState().detail}
+                        </span>
+                      </Show>
+                    </div>
+                  </div>
+                </SettingsRowV2>
 
-          <SettingsRowV2
-            title={language.t("settings.general.voice.test.title")}
-            description={
-              voiceTest() === "idle"
-                ? language.t("settings.general.voice.test.description")
-                : voiceTest() === "running"
-                  ? language.t("settings.general.voice.test.running")
-                  : voiceTest()
+                <SettingsRowV2
+                  title={language.t("settings.general.voice.fish.latency.title")}
+                  description={language.t("settings.general.voice.fish.latency.description")}
+                >
+                  <SelectV2
+                    appearance="inline"
+                    data-action="settings-voice-fish-latency"
+                    options={fishLatencies}
+                    current={fishLatencies.find((option) => option.value === settings.voice.fishLatency())}
+                    placement="bottom-end"
+                    gutter={6}
+                    value={(option) => option.value}
+                    label={(option) => option.label}
+                    onSelect={(option) => option && settings.voice.setFishLatency(option.value)}
+                  />
+                </SettingsRowV2>
+
+                <SettingsRowV2
+                  title={language.t("settings.general.voice.fish.language.title")}
+                  description={language.t("settings.general.voice.fish.language.description")}
+                >
+                  <SelectV2
+                    appearance="inline"
+                    data-action="settings-voice-fish-language"
+                    options={fishLanguages}
+                    current={fishLanguages.find((option) => option.value === settings.voice.fishLanguage())}
+                    placement="bottom-end"
+                    gutter={6}
+                    value={(option) => option.value}
+                    label={(option) => option.label}
+                    onSelect={(option) => option && settings.voice.setFishLanguage(option.value)}
+                  />
+                </SettingsRowV2>
+
+                <SettingsRowV2
+                  title={language.t("settings.general.voice.fish.playbackRate.title")}
+                  description={language.t("settings.general.voice.fish.playbackRate.description")}
+                >
+                  <div class="w-28">
+                    <TextInputV2
+                      data-action="settings-voice-fish-playback-rate"
+                      type="number"
+                      appearance="base"
+                      min={0.5}
+                      max={2}
+                      step={0.05}
+                      value={String(settings.voice.fishPlaybackRate())}
+                      onChange={(event) => settings.voice.setFishPlaybackRate(event.currentTarget.valueAsNumber)}
+                      aria-label={language.t("settings.general.voice.fish.playbackRate.title")}
+                    />
+                  </div>
+                </SettingsRowV2>
+
+                <SettingsRowV2
+                  title={language.t("settings.general.voice.fish.volume.title")}
+                  description={language.t("settings.general.voice.fish.volume.description")}
+                >
+                  <div class="w-28">
+                    <TextInputV2
+                      data-action="settings-voice-fish-volume"
+                      type="number"
+                      appearance="base"
+                      min={0}
+                      max={100}
+                      step={5}
+                      value={String(Math.round(settings.voice.fishVolume() * 100))}
+                      onChange={(event) => settings.voice.setFishVolume(event.currentTarget.valueAsNumber / 100)}
+                      aria-label={language.t("settings.general.voice.fish.volume.title")}
+                    />
+                  </div>
+                </SettingsRowV2>
+
+                <SettingsRowV2
+                  title={language.t("settings.general.voice.fish.temperature.title")}
+                  description={language.t("settings.general.voice.fish.temperature.description")}
+                >
+                  <div class="w-28">
+                    <TextInputV2
+                      data-action="settings-voice-fish-temperature"
+                      type="number"
+                      appearance="base"
+                      min={0.1}
+                      max={1}
+                      step={0.05}
+                      value={String(settings.voice.fishTemperature())}
+                      onChange={(event) => settings.voice.setFishTemperature(event.currentTarget.valueAsNumber)}
+                      aria-label={language.t("settings.general.voice.fish.temperature.title")}
+                    />
+                  </div>
+                </SettingsRowV2>
+
+                <SettingsRowV2
+                  title={language.t("settings.general.voice.fish.topP.title")}
+                  description={language.t("settings.general.voice.fish.topP.description")}
+                >
+                  <div class="w-28">
+                    <TextInputV2
+                      data-action="settings-voice-fish-top-p"
+                      type="number"
+                      appearance="base"
+                      min={0.1}
+                      max={1}
+                      step={0.05}
+                      value={String(settings.voice.fishTopP())}
+                      onChange={(event) => settings.voice.setFishTopP(event.currentTarget.valueAsNumber)}
+                      aria-label={language.t("settings.general.voice.fish.topP.title")}
+                    />
+                  </div>
+                </SettingsRowV2>
+
+                <SettingsRowV2
+                  title={language.t("settings.general.voice.fish.repetitionPenalty.title")}
+                  description={language.t("settings.general.voice.fish.repetitionPenalty.description")}
+                >
+                  <div class="w-28">
+                    <TextInputV2
+                      data-action="settings-voice-fish-repetition-penalty"
+                      type="number"
+                      appearance="base"
+                      min={0.9}
+                      max={2}
+                      step={0.05}
+                      value={String(settings.voice.fishRepetitionPenalty())}
+                      onChange={(event) => settings.voice.setFishRepetitionPenalty(event.currentTarget.valueAsNumber)}
+                      aria-label={language.t("settings.general.voice.fish.repetitionPenalty.title")}
+                    />
+                  </div>
+                </SettingsRowV2>
+
+                <SettingsRowV2
+                  title={language.t("settings.general.voice.fish.seed.title")}
+                  description={language.t("settings.general.voice.fish.seed.description")}
+                >
+                  <div class="w-36">
+                    <TextInputV2
+                      data-action="settings-voice-fish-seed"
+                      type="number"
+                      appearance="base"
+                      value={settings.voice.fishSeed() === null ? "" : String(settings.voice.fishSeed())}
+                      onChange={(event) =>
+                        settings.voice.setFishSeed(event.currentTarget.value ? event.currentTarget.valueAsNumber : null)
+                      }
+                      placeholder={language.t("settings.general.voice.fish.seed.random")}
+                      aria-label={language.t("settings.general.voice.fish.seed.title")}
+                    />
+                  </div>
+                </SettingsRowV2>
+
+                <SettingsRowV2
+                  title={language.t("settings.general.voice.fish.chunkLength.title")}
+                  description={language.t("settings.general.voice.fish.chunkLength.description")}
+                >
+                  <div class="w-28">
+                    <TextInputV2
+                      data-action="settings-voice-fish-chunk-length"
+                      type="number"
+                      appearance="base"
+                      min={100}
+                      max={1000}
+                      step={50}
+                      value={String(settings.voice.fishChunkLength())}
+                      onChange={(event) => settings.voice.setFishChunkLength(event.currentTarget.valueAsNumber)}
+                      aria-label={language.t("settings.general.voice.fish.chunkLength.title")}
+                    />
+                  </div>
+                </SettingsRowV2>
+
+                <SettingsRowV2
+                  title={language.t("settings.general.voice.fish.maxNewTokens.title")}
+                  description={language.t("settings.general.voice.fish.maxNewTokens.description")}
+                >
+                  <div class="w-28">
+                    <TextInputV2
+                      data-action="settings-voice-fish-max-new-tokens"
+                      type="number"
+                      appearance="base"
+                      min={128}
+                      max={4096}
+                      step={128}
+                      value={String(settings.voice.fishMaxNewTokens())}
+                      onChange={(event) => settings.voice.setFishMaxNewTokens(event.currentTarget.valueAsNumber)}
+                      aria-label={language.t("settings.general.voice.fish.maxNewTokens.title")}
+                    />
+                  </div>
+                </SettingsRowV2>
+
+                <SettingsRowV2
+                  title={language.t("settings.general.voice.fish.normalize.title")}
+                  description={language.t("settings.general.voice.fish.normalize.description")}
+                >
+                  <Switch checked={settings.voice.fishNormalize()} onChange={settings.voice.setFishNormalize} />
+                </SettingsRowV2>
+
+                <SettingsRowV2
+                  title={language.t("settings.general.voice.fish.streaming.title")}
+                  description={language.t("settings.general.voice.fish.streaming.description")}
+                >
+                  <Switch checked={settings.voice.fishStreaming()} onChange={settings.voice.setFishStreaming} />
+                </SettingsRowV2>
+
+                <SettingsRowV2
+                  title={language.t("settings.general.voice.fish.memoryCache.title")}
+                  description={language.t("settings.general.voice.fish.memoryCache.description")}
+                >
+                  <Switch checked={settings.voice.fishMemoryCache()} onChange={settings.voice.setFishMemoryCache} />
+                </SettingsRowV2>
+
+                <SettingsRowV2
+                  title={language.t("settings.general.voice.fish.debug.title")}
+                  description={
+                    fishVoiceState() === "idle"
+                      ? language.t("settings.general.voice.fish.debug.description")
+                      : fishVoiceState() === "saving"
+                        ? language.t("settings.general.voice.fish.clone.creating")
+                        : fishVoiceState()
+                  }
+                >
+                  <div class="grid w-full sm:w-[520px] gap-3">
+                    <div class="flex flex-wrap items-center gap-2">
+                      <ButtonV2
+                        data-action="settings-voice-fish-reference-choose"
+                        variant="neutral"
+                        disabled={fishDebugState() === "running"}
+                        onClick={() => void chooseFishReference()}
+                      >
+                        {language.t("settings.general.voice.fish.debug.choose")}
+                      </ButtonV2>
+                      <ButtonV2
+                        data-action="settings-voice-fish-reference-play"
+                        variant="ghost"
+                        disabled={!fishReferenceFile() || fishDebugState() === "running"}
+                        onClick={() => void playFishReference()}
+                      >
+                        {language.t("settings.general.voice.fish.debug.playReference")}
+                      </ButtonV2>
+                    </div>
+                    <div class="min-h-5 break-all text-12-regular text-text-weak">
+                      <Show
+                        when={fishReferenceFile()}
+                        fallback={
+                          fishSavedReference()
+                            ? language.t("settings.general.voice.fish.debug.savedFile", {
+                                name: fishSavedReference()!.filename,
+                                size: (fishSavedReference()!.bytes / 1024 / 1024).toFixed(2),
+                              })
+                            : language.t("settings.general.voice.fish.debug.noFile")
+                        }
+                      >
+                        {(file) =>
+                          language.t("settings.general.voice.fish.debug.file", {
+                            name: file().name,
+                            type: fishContentType(file()),
+                            size: (file().size / 1024 / 1024).toFixed(2),
+                          })
+                        }
+                      </Show>
+                    </div>
+                    <TextInputV2
+                      data-action="settings-voice-fish-clone-transcript"
+                      appearance="base"
+                      value={fishVoiceTranscript()}
+                      onInput={(event) => setFishVoiceTranscript(event.currentTarget.value)}
+                      placeholder={language.t("settings.general.voice.fish.clone.transcript")}
+                      aria-label={language.t("settings.general.voice.fish.clone.transcript")}
+                    />
+                    <TextareaV2
+                      data-action="settings-voice-fish-debug-text"
+                      class="w-full"
+                      rows={4}
+                      value={fishDebugText()}
+                      onInput={(event) => setFishDebugText(event.currentTarget.value)}
+                      placeholder={language.t("settings.general.voice.fish.debug.text")}
+                      aria-label={language.t("settings.general.voice.fish.debug.text")}
+                    />
+                    <div class="flex flex-wrap items-center gap-2">
+                      <ButtonV2
+                        data-action="settings-voice-fish-reference-save"
+                        variant="ghost"
+                        disabled={
+                          fishDebugState() === "running" ||
+                          !fishReferenceFile() ||
+                          !fishVoiceTranscript().trim() ||
+                          fishVoiceState() === "saving"
+                        }
+                        onClick={() => void saveFishReference()}
+                      >
+                        {language.t("settings.general.voice.fish.debug.saveReference")}
+                      </ButtonV2>
+                      <ButtonV2
+                        data-action="settings-voice-fish-debug-play"
+                        variant="neutral"
+                        disabled={
+                          fishDebugState() === "running" ||
+                          !fishDebugText().trim() ||
+                          (!fishReferenceFile() && !fishSavedReference()) ||
+                          (Boolean(fishReferenceFile()) && !fishVoiceTranscript().trim())
+                        }
+                        onClick={() => void testFishVoice()}
+                      >
+                        {fishDebugState() === "running"
+                          ? language.t("settings.general.voice.fish.debug.running")
+                          : language.t("settings.general.voice.fish.debug.play")}
+                      </ButtonV2>
+                      <ButtonV2
+                        data-action="settings-voice-fish-debug-clear"
+                        variant="ghost"
+                        disabled={fishDebugLog().length === 0 || fishDebugState() === "running"}
+                        onClick={() => setFishDebugLog([])}
+                      >
+                        {language.t("settings.general.voice.fish.debug.clear")}
+                      </ButtonV2>
+                    </div>
+                    <div
+                      class="max-h-44 min-h-20 overflow-y-auto rounded-md border border-border-weak-base bg-surface-base px-3 py-2"
+                      aria-live="polite"
+                      aria-label={language.t("settings.general.voice.fish.debug.log")}
+                    >
+                      <Show
+                        when={fishDebugLog().length > 0}
+                        fallback={
+                          <div class="text-11-regular text-text-weaker">
+                            {language.t("settings.general.voice.fish.debug.empty")}
+                          </div>
+                        }
+                      >
+                        <div class="grid gap-1.5">
+                          <For each={fishDebugLog()}>
+                            {(entry) => (
+                              <div class="flex items-start gap-2 font-mono text-11-regular">
+                                <span class="shrink-0 text-text-weaker">{entry.at}</span>
+                                <span
+                                  classList={{
+                                    "break-words text-text-weak": entry.kind === "info",
+                                    "break-words text-icon-success-base": entry.kind === "success",
+                                    "break-words text-icon-critical-base": entry.kind === "error",
+                                  }}
+                                >
+                                  {entry.text}
+                                </span>
+                              </div>
+                            )}
+                          </For>
+                        </div>
+                      </Show>
+                    </div>
+                  </div>
+                </SettingsRowV2>
+              </>
             }
           >
-            <ButtonV2
-              size="normal"
-              variant="neutral"
-              disabled={voiceTest() === "running"}
-              onClick={() => void testVoice()}
+            <SettingsRowV2
+              title={language.t("settings.general.voice.ttsEndpoint.title")}
+              description={language.t("settings.general.voice.ttsEndpoint.description")}
             >
-              {language.t("settings.general.voice.test.action")}
-            </ButtonV2>
-          </SettingsRowV2>
+              <div class="w-full sm:w-[320px]">
+                <TextInputV2
+                  data-action="settings-voice-tts-endpoint"
+                  type="url"
+                  appearance="base"
+                  value={settings.voice.ttsEndpoint()}
+                  onInput={(event) => settings.voice.setTTSEndpoint(event.currentTarget.value)}
+                  placeholder="http://127.0.0.1:8880/v1/audio/speech"
+                  spellcheck={false}
+                  autocomplete="off"
+                  aria-label={language.t("settings.general.voice.ttsEndpoint.title")}
+                />
+              </div>
+            </SettingsRowV2>
+          </Show>
+
+          <Show when={settings.voice.ttsProvider() === "local"}>
+            <SettingsRowV2
+              title={language.t("settings.general.voice.mode.title")}
+              description={language.t("settings.general.voice.mode.description")}
+            >
+              <SelectV2
+                appearance="inline"
+                data-action="settings-voice-tts-mode"
+                options={voiceModes}
+                current={voiceModes.find((option) => option.value === settings.voice.ttsMode())}
+                placement="bottom-end"
+                gutter={6}
+                value={(option) => option.value}
+                label={(option) => option.label}
+                onSelect={(option) => option && settings.voice.setTTSMode(option.value)}
+              />
+            </SettingsRowV2>
+
+            <SettingsRowV2
+              title={language.t("settings.general.voice.ttsVoice.title")}
+              description={language.t("settings.general.voice.ttsVoice.description")}
+            >
+              <SelectV2
+                appearance="inline"
+                data-action="settings-voice-tts-voice"
+                options={voiceOptions()}
+                current={
+                  voiceOptions().find((option) => option.value === settings.voice.ttsVoice()) ?? voiceOptions()[0]
+                }
+                placement="bottom-end"
+                gutter={6}
+                value={(option) => option.value}
+                label={(option) => option.label}
+                onSelect={(option) => option && settings.voice.setTTSVoice(option.value)}
+              />
+            </SettingsRowV2>
+          </Show>
+
+          <Show when={settings.voice.ttsProvider() === "local"}>
+            <SettingsRowV2
+              title={language.t("settings.general.voice.test.title")}
+              description={
+                voiceTest() === "idle"
+                  ? language.t("settings.general.voice.test.description")
+                  : voiceTest() === "running"
+                    ? language.t("settings.general.voice.test.running")
+                    : voiceTest()
+              }
+            >
+              <ButtonV2
+                size="normal"
+                variant="neutral"
+                disabled={voiceTest() === "running"}
+                onClick={() => void testVoice()}
+              >
+                {language.t("settings.general.voice.test.action")}
+              </ButtonV2>
+            </SettingsRowV2>
+          </Show>
         </Show>
 
         <SettingsRowV2

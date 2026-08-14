@@ -12,6 +12,7 @@ import { SettingsListV2 } from "./parts/list"
 import { SettingsRowV2 } from "./parts/row"
 import "./settings-v2.css"
 import { SettingsModelContextLimit } from "../settings-model-context-limit"
+import { useServerSync } from "@/context/server-sync"
 
 type ModelItem = ReturnType<ReturnType<typeof useModels>["list"]>[number]
 
@@ -20,6 +21,7 @@ const PROVIDER_ICON_SIZE = 16
 export const SettingsModelsV2: Component = () => {
   const language = useLanguage()
   const models = useModels()
+  const serverSync = useServerSync()
 
   const list = useFilteredList<ModelItem>({
     items: (_filter) => models.list(),
@@ -126,6 +128,20 @@ export const SettingsModelsV2: Component = () => {
                                 output={item.limit.output}
                                 variant="v2"
                               />
+                              <Show when={item.provider.id === "lmstudio"}>
+                                <SettingsModelContextLimit
+                                  providerID={item.provider.id}
+                                  modelID={item.id}
+                                  context={Math.min(
+                                    item.limit.context,
+                                    serverSync().data.config.provider?.lmstudio?.models?.[item.id]?.chat_context ??
+                                      32_768,
+                                  )}
+                                  output={item.limit.output}
+                                  variant="v2"
+                                  scope="chat"
+                                />
+                              </Show>
                               <Switch
                                 checked={models.visible(key)}
                                 onChange={(checked) => {

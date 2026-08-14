@@ -11,6 +11,19 @@ export type VoiceEvaluationTurn = {
   error?: string
   phases: Partial<Record<VoiceEvaluationPhase, number>>
   bottleneck?: VoiceEvaluationPhase
+  preview?: string
+  finalTranscript?: string
+  correctedTranscript?: string
+  confidence?: number
+  corrections: string[]
+  sendReason?: string
+  endpointReason?: string
+  audioMs?: number
+  speechMs?: number
+  silenceMs?: number
+  preRollMs?: number
+  transcriptionMs?: number
+  hasAudio: boolean
 }
 
 export type VoiceEvaluation = {
@@ -78,6 +91,11 @@ function evaluateTurn(id: string, entries: VoiceDiagnosticEntry[]): VoiceEvaluat
   const responseCompleted = find("response_completed")
   const wake = find("wake_detected")
   const final = [...ordered].reverse().find((entry) => entry.source === "stt" && entry.event === "final")
+  const preview = [...ordered].reverse().find((entry) => entry.source === "stt" && entry.event === "partial")
+  const assessment = [...ordered].reverse().find((entry) => entry.event === "transcript_assessed")
+  const correction = [...ordered].reverse().find((entry) => entry.event === "manual_correction")
+  const redecode = [...ordered].reverse().find((entry) => entry.event === "turn_redecoded")
+  const audio = [...ordered].reverse().find((entry) => entry.event === "audio_saved")
   const synthesis = find("synthesis_completed")
   const error = ordered.find((entry) => entry.error)
   const started = find("speech_start") ?? find("listening_started") ?? ordered[0]!
@@ -102,6 +120,25 @@ function evaluateTurn(id: string, entries: VoiceDiagnosticEntry[]): VoiceEvaluat
     error: error?.error,
     phases: values,
     bottleneck,
+    preview: preview?.text,
+    finalTranscript: final?.text,
+    correctedTranscript: correction?.text ?? redecode?.text,
+    confidence: diagnosticNumber(final, "final_confidence") ?? diagnosticNumber(assessment, "final_confidence"),
+    corrections:
+      typeof assessment?.diagnostics?.corrections === "string"
+        ? assessment.diagnostics.corrections.split(",").map((item) => item.trim()).filter(Boolean)
+        : [],
+    sendReason:
+      typeof assessment?.diagnostics?.reason === "string"
+        ? `${assessment.diagnostics.decision ?? "assessed"}: ${assessment.diagnostics.reason}`
+        : undefined,
+    endpointReason: typeof final?.diagnostics?.endpoint_reason === "string" ? final.diagnostics.endpoint_reason : undefined,
+    audioMs: diagnosticNumber(final, "audio_ms") ?? audio?.durationMs,
+    speechMs: diagnosticNumber(final, "speech_ms"),
+    silenceMs: diagnosticNumber(final, "silence_ms"),
+    preRollMs: diagnosticNumber(final, "pre_roll_ms"),
+    transcriptionMs: diagnosticNumber(final, "transcription_ms"),
+    hasAudio: Boolean(audio),
   }
 }
 

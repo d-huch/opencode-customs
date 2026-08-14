@@ -390,6 +390,7 @@
         "electron-updater": "6.8.9",
         "electron-window-state": "^5.0.3",
         "marked": "^15",
+        "msgpackr": "2.0.2",
       },
       "devDependencies": {
         "@actions/artifact": "4.0.0",

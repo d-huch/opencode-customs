@@ -21,14 +21,17 @@ from pydantic import BaseModel, Field
 
 from app.accent import UkrainianAccentor
 from app.duplex_regression import run_duplex_regression
+from app.duplex_reliability import run_duplex_reliability
 from app.language import adapt_mixed_latin, normalize_voice, segment_languages
 from app.streaming_stt import (
     DuplexSession,
     IncrementalRecognitionState,
+    STT_MIN_FINAL_CONFIDENCE,
     STT_SAMPLE_RATE,
     StreamingRecognizer,
     WakeWordRecognizer,
     decode_wav_pcm16,
+    semantic_complete,
 )
 
 
@@ -79,6 +82,11 @@ class DuplexRegressionRequest(BaseModel):
     voice: str = "kateryna"
     mode: str = "quality"
     language: str = "uk"
+
+
+class DuplexReliabilityRequest(DuplexRegressionRequest):
+    cycles: int = Field(default=5, ge=1, le=20)
+    inject_faults: bool = True
 
 
 class ModelUnavailableError(RuntimeError):
@@ -530,13 +538,22 @@ async def transcriptions(websocket: WebSocket):
     await websocket.accept()
     session = DuplexSession()
     partial_task: asyncio.Task | None = None
-    partial_endpoint = False
     send_lock = asyncio.Lock()
     recognition_state = IncrementalRecognitionState()
+    turn_id = ""
+    turn_generation = 0
+    finalized_turns: set[tuple[str, int]] = set()
 
-    async def send(payload: dict):
+    async def send(payload: dict, identity: tuple[str, int] | None = None):
+        event_turn_id, event_turn_generation = identity or (turn_id, turn_generation)
         async with send_lock:
-            await websocket.send_json(payload)
+            await websocket.send_json(
+                {
+                    **payload,
+                    "turn_id": event_turn_id or None,
+                    "turn_generation": event_turn_generation,
+                }
+            )
 
     async def send_transcript(
         kind: str,
@@ -545,50 +562,94 @@ async def transcriptions(websocket: WebSocket):
         reference: str,
         generation: int,
         diagnostics: dict,
+        identity: tuple[str, int],
+        recognition: IncrementalRecognitionState,
         wake: bool = False,
-        cached_text: str = "",
         speech_frames: int | None = None,
         incremental: bool = True,
+        recognition_engine: StreamingRecognizer | None = None,
     ):
-        if recognizer is None and not cached_text:
-            await send({"type": "error", "error": "The local STT runtime is unavailable."})
+        if kind == "final" and identity in finalized_turns:
+            return
+        if kind == "final":
+            finalized_turns.add(identity)
+        selected_recognizer = recognizer if kind == "final" else recognition_engine or wake_recognizer
+        if selected_recognizer is None:
+            await send({"type": "error", "error": "The local STT runtime is unavailable."}, identity)
             return
         started = time.perf_counter()
-        if cached_text:
-            text = cached_text
-            incremental_diagnostics = {
-                "incremental_decode": True,
-                "decode_count": recognition_state.decode_count,
-                "decoded_audio_ms": 0,
-                "committed_audio_ms": round(
-                    recognition_state.committed_bytes / 2 / STT_SAMPLE_RATE * 1000
-                ),
-            }
-        else:
-            try:
-                if incremental:
-                    text, incremental_diagnostics = await recognizer.transcribe_incremental(
-                        pcm,
-                        session.language,
-                        recognition_state,
-                        generation,
-                        kind == "final",
-                    )
+        try:
+            if incremental and kind != "final":
+                text, incremental_diagnostics = await selected_recognizer.transcribe_incremental(
+                    pcm,
+                    session.language,
+                    recognition,
+                    generation,
+                    False,
+                )
+            else:
+                if kind == "final" and hasattr(selected_recognizer, "transcribe_final"):
+                    text, final_diagnostics = await selected_recognizer.transcribe_final(pcm, session.language)
                 else:
-                    text = await recognizer.transcribe(pcm, session.language)
-                    incremental_diagnostics = {"incremental_decode": False}
-            except Exception as error:
-                await send({"type": "error", "error": str(error)})
-                return
+                    text = await selected_recognizer.transcribe(pcm, session.language)
+                    final_diagnostics = {}
+                incremental_diagnostics = {"incremental_decode": False, **final_diagnostics}
+        except Exception as error:
+            await send({"type": "error", "error": str(error)}, identity)
+            return
         if wake and not text.strip():
             await send(
                 {
                     "type": "error",
                     "error": "The wake phrase was detected, but the following command could not be transcribed. No fallback was used.",
-                }
+                },
+                identity,
             )
             return
-        session.observe_transcript(text, generation, speech_frames)
+        if kind == "final" and incremental_diagnostics.get("final_confidence", 1) < STT_MIN_FINAL_CONFIDENCE:
+            await send(
+                {
+                    "type": "discard",
+                    "text": "",
+                    "mode": mode,
+                    "reference": reference,
+                    "generation": generation,
+                    "diagnostics": {
+                        **diagnostics,
+                        **incremental_diagnostics,
+                        "endpoint_reason": "low_confidence",
+                        "recognition_model": selected_recognizer.model_name,
+                    },
+                },
+                identity,
+            )
+            return
+        final_stability = max(
+            diagnostics.get("transcript_stability", 0),
+            session.transcript_stability,
+        )
+        if kind == "final" and not semantic_complete(text, session.language, final_stability):
+            await send(
+                {
+                    "type": "discard",
+                    "text": "",
+                    "mode": mode,
+                    "reference": reference,
+                    "generation": generation,
+                    "diagnostics": {
+                        **diagnostics,
+                        **incremental_diagnostics,
+                        "endpoint_reason": "semantic_incomplete",
+                        "recognition_model": selected_recognizer.model_name,
+                        "transcript_stability": final_stability,
+                    },
+                },
+                identity,
+            )
+            return
+        accepted = session.observe_transcript(text, generation, speech_frames)
+        if kind == "partial" and not accepted:
+            return
         await send(
             {
                 "type": kind,
@@ -599,15 +660,14 @@ async def transcriptions(websocket: WebSocket):
                 "wake": wake,
                 "diagnostics": {
                     **diagnostics,
-                    "transcription_ms": 0 if cached_text else round((time.perf_counter() - started) * 1000),
-                    "transcription_cache": "hit" if cached_text else "miss",
+                    "transcription_ms": round((time.perf_counter() - started) * 1000),
+                    "transcription_cache": "miss",
                     **incremental_diagnostics,
-                    "transcript_stability": max(
-                        diagnostics.get("transcript_stability", 0),
-                        session.transcript_stability,
-                    ),
+                    "recognition_model": selected_recognizer.model_name if selected_recognizer else None,
+                    "transcript_stability": final_stability,
                 },
-            }
+            },
+            identity,
         )
 
     async def send_wake_candidate(
@@ -617,6 +677,8 @@ async def transcriptions(websocket: WebSocket):
         generation: int,
         diagnostics: dict,
         phrases: list[str],
+        identity: tuple[str, int],
+        recognition: IncrementalRecognitionState,
     ):
         if wake_recognizer is None or not wake_recognizer.status()["ready"]:
             error = wake_recognizer.status().get("error") if wake_recognizer else None
@@ -624,14 +686,15 @@ async def transcriptions(websocket: WebSocket):
                 {
                     "type": "error",
                     "error": error or "The dedicated wake-word recognizer is unavailable. No full STT fallback was used.",
-                }
+                },
+                identity,
             )
             return
         started = time.perf_counter()
         try:
             detection = await wake_recognizer.detect(pcm, session.language, phrases)
         except Exception as error:
-            await send({"type": "error", "error": f"Wake-word recognition failed: {error}"})
+            await send({"type": "error", "error": f"Wake-word recognition failed: {error}"}, identity)
             return
         wake_diagnostics = {
             **diagnostics,
@@ -647,7 +710,8 @@ async def transcriptions(websocket: WebSocket):
                     "reference": reference,
                     "generation": generation,
                     "diagnostics": wake_diagnostics,
-                }
+                },
+                identity,
             )
             return
         await send(
@@ -661,7 +725,8 @@ async def transcriptions(websocket: WebSocket):
                 "reference": reference,
                 "generation": generation,
                 "diagnostics": wake_diagnostics,
-            }
+            },
+            identity,
         )
         if not detection["has_command"]:
             return
@@ -672,6 +737,8 @@ async def transcriptions(websocket: WebSocket):
             reference,
             generation,
             {**wake_diagnostics, "endpoint_reason": "wake_command"},
+            identity,
+            recognition,
             True,
             incremental=False,
         )
@@ -691,6 +758,8 @@ async def transcriptions(websocket: WebSocket):
             if message.get("text") is not None:
                 command = json.loads(message["text"])
                 if command.get("type") == "configure":
+                    turn_id = str(command.get("turn_id") or "")
+                    turn_generation = int(command.get("turn_generation") or 0)
                     session.configure(command.get("language"))
                     session.set_wake(
                         bool(command.get("wake_enabled")),
@@ -741,6 +810,15 @@ async def transcriptions(websocket: WebSocket):
                     )
                     continue
                 if command.get("type") == "state":
+                    next_turn_id = str(command.get("turn_id") or "")
+                    next_turn_generation = int(command.get("turn_generation") or 0)
+                    if (next_turn_id, next_turn_generation) != (turn_id, turn_generation):
+                        if partial_task and not partial_task.done():
+                            partial_task.cancel()
+                        session.reset_utterance()
+                        recognition_state = IncrementalRecognitionState()
+                    turn_id = next_turn_id
+                    turn_generation = next_turn_generation
                     session.set_mode(command.get("mode", "paused"), command.get("reference", ""))
                     await send({"type": "state", "mode": session.mode})
                     continue
@@ -748,15 +826,20 @@ async def transcriptions(websocket: WebSocket):
                     wake_armed = session.wake_armed
                     phrases = list(session.wake_phrases)
                     if partial_task and not partial_task.done():
-                        if partial_endpoint:
-                            await partial_task
-                        else:
-                            partial_task.cancel()
-                    cached_text = session.cached_transcript()
+                        partial_task.cancel()
                     pcm, mode, reference, generation, diagnostics = session.finish("manual_flush")
                     if pcm:
                         if wake_armed:
-                            await send_wake_candidate(pcm, mode, reference, generation, diagnostics, phrases)
+                            await send_wake_candidate(
+                                pcm,
+                                mode,
+                                reference,
+                                generation,
+                                diagnostics,
+                                phrases,
+                                (turn_id, turn_generation),
+                                recognition_state,
+                            )
                         else:
                             await send_transcript(
                                 "final",
@@ -765,7 +848,8 @@ async def transcriptions(websocket: WebSocket):
                                 reference,
                                 generation,
                                 diagnostics,
-                                cached_text=cached_text,
+                                (turn_id, turn_generation),
+                                recognition_state,
                             )
                     continue
             data = message.get("bytes")
@@ -779,7 +863,8 @@ async def transcriptions(websocket: WebSocket):
                     if event["type"] == "partial_ready":
                         if partial_task and not partial_task.done():
                             continue
-                        partial_endpoint = False
+                        if wake_recognizer is None or not wake_recognizer.status()["ready"]:
+                            continue
                         partial_task = asyncio.create_task(
                             send_transcript(
                                 "partial",
@@ -788,14 +873,19 @@ async def transcriptions(websocket: WebSocket):
                                 session.reference,
                                 event["generation"],
                                 session.diagnostics(),
+                                (turn_id, turn_generation),
+                                recognition_state,
                                 speech_frames=session.speech_frames,
+                                incremental=False,
+                                recognition_engine=wake_recognizer,
                             )
                         )
                         continue
                     if event["type"] == "endpoint_ready":
                         if partial_task and not partial_task.done():
                             continue
-                        partial_endpoint = True
+                        if wake_recognizer is None or not wake_recognizer.status()["ready"]:
+                            continue
                         partial_task = asyncio.create_task(
                             send_transcript(
                                 "partial",
@@ -804,7 +894,11 @@ async def transcriptions(websocket: WebSocket):
                                 session.reference,
                                 event["generation"],
                                 session.diagnostics("endpoint_candidate"),
+                                (turn_id, turn_generation),
+                                recognition_state,
                                 speech_frames=session.speech_frames,
+                                incremental=False,
+                                recognition_engine=wake_recognizer,
                             )
                         )
                         continue
@@ -814,14 +908,19 @@ async def transcriptions(websocket: WebSocket):
                     wake_armed = session.wake_armed
                     phrases = list(session.wake_phrases)
                     if partial_task and not partial_task.done():
-                        if partial_endpoint:
-                            await partial_task
-                        else:
-                            partial_task.cancel()
-                    cached_text = session.cached_transcript()
+                        partial_task.cancel()
                     pcm, mode, reference, generation, diagnostics = session.finish(event.get("reason", "silence"))
                     if wake_armed:
-                        await send_wake_candidate(pcm, mode, reference, generation, diagnostics, phrases)
+                        await send_wake_candidate(
+                            pcm,
+                            mode,
+                            reference,
+                            generation,
+                            diagnostics,
+                            phrases,
+                            (turn_id, turn_generation),
+                            recognition_state,
+                        )
                         continue
                     await send_transcript(
                         "final",
@@ -830,7 +929,8 @@ async def transcriptions(websocket: WebSocket):
                         reference,
                         generation,
                         diagnostics,
-                        cached_text=cached_text,
+                        (turn_id, turn_generation),
+                        recognition_state,
                     )
     except WebSocketDisconnect:
         return
@@ -904,3 +1004,17 @@ async def duplex_regression(request: DuplexRegressionRequest):
         request.language.split("-", 1)[0].lower() or "uk",
         f"{request.mode}:{request.voice}",
     )
+
+
+@app.post("/v1/audio/duplex/reliability")
+async def duplex_reliability(request: DuplexReliabilityRequest):
+    async def run_cycle():
+        return await duplex_regression(
+            DuplexRegressionRequest(
+                voice=request.voice,
+                mode=request.mode,
+                language=request.language,
+            )
+        )
+
+    return await run_duplex_reliability(run_cycle, request.cycles, request.inject_faults)

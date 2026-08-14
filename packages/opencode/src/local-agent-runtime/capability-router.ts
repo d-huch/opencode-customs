@@ -7,6 +7,11 @@ import type { LmStudioProbe, LmStudioRequest } from "./lmstudio"
 import { snapshot } from "./resource-governor"
 
 const current = new Map<string, { policy: string; plan: ModelCapabilityRouter.Plan }>()
+const DEFAULT_PRIMARY_MIN_SIZE_GB = 12
+
+export function minimumPrimarySizeBytes(config: ConfigV1.Info) {
+  return Math.max(0, config.provider?.lmstudio?.primary_min_size_gb ?? DEFAULT_PRIMARY_MIN_SIZE_GB) * 1024 ** 3
+}
 
 export async function route(input: {
   readonly config: ConfigV1.Info
@@ -36,6 +41,7 @@ export async function route(input: {
     needsVision: input.requestShape.images > 0,
     needsTools: input.requestShape.tools > 0,
     allowUnloaded: input.allowUnloaded,
+    minimumPrimarySizeBytes: minimumPrimarySizeBytes(input.config),
     disabledModelIDs: Object.entries(provider?.models ?? {}).flatMap(([modelID, model]) =>
       model.auto_route === false ? [modelID, ...(model.id ? [model.id] : [])] : [],
     ),
@@ -94,6 +100,7 @@ function runtimeKey(config: ConfigV1.Info) {
 function routingPolicy(config: ConfigV1.Info) {
   return [
     `global:${automaticRoutingEnabled(config)}`,
+    `primary:${config.provider?.lmstudio?.primary_min_size_gb ?? DEFAULT_PRIMARY_MIN_SIZE_GB}`,
     ...Object.entries(config.provider?.lmstudio?.models ?? {})
       .filter(([, model]) => model.auto_route === false)
       .map(([modelID, model]) => `${modelID}:${model.id ?? ""}`)

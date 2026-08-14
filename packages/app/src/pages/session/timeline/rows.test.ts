@@ -23,7 +23,7 @@ describe("timeline rows", () => {
       [summary],
       0,
       true,
-      "idle",
+      { type: "idle" },
       false,
       false,
     )
@@ -45,11 +45,31 @@ describe("timeline rows", () => {
       [assistant],
       0,
       true,
-      "busy",
+      { type: "busy" },
       true,
       false,
     )
 
     expect(rows.map((row) => row._tag)).toContain("Thinking")
+  })
+
+  test("keeps the inferred LM Studio cache restore status and its start time", () => {
+    const user = { id: "msg_user", role: "user" } as UserMessage
+    const startedAt = Date.now() - 97_000
+
+    const rows = Timeline.constructMessageRows(
+      user,
+      () => [],
+      [],
+      0,
+      true,
+      { type: "cache_restore", startedAt },
+      true,
+      false,
+    )
+
+    expect(rows.find((row) => row._tag === "Thinking")).toMatchObject({
+      status: { type: "cache_restore", startedAt },
+    })
   })
 })

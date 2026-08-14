@@ -36,12 +36,36 @@ export type SpeechRecognitionEvent = {
   error?: string
 }
 export type LocalTTSInput = {
+  provider?: "local" | "fish-local"
   endpoint: string
   model: string
   voice: string
   mode: "quality" | "fast"
   speed?: number
   text: string
+  latency?: "normal" | "balanced"
+  language?: "auto" | "uk" | "en" | "mixed"
+  temperature?: number
+  topP?: number
+  repetitionPenalty?: number
+  seed?: number | null
+  chunkLength?: number
+  normalize?: boolean
+  streaming?: boolean
+  useMemoryCache?: boolean
+  maxNewTokens?: number
+}
+export type FishAudioLocalReference = {
+  filename: string
+  contentType: string
+  transcript: string
+  bytes: number
+}
+export type FishAudioLocalReferenceInput = {
+  filename: string
+  contentType: string
+  audio: ArrayBuffer
+  transcript: string
 }
 export type VoiceDiagnosticInput = {
   sessionID: string
@@ -57,6 +81,7 @@ export type VoiceDiagnosticInput = {
   diagnostics?: Record<string, string | number | boolean | null | undefined>
 }
 export type VoiceDiagnosticEntry = VoiceDiagnosticInput & { timestamp: string }
+export type VoiceTurnAudioInput = { sessionID: string; turnID: string; pcm: ArrayBuffer; sampleRate: number }
 export type TitlebarTheme = {
   mode: "light" | "dark"
   scheme?: "system" | "light" | "dark"
@@ -80,6 +105,7 @@ export type ElectronAPI = {
   setDefaultServerUrl: (url: string | null) => Promise<void>
   isFirstLaunchOnboardingPending: () => Promise<boolean>
   finishFirstLaunchOnboarding: (createDefaultProject: boolean) => Promise<string | null>
+  ensureChatWorkspace: () => Promise<string>
   isOldLayoutEligible: () => Promise<boolean>
   getDisplayBackend: () => Promise<LinuxDisplayBackend | null>
   setDisplayBackend: (backend: LinuxDisplayBackend | null) => Promise<void>
@@ -127,11 +153,27 @@ export type ElectronAPI = {
     contentType: string
     metrics: { cache: string; prepareMs: number; synthesisMs: number; totalMs: number }
   }>
+  getFishAudioLocalReference: () => Promise<FishAudioLocalReference | undefined>
+  getFishAudioLocalStatus: (endpoint: string) => Promise<{
+    status: "ready" | "offline" | "error"
+    endpoint: string
+    latencyMs?: number
+    detail?: string
+  }>
+  setFishAudioLocalReference: (input: FishAudioLocalReferenceInput) => Promise<FishAudioLocalReference>
+  clearFishAudioLocalReference: () => Promise<void>
   cancelLocalSpeech: () => Promise<void>
   appendVoiceDiagnostic: (input: VoiceDiagnosticInput) => Promise<void>
   getVoiceDiagnostics: (sessionID: string) => Promise<{ path: string; entries: VoiceDiagnosticEntry[] }>
   clearVoiceDiagnostics: (sessionID?: string) => Promise<{ files: number; bytes: number }>
   exportVoiceDiagnostics: (sessionID: string) => Promise<string>
+  storeVoiceTurnAudio: (
+    input: VoiceTurnAudioInput,
+  ) => Promise<{ path: string; bytes: number; durationMs: number; sampleRate: number }>
+  getVoiceTurnAudio: (
+    sessionID: string,
+    turnID: string,
+  ) => Promise<{ path: string; contentType: string; audio: ArrayBuffer } | undefined>
   showNotification: (title: string, body?: string) => void
   getWindowFocused: () => Promise<boolean>
   setWindowFocus: () => Promise<void>

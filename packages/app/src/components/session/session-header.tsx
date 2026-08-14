@@ -26,7 +26,7 @@ import { messageAgentColor } from "@/utils/agent"
 import { decode64 } from "@/utils/base64"
 import { fileManagerApp } from "@/utils/file-manager"
 import { Persist, persisted } from "@/utils/persist"
-import { isDefaultProjectDirectory } from "@/utils/project"
+import { isNonRepositoryDirectory } from "@/utils/project"
 import { StatusPopover, StatusPopoverV2 } from "../status-popover"
 import { IconButtonV2 } from "@opencode-ai/ui/v2/icon-button-v2"
 import { Icon as IconV2 } from "@opencode-ai/ui/v2/icon"
@@ -151,7 +151,7 @@ export function SessionHeader() {
   const { params, view } = useSessionLayout()
 
   const projectDirectory = createMemo(() => decode64(params.dir) ?? "")
-  const defaultProject = createMemo(() => isDefaultProjectDirectory(projectDirectory()))
+  const nonRepository = createMemo(() => isNonRepositoryDirectory(projectDirectory()))
   const project = createMemo(() => {
     const directory = projectDirectory()
     if (!directory) return
@@ -242,7 +242,7 @@ export function SessionHeader() {
     statusLabel: language.t("status.popover.trigger"),
     reviewLabel: language.t("command.review.toggle"),
     reviewKeybind: reviewTooltipKeybind(command),
-    reviewVisible: isDesktop() && !defaultProject(),
+    reviewVisible: isDesktop() && !nonRepository(),
     reviewOpened: view().reviewPanel.opened(),
     onReviewToggle: () => view().reviewPanel.toggle(),
   }))
@@ -465,7 +465,7 @@ export function SessionHeader() {
                     </TooltipKeybind>
 
                     <div class="hidden md:flex items-center gap-1 shrink-0">
-                      <Show when={!defaultProject()}>
+                      <Show when={!nonRepository()}>
                         <TooltipKeybind
                           title={language.t("command.review.toggle")}
                           keybind={command.keybind("review.toggle")}

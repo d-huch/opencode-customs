@@ -578,6 +578,43 @@ it.instance("loop calls LLM and returns assistant message", () =>
   }),
 )
 
+it.instance("session title excludes synthetic and ignored prompt context", () =>
+  Effect.gen(function* () {
+    const { llm } = yield* useServerConfig(providerCfg)
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const chat = yield* sessions.create({
+      permission: [{ permission: "*", pattern: "*", action: "allow" }],
+    })
+    yield* prompt.prompt({
+      sessionID: chat.id,
+      agent: "build",
+      noReply: true,
+      parts: [
+        { type: "text", text: "Як тебе звати?" },
+        {
+          type: "text",
+          text: "Apply this user-controlled personalization profile to communication style and collaboration behavior.",
+          synthetic: true,
+        },
+        { type: "text", text: "Hidden voice context", ignored: true },
+      ],
+    })
+    yield* llm.text("Мене звати OpenCode Customs")
+
+    yield* prompt.loop({ sessionID: chat.id })
+    const title = yield* pollWithTimeout(
+      sessions.get(chat.id).pipe(
+        Effect.map((session) => (Session.isDefaultTitle(session.title) ? undefined : session.title)),
+      ),
+      "session title was not generated",
+      "2 seconds",
+    )
+
+    expect(title).toBe("Як тебе звати?")
+  }),
+)
+
 it.instance(
   "routes a screenshot through vision, repository context, and a grounded recommendation",
   () =>

@@ -1,5 +1,6 @@
 import { Button } from "@opencode-ai/ui/button"
 import { Dialog } from "@opencode-ai/ui/dialog"
+import { TextField } from "@opencode-ai/ui/text-field"
 import { useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
 import { useSettings } from "@/context/settings"
@@ -19,8 +20,46 @@ import {
   type VoiceRegressionReport,
   type VoiceRegressionResult,
 } from "@/utils/voice-regression"
+import {
+  runVoiceTurnRegression,
+  voiceTurnRegressionHTML,
+  type VoiceTurnRegressionReport,
+  type VoiceTurnRegressionResult,
+} from "@/utils/voice-turn-regression"
+import {
+  runVoiceSoakRegression,
+  voiceSoakRegressionHTML,
+  type VoiceSoakBatchResult,
+  type VoiceSoakRegressionReport,
+} from "@/utils/voice-soak-regression"
 import { showToast } from "@/utils/toast"
+import { upsertVoiceDictionaryEntry, voiceDictionaryCandidateFromCorrection } from "@/utils/voice-dictionary"
 import { createMemo, createResource, createSignal, For, Show } from "solid-js"
+
+type VoiceReliabilityReport = {
+  created_at: string
+  cycles: number
+  passed: number
+  failed: number
+  recovered_faults: number
+  total_ms: number
+  resources: {
+    rss_delta_bytes: number
+    steady_state_rss_delta_bytes: number
+    threads_delta: number
+    steady_state_threads_delta: number
+    file_descriptors_delta: number
+  }
+  results: {
+    cycle: number
+    fault?: string
+    recovered: boolean
+    passed: boolean
+    duration_ms: number
+    error?: string
+    report?: DuplexRegressionRawReport
+  }[]
+}
 
 export function DialogVoiceInspector(props: { sessionID?: string }) {
   const platform = usePlatform()
@@ -36,11 +75,20 @@ export function DialogVoiceInspector(props: { sessionID?: string }) {
   const [duplexRunning, setDuplexRunning] = createSignal(false)
   const [duplexReport, setDuplexReport] = createSignal<DuplexRegressionReport>()
   const [duplexBaseline, setDuplexBaseline] = createSignal<DuplexRegressionReport>()
+  const [reliabilityRunning, setReliabilityRunning] = createSignal(false)
+  const [reliabilityReport, setReliabilityReport] = createSignal<VoiceReliabilityReport>()
+  const [turnReport, setTurnReport] = createSignal<VoiceTurnRegressionReport>()
+  const [soakRunning, setSoakRunning] = createSignal(false)
+  const [soakReport, setSoakReport] = createSignal<VoiceSoakRegressionReport>()
   const [replayResult, setReplayResult] = createSignal<{
     file: string
     text: string
     diagnostics: Record<string, string | number>
   }>()
+  const [editingTurn, setEditingTurn] = createSignal<string>()
+  const [correction, setCorrection] = createSignal("")
+  const [workingTurn, setWorkingTurn] = createSignal<string>()
+  let playing: HTMLAudioElement | undefined
   const [timeline] = createResource(
     () => ({ sessionID: sessionID(), refresh: refresh(), available: Boolean(platform.getVoiceDiagnostics) }),
     (input) =>
@@ -215,6 +263,152 @@ export function DialogVoiceInspector(props: { sessionID?: string }) {
     URL.revokeObjectURL(url)
   }
 
+  const runReliabilityRegression = async () => {
+    setReliabilityRunning(true)
+    const report = await (async () => {
+      const url = new URL(settings.voice.ttsEndpoint())
+      url.pathname = "/v1/audio/duplex/reliability"
+      url.search = ""
+      const response = await (platform.fetch ?? fetch)(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          voice: settings.voice.ttsVoice(),
+          mode: settings.voice.ttsMode(),
+          language: document.documentElement.lang || navigator.language,
+          cycles: 5,
+          inject_faults: true,
+        }),
+      })
+      if (!response.ok) throw new Error(await response.text())
+      const report = (await response.json()) as VoiceReliabilityReport
+      const results = report.results.map((result) => ({
+        ...result,
+        passed: result.passed && (!result.report || evaluateDuplexRegression(result.report).failed === 0),
+      }))
+      return {
+        ...report,
+        results,
+        passed: results.filter((result) => result.passed).length,
+        failed: results.filter((result) => !result.passed).length,
+      }
+    })().catch((error: unknown) => {
+      showToast({
+        variant: "error",
+        title: language.t("voice.inspector.reliability.failed"),
+        description: error instanceof Error ? error.message : String(error),
+      })
+    })
+    setReliabilityRunning(false)
+    if (!report) return
+    setReliabilityReport(report)
+    report.results.forEach((result) => {
+      const semantic = result.report ? evaluateDuplexRegression(result.report) : undefined
+      const passed = result.passed && (semantic?.failed ?? 0) === 0
+      void platform.appendVoiceDiagnostic?.({
+        sessionID: sessionID(),
+        source: "replay",
+        event: passed ? "voice_reliability_cycle_passed" : "voice_reliability_cycle_failed",
+        error: result.error,
+        durationMs: result.duration_ms,
+        diagnostics: {
+          suite: "real_audio_reliability",
+          cycle: result.cycle,
+          fault: result.fault,
+          recovered: result.recovered,
+          scenario_failures: semantic?.failed,
+        },
+      })
+    })
+    setRefresh((value) => value + 1)
+  }
+
+  const exportReliabilityRegression = () => {
+    const report = reliabilityReport()
+    if (!report) return
+    const url = URL.createObjectURL(new Blob([JSON.stringify(report, null, 2)], { type: "application/json" }))
+    const anchor = document.createElement("a")
+    anchor.href = url
+    anchor.download = `opencode-real-audio-reliability-${new Date().toISOString().replace(/[:.]/g, "-")}.json`
+    anchor.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const runTurnRecoveryRegression = () => {
+    const report = runVoiceTurnRegression()
+    setTurnReport(report)
+    report.results.forEach((result) => {
+      void platform.appendVoiceDiagnostic?.({
+        sessionID: sessionID(),
+        source: "agent",
+        event: result.passed ? "turn_regression_passed" : "turn_regression_failed",
+        error: result.error,
+        diagnostics: {
+          scenario: result.id,
+          suite: "turn_recovery",
+          transitions: result.events.length,
+        },
+      })
+    })
+    setRefresh((value) => value + 1)
+  }
+
+  const exportTurnRegression = (format: "json" | "html") => {
+    const report = turnReport()
+    if (!report) return
+    const content = format === "json" ? JSON.stringify(report, null, 2) : voiceTurnRegressionHTML(report)
+    const url = URL.createObjectURL(new Blob([content], { type: format === "json" ? "application/json" : "text/html" }))
+    const anchor = document.createElement("a")
+    anchor.href = url
+    anchor.download = `opencode-voice-turn-recovery-${new Date().toISOString().replace(/[:.]/g, "-")}.${format}`
+    anchor.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const runSoakRegression = async () => {
+    setSoakRunning(true)
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    const report = runVoiceSoakRegression()
+    setSoakReport(report)
+    setSoakRunning(false)
+    void platform.appendVoiceDiagnostic?.({
+      sessionID: sessionID(),
+      source: "agent",
+      event: report.failed ? "soak_regression_failed" : "soak_regression_passed",
+      error: report.failed
+        ? report.batches
+            .flatMap((batch) => batch.errors)
+            .slice(0, 3)
+            .join(" · ")
+        : undefined,
+      diagnostics: {
+        suite: "soak_chaos",
+        seed: report.seed,
+        turns: report.turns,
+        passed: report.passed,
+        failed: report.failed,
+        state_leaks: report.stateLeaks,
+        stale_rejected: report.staleCallbacksRejected,
+        duplicates_rejected: report.duplicateFinalsRejected,
+        responses_rejected: report.unrelatedResponsesRejected,
+        final_generation: report.finalGeneration,
+      },
+    })
+    setRefresh((value) => value + 1)
+  }
+
+  const exportSoakRegression = (format: "json" | "html") => {
+    const report = soakReport()
+    if (!report) return
+    const content = format === "json" ? JSON.stringify(report, null, 2) : voiceSoakRegressionHTML(report)
+    const url = URL.createObjectURL(new Blob([content], { type: format === "json" ? "application/json" : "text/html" }))
+    const anchor = document.createElement("a")
+    anchor.href = url
+    anchor.download = `opencode-voice-soak-chaos-${new Date().toISOString().replace(/[:.]/g, "-")}.${format}`
+    anchor.click()
+    URL.revokeObjectURL(url)
+  }
+
   const replay = async () => {
     if (!platform.openAttachmentPickerDialog) return
     setReplaying(true)
@@ -283,6 +477,98 @@ export function DialogVoiceInspector(props: { sessionID?: string }) {
     showToast({ variant: "success", title: language.t("voice.inspector.export.completed") })
   }
 
+  const readTurnAudio = (turnID: string) =>
+    platform.getVoiceTurnAudio ? platform.getVoiceTurnAudio(sessionID(), turnID) : Promise.resolve(undefined)
+
+  const playTurn = async (turnID: string) => {
+    setWorkingTurn(turnID)
+    const result = await readTurnAudio(turnID).catch(() => undefined)
+    setWorkingTurn()
+    if (!result) {
+      showToast({ variant: "error", title: language.t("voice.inspector.turn.audio.missing") })
+      return
+    }
+    playing?.pause()
+    const url = URL.createObjectURL(new Blob([result.audio], { type: result.contentType }))
+    playing = new Audio(url)
+    playing.onended = () => URL.revokeObjectURL(url)
+    playing.onerror = () => URL.revokeObjectURL(url)
+    await playing.play()
+  }
+
+  const saveCorrection = async (turnID: string) => {
+    const text = correction().trim()
+    if (!text) return
+    const turn = evaluation().turns.find((item) => item.id === turnID)
+    const heard = turn?.finalTranscript?.trim()
+    setWorkingTurn(turnID)
+    await platform.appendVoiceDiagnostic?.({
+      sessionID: sessionID(),
+      turnID,
+      source: "ui",
+      event: "manual_correction",
+      text,
+      diagnostics: { reason: "voice_inspector_user_correction" },
+    })
+    const candidate = heard
+      ? voiceDictionaryCandidateFromCorrection(heard, text, {
+          language: document.documentElement.lang || navigator.language,
+          scope: "session",
+          scopeID: sessionID(),
+          confidence: 1,
+          confirmed: true,
+        })
+      : undefined
+    if (candidate) {
+      settings.voice.setDictionaryEntries(
+        upsertVoiceDictionaryEntry(settings.voice.dictionaryEntries(), candidate),
+      )
+    }
+    setWorkingTurn()
+    setEditingTurn()
+    setCorrection("")
+    setRefresh((value) => value + 1)
+  }
+
+  const recognizeTurnAgain = async (turnID: string) => {
+    setWorkingTurn(turnID)
+    const audio = await readTurnAudio(turnID).catch(() => undefined)
+    if (!audio) {
+      setWorkingTurn()
+      showToast({ variant: "error", title: language.t("voice.inspector.turn.audio.missing") })
+      return
+    }
+    const url = new URL(settings.voice.ttsEndpoint())
+    url.pathname = "/v1/audio/transcriptions/replay"
+    url.search = new URLSearchParams({ language: document.documentElement.lang || navigator.language }).toString()
+    const started = performance.now()
+    const response = await (platform.fetch ?? fetch)(url, {
+      method: "POST",
+      headers: { "Content-Type": audio.contentType },
+      body: new Blob([audio.audio], { type: audio.contentType }),
+    }).catch(
+      (error: unknown) =>
+        new Response(error instanceof Error ? error.message : String(error), { status: 599, statusText: "STT unavailable" }),
+    )
+    if (!response.ok) {
+      setWorkingTurn()
+      showToast({ variant: "error", title: language.t("voice.inspector.turn.redecode.failed"), description: await response.text() })
+      return
+    }
+    const result = (await response.json()) as { text: string; diagnostics?: Record<string, string | number | boolean> }
+    await platform.appendVoiceDiagnostic?.({
+      sessionID: sessionID(),
+      turnID,
+      source: "replay",
+      event: "turn_redecoded",
+      text: result.text,
+      durationMs: performance.now() - started,
+      diagnostics: result.diagnostics,
+    })
+    setWorkingTurn()
+    setRefresh((value) => value + 1)
+  }
+
   return (
     <Dialog
       title={language.t("voice.inspector.title")}
@@ -303,8 +589,31 @@ export function DialogVoiceInspector(props: { sessionID?: string }) {
               ? language.t("voice.inspector.regression.running", { completed: regressionProgress(), total: 6 })
               : language.t("voice.inspector.regression.action")}
           </Button>
-          <Button type="button" variant="secondary" disabled={duplexRunning()} onClick={() => void runDuplexRegression()}>
-            {duplexRunning() ? language.t("voice.inspector.duplex.running") : language.t("voice.inspector.duplex.action")}
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={duplexRunning()}
+            onClick={() => void runDuplexRegression()}
+          >
+            {duplexRunning()
+              ? language.t("voice.inspector.duplex.running")
+              : language.t("voice.inspector.duplex.action")}
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={reliabilityRunning()}
+            onClick={() => void runReliabilityRegression()}
+          >
+            {reliabilityRunning()
+              ? language.t("voice.inspector.reliability.running")
+              : language.t("voice.inspector.reliability.action")}
+          </Button>
+          <Button type="button" variant="secondary" onClick={runTurnRecoveryRegression}>
+            {language.t("voice.inspector.turnRegression.action")}
+          </Button>
+          <Button type="button" variant="secondary" disabled={soakRunning()} onClick={() => void runSoakRegression()}>
+            {soakRunning() ? language.t("voice.inspector.soak.running") : language.t("voice.inspector.soak.action")}
           </Button>
           <Button
             type="button"
@@ -330,113 +639,233 @@ export function DialogVoiceInspector(props: { sessionID?: string }) {
           </Button>
         </div>
 
-        <Show when={replayResult()}>
-          {(result) => (
-            <div class="shrink-0 rounded-md border border-border-weak-base bg-surface-raised-base p-3">
-              <div class="text-12-medium text-text-strong">{result().file}</div>
-              <div class="mt-1 whitespace-pre-wrap text-12-regular text-text-strong">{result().text || "—"}</div>
-              <div class="mt-2 font-mono text-11-regular text-text-weak">{JSON.stringify(result().diagnostics)}</div>
-            </div>
-          )}
-        </Show>
+        <div class="flex max-h-[45%] shrink-0 flex-col gap-4 overflow-y-auto">
+          <Show when={replayResult()}>
+            {(result) => (
+              <div class="shrink-0 rounded-md border border-border-weak-base bg-surface-raised-base p-3">
+                <div class="text-12-medium text-text-strong">{result().file}</div>
+                <div class="mt-1 whitespace-pre-wrap text-12-regular text-text-strong">{result().text || "—"}</div>
+                <div class="mt-2 font-mono text-11-regular text-text-weak">{JSON.stringify(result().diagnostics)}</div>
+              </div>
+            )}
+          </Show>
 
-        <Show when={regressionReport()}>
-          {(report) => (
-            <div class="shrink-0 rounded-md border border-border-weak-base bg-surface-raised-base p-3">
-              <div class="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <div class="text-12-medium text-text-strong">{language.t("voice.inspector.regression.title")}</div>
-                  <div class="mt-1 text-11-regular text-text-weak">
-                    {language.t("voice.inspector.regression.summary", {
-                      passed: report().passed,
-                      failed: report().failed,
-                      wer: Math.round(report().medianWordErrorRate * 100),
-                      cer: Math.round(report().medianCharacterErrorRate * 100),
-                      latency: Math.round(report().medianTotalMs),
-                    })}
+          <Show when={regressionReport()}>
+            {(report) => (
+              <div class="shrink-0 rounded-md border border-border-weak-base bg-surface-raised-base p-3">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <div class="text-12-medium text-text-strong">{language.t("voice.inspector.regression.title")}</div>
+                    <div class="mt-1 text-11-regular text-text-weak">
+                      {language.t("voice.inspector.regression.summary", {
+                        passed: report().passed,
+                        failed: report().failed,
+                        wer: Math.round(report().medianWordErrorRate * 100),
+                        cer: Math.round(report().medianCharacterErrorRate * 100),
+                        latency: Math.round(report().medianTotalMs),
+                      })}
+                    </div>
+                    <Show when={regressionComparison()}>
+                      {(comparison) => (
+                        <div class="mt-1 text-11-regular text-text-weak">
+                          {language.t("voice.inspector.regression.delta", {
+                            passed: signed(comparison().passed),
+                            wer: signed(Math.round(comparison().wordErrorRate * 100)),
+                            cer: signed(Math.round(comparison().characterErrorRate * 100)),
+                            latency: signed(Math.round(comparison().totalMs)),
+                          })}
+                        </div>
+                      )}
+                    </Show>
                   </div>
-                  <Show when={regressionComparison()}>
-                    {(comparison) => (
-                      <div class="mt-1 text-11-regular text-text-weak">
-                        {language.t("voice.inspector.regression.delta", {
-                          passed: signed(comparison().passed),
-                          wer: signed(Math.round(comparison().wordErrorRate * 100)),
-                          cer: signed(Math.round(comparison().characterErrorRate * 100)),
-                          latency: signed(Math.round(comparison().totalMs)),
-                        })}
-                      </div>
-                    )}
-                  </Show>
+                  <div class="flex flex-wrap gap-2">
+                    <Button type="button" variant="secondary" onClick={saveBaseline}>
+                      {language.t("voice.inspector.regression.baseline.action")}
+                    </Button>
+                    <Button type="button" variant="secondary" onClick={() => exportRegression("json")}>
+                      JSON
+                    </Button>
+                    <Button type="button" variant="secondary" onClick={() => exportRegression("html")}>
+                      HTML
+                    </Button>
+                  </div>
                 </div>
-                <div class="flex flex-wrap gap-2">
-                  <Button type="button" variant="secondary" onClick={saveBaseline}>
-                    {language.t("voice.inspector.regression.baseline.action")}
-                  </Button>
-                  <Button type="button" variant="secondary" onClick={() => exportRegression("json")}>
+                <div class="mt-3 max-h-52 overflow-y-auto rounded border border-border-weak-base">
+                  <For each={report().results}>{(result) => <RegressionRow result={result} />}</For>
+                </div>
+              </div>
+            )}
+          </Show>
+
+          <Show when={duplexReport()}>
+            {(report) => (
+              <div class="shrink-0 rounded-md border border-border-weak-base bg-surface-raised-base p-3">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <div class="text-12-medium text-text-strong">{language.t("voice.inspector.duplex.title")}</div>
+                    <div class="mt-1 text-11-regular text-text-weak">
+                      {language.t("voice.inspector.duplex.summary", {
+                        passed: report().passed,
+                        failed: report().failed,
+                        falseBarge: report().falseBargeIns,
+                        missedBarge: report().missedBargeIns,
+                        falseWake: report().falseWakes,
+                        missedWake: report().missedWakes,
+                        latency: Math.round(report().medianEndpointMs),
+                      })}
+                    </div>
+                    <Show when={duplexComparison()}>
+                      {(comparison) => (
+                        <div class="mt-1 text-11-regular text-text-weak">
+                          {language.t("voice.inspector.duplex.delta", {
+                            passed: signed(comparison().passed),
+                            falseBarge: signed(comparison().falseBargeIns),
+                            missedBarge: signed(comparison().missedBargeIns),
+                            falseWake: signed(comparison().falseWakes),
+                            missedWake: signed(comparison().missedWakes),
+                            latency: signed(Math.round(comparison().endpointMs)),
+                          })}
+                        </div>
+                      )}
+                    </Show>
+                  </div>
+                  <div class="flex flex-wrap gap-2">
+                    <Button type="button" variant="secondary" onClick={saveDuplexBaseline}>
+                      {language.t("voice.inspector.duplex.baseline.action")}
+                    </Button>
+                    <Button type="button" variant="secondary" onClick={() => exportDuplexRegression("json")}>
+                      JSON
+                    </Button>
+                    <Button type="button" variant="secondary" onClick={() => exportDuplexRegression("html")}>
+                      HTML
+                    </Button>
+                  </div>
+                </div>
+                <div class="mt-3 max-h-52 overflow-y-auto rounded border border-border-weak-base">
+                  <For each={report().results}>{(result) => <DuplexRegressionRow result={result} />}</For>
+                </div>
+              </div>
+            )}
+          </Show>
+
+          <Show when={reliabilityReport()}>
+            {(report) => (
+              <div class="shrink-0 rounded-md border border-border-weak-base bg-surface-raised-base p-3">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <div class="text-12-medium text-text-strong">
+                      {language.t("voice.inspector.reliability.title")}
+                    </div>
+                    <div class="mt-1 text-11-regular text-text-weak">
+                      {language.t("voice.inspector.reliability.summary", {
+                        passed: report().passed,
+                        cycles: report().cycles,
+                        failed: report().failed,
+                        recovered: report().recovered_faults,
+                        seconds: Math.round(report().total_ms / 1_000),
+                        memory: (report().resources.steady_state_rss_delta_bytes / 1024 / 1024).toFixed(1),
+                      })}
+                    </div>
+                    <div class="mt-1 font-mono text-11-regular text-text-weak">
+                      warmup RSS {(report().resources.rss_delta_bytes / 1024 / 1024).toFixed(1)} MB · steady threads {signed(report().resources.steady_state_threads_delta)} · fds {signed(report().resources.file_descriptors_delta)}
+                    </div>
+                  </div>
+                  <Button type="button" variant="secondary" onClick={exportReliabilityRegression}>
                     JSON
                   </Button>
-                  <Button type="button" variant="secondary" onClick={() => exportRegression("html")}>
-                    HTML
-                  </Button>
                 </div>
-              </div>
-              <div class="mt-3 max-h-52 overflow-y-auto rounded border border-border-weak-base">
-                <For each={report().results}>{(result) => <RegressionRow result={result} />}</For>
-              </div>
-            </div>
-          )}
-        </Show>
-
-        <Show when={duplexReport()}>
-          {(report) => (
-            <div class="shrink-0 rounded-md border border-border-weak-base bg-surface-raised-base p-3">
-              <div class="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <div class="text-12-medium text-text-strong">{language.t("voice.inspector.duplex.title")}</div>
-                  <div class="mt-1 text-11-regular text-text-weak">
-                    {language.t("voice.inspector.duplex.summary", {
-                      passed: report().passed,
-                      failed: report().failed,
-                      falseBarge: report().falseBargeIns,
-                      missedBarge: report().missedBargeIns,
-                      falseWake: report().falseWakes,
-                      missedWake: report().missedWakes,
-                      latency: Math.round(report().medianEndpointMs),
-                    })}
-                  </div>
-                  <Show when={duplexComparison()}>
-                    {(comparison) => (
-                      <div class="mt-1 text-11-regular text-text-weak">
-                        {language.t("voice.inspector.duplex.delta", {
-                          passed: signed(comparison().passed),
-                          falseBarge: signed(comparison().falseBargeIns),
-                          missedBarge: signed(comparison().missedBargeIns),
-                          falseWake: signed(comparison().falseWakes),
-                          missedWake: signed(comparison().missedWakes),
-                          latency: signed(Math.round(comparison().endpointMs)),
-                        })}
+                <div class="mt-3 max-h-52 overflow-y-auto rounded border border-border-weak-base">
+                  <For each={report().results}>
+                    {(result) => (
+                      <div class="flex items-center justify-between gap-3 border-b border-border-weak-base px-3 py-2 last:border-b-0">
+                        <div class="min-w-0 text-11-regular text-text-strong">
+                          #{result.cycle} · {result.fault || "normal"}
+                          <Show when={result.recovered}> · recovered</Show>
+                          <Show when={result.error}> · {result.error}</Show>
+                        </div>
+                        <div class={result.passed ? "text-11-regular text-success-base" : "text-11-regular text-error-base"}>
+                          {result.passed ? "PASS" : "FAIL"} · {result.duration_ms} ms
+                        </div>
                       </div>
                     )}
-                  </Show>
-                </div>
-                <div class="flex flex-wrap gap-2">
-                  <Button type="button" variant="secondary" onClick={saveDuplexBaseline}>
-                    {language.t("voice.inspector.duplex.baseline.action")}
-                  </Button>
-                  <Button type="button" variant="secondary" onClick={() => exportDuplexRegression("json")}>
-                    JSON
-                  </Button>
-                  <Button type="button" variant="secondary" onClick={() => exportDuplexRegression("html")}>
-                    HTML
-                  </Button>
+                  </For>
                 </div>
               </div>
-              <div class="mt-3 max-h-52 overflow-y-auto rounded border border-border-weak-base">
-                <For each={report().results}>{(result) => <DuplexRegressionRow result={result} />}</For>
+            )}
+          </Show>
+
+          <Show when={turnReport()}>
+            {(report) => (
+              <div class="shrink-0 rounded-md border border-border-weak-base bg-surface-raised-base p-3">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <div class="text-12-medium text-text-strong">
+                      {language.t("voice.inspector.turnRegression.title")}
+                    </div>
+                    <div class="mt-1 text-11-regular text-text-weak">
+                      {language.t("voice.inspector.turnRegression.summary", {
+                        passed: report().passed,
+                        failed: report().failed,
+                        stale: report().staleCallbacksRejected,
+                        duplicates: report().duplicateFinalsRejected,
+                        responses: report().unrelatedResponsesRejected,
+                        recovered: report().recoveredToIdle,
+                      })}
+                    </div>
+                  </div>
+                  <div class="flex flex-wrap gap-2">
+                    <Button type="button" variant="secondary" onClick={() => exportTurnRegression("json")}>
+                      JSON
+                    </Button>
+                    <Button type="button" variant="secondary" onClick={() => exportTurnRegression("html")}>
+                      HTML
+                    </Button>
+                  </div>
+                </div>
+                <div class="mt-3 max-h-52 overflow-y-auto rounded border border-border-weak-base">
+                  <For each={report().results}>{(result) => <TurnRegressionRow result={result} />}</For>
+                </div>
               </div>
-            </div>
-          )}
-        </Show>
+            )}
+          </Show>
+
+          <Show when={soakReport()}>
+            {(report) => (
+              <div class="shrink-0 rounded-md border border-border-weak-base bg-surface-raised-base p-3">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <div class="text-12-medium text-text-strong">{language.t("voice.inspector.soak.title")}</div>
+                    <div class="mt-1 text-11-regular text-text-weak">
+                      {language.t("voice.inspector.soak.summary", {
+                        passed: report().passed,
+                        turns: report().turns,
+                        failed: report().failed,
+                        stale: report().staleCallbacksRejected,
+                        duplicates: report().duplicateFinalsRejected,
+                        recovered: report().recoveredTurns,
+                        leaks: report().stateLeaks,
+                      })}
+                    </div>
+                    <div class="mt-1 font-mono text-11-regular text-text-weak">
+                      seed {report().seed} · generation {report().finalGeneration} · {report().finalState}
+                    </div>
+                  </div>
+                  <div class="flex flex-wrap gap-2">
+                    <Button type="button" variant="secondary" onClick={() => exportSoakRegression("json")}>
+                      JSON
+                    </Button>
+                    <Button type="button" variant="secondary" onClick={() => exportSoakRegression("html")}>
+                      HTML
+                    </Button>
+                  </div>
+                </div>
+                <div class="mt-3 max-h-52 overflow-y-auto rounded border border-border-weak-base">
+                  <For each={report().batches}>{(batch) => <SoakBatchRow batch={batch} />}</For>
+                </div>
+              </div>
+            )}
+          </Show>
+        </div>
 
         <div class="min-h-0 flex-1 overflow-y-auto rounded-md border border-border-weak-base bg-surface-base p-3">
           <Show
@@ -512,6 +941,89 @@ export function DialogVoiceInspector(props: { sessionID?: string }) {
                           <Show when={turn.error}>
                             <div class="mt-2 whitespace-pre-wrap text-11-regular text-error-base">{turn.error}</div>
                           </Show>
+                          <div class="mt-3 grid gap-2 rounded border border-border-weak-base bg-surface-base p-2 text-11-regular sm:grid-cols-2">
+                            <DiagnosticValue label={language.t("voice.inspector.turn.preview")} value={turn.preview} />
+                            <DiagnosticValue
+                              label={language.t("voice.inspector.turn.final")}
+                              value={turn.correctedTranscript ?? turn.finalTranscript}
+                            />
+                            <DiagnosticValue
+                              label={language.t("voice.inspector.turn.confidence")}
+                              value={turn.confidence === undefined ? undefined : `${Math.round(turn.confidence * 100)}%`}
+                            />
+                            <DiagnosticValue
+                              label={language.t("voice.inspector.turn.reason")}
+                              value={[turn.sendReason, turn.endpointReason].filter(Boolean).join(" · ")}
+                            />
+                            <DiagnosticValue
+                              label={language.t("voice.inspector.turn.vad")}
+                              value={[
+                                turn.audioMs === undefined ? undefined : `audio ${Math.round(turn.audioMs)} ms`,
+                                turn.speechMs === undefined ? undefined : `speech ${Math.round(turn.speechMs)} ms`,
+                                turn.silenceMs === undefined ? undefined : `silence ${Math.round(turn.silenceMs)} ms`,
+                                turn.preRollMs === undefined ? undefined : `pre-roll ${Math.round(turn.preRollMs)} ms`,
+                                turn.transcriptionMs === undefined ? undefined : `STT ${Math.round(turn.transcriptionMs)} ms`,
+                              ]
+                                .filter(Boolean)
+                                .join(" · ")}
+                            />
+                            <DiagnosticValue
+                              label={language.t("voice.inspector.turn.corrections")}
+                              value={turn.corrections.join(" · ") || turn.correctedTranscript}
+                            />
+                          </div>
+                          <Show when={editingTurn() === turn.id}>
+                            <div class="mt-2 flex items-end gap-2">
+                              <div class="min-w-0 flex-1">
+                                <TextField
+                                  autofocus
+                                  hideLabel
+                                  label={language.t("voice.inspector.turn.correction.placeholder")}
+                                  value={correction()}
+                                  onChange={setCorrection}
+                                  class="w-full"
+                                />
+                              </div>
+                              <Button
+                                type="button"
+                                variant="primary"
+                                disabled={workingTurn() === turn.id || !correction().trim()}
+                                onClick={() => void saveCorrection(turn.id)}
+                              >
+                                {language.t("voice.inspector.turn.correction.save")}
+                              </Button>
+                            </div>
+                          </Show>
+                          <div class="mt-2 flex flex-wrap gap-2">
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              disabled={!turn.hasAudio || workingTurn() === turn.id}
+                              onClick={() => void playTurn(turn.id)}
+                            >
+                              {language.t("voice.inspector.turn.play")}
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              onClick={() => {
+                                setEditingTurn(turn.id)
+                                setCorrection(turn.correctedTranscript ?? turn.finalTranscript ?? turn.text ?? "")
+                              }}
+                            >
+                              {language.t("voice.inspector.turn.correct")}
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              disabled={!turn.hasAudio || workingTurn() === turn.id}
+                              onClick={() => void recognizeTurnAgain(turn.id)}
+                            >
+                              {workingTurn() === turn.id
+                                ? language.t("voice.inspector.turn.redecode.running")
+                                : language.t("voice.inspector.turn.redecode")}
+                            </Button>
+                          </div>
                         </div>
                       )}
                     </For>
@@ -577,6 +1089,15 @@ function SummaryCard(props: { label: string; value: string | number }) {
   )
 }
 
+function DiagnosticValue(props: { label: string; value?: string }) {
+  return (
+    <div class="min-w-0">
+      <div class="text-text-weak">{props.label}</div>
+      <div class="mt-0.5 break-words text-text-strong">{props.value || "—"}</div>
+    </div>
+  )
+}
+
 function LevelWaveform(props: { values: number[] }) {
   const points = () =>
     props.values
@@ -616,12 +1137,47 @@ function DuplexRegressionRow(props: { result: DuplexRegressionResult }) {
         <div class="truncate text-11-medium text-text-strong">
           {language.t(`voice.inspector.duplex.scenario.${props.result.id}`)}
         </div>
-        <div class="truncate text-11-regular text-text-weak">{props.result.transcript || props.result.error || "—"}</div>
+        <div class="truncate text-11-regular text-text-weak">
+          {props.result.transcript || props.result.error || "—"}
+        </div>
       </div>
       <div class={props.result.passed ? "text-11-medium text-icon-success-base" : "text-11-medium text-error-base"}>
         {props.result.passed ? "PASS" : "FAIL"}
       </div>
       <div class="font-mono text-11-regular text-text-weak">{formatDuration(props.result.latencyMs)}</div>
+    </div>
+  )
+}
+
+function TurnRegressionRow(props: { result: VoiceTurnRegressionResult }) {
+  const language = useLanguage()
+  return (
+    <div class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-border-weak-base px-3 py-2 last:border-b-0">
+      <div class="min-w-0">
+        <div class="truncate text-11-medium text-text-strong">
+          {language.t(`voice.inspector.turnRegression.scenario.${props.result.id}`)}
+        </div>
+        <div class="truncate font-mono text-11-regular text-text-weak">
+          {props.result.error || props.result.events.join(" → ") || "—"}
+        </div>
+      </div>
+      <div class={props.result.passed ? "text-11-medium text-icon-success-base" : "text-11-medium text-error-base"}>
+        {props.result.passed ? "PASS" : "FAIL"}
+      </div>
+    </div>
+  )
+}
+
+function SoakBatchRow(props: { batch: VoiceSoakBatchResult }) {
+  return (
+    <div class="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 border-b border-border-weak-base px-3 py-2 last:border-b-0">
+      <div class="font-mono text-11-medium text-text-strong">#{props.batch.batch}</div>
+      <div class="min-w-0 truncate font-mono text-11-regular text-text-weak">
+        {props.batch.errors.join(" · ") || `${props.batch.turns} turns · ${props.batch.stateLeaks} leaks`}
+      </div>
+      <div class={props.batch.failed ? "text-11-medium text-error-base" : "text-11-medium text-icon-success-base"}>
+        {props.batch.failed ? `${props.batch.failed} FAIL` : `${props.batch.passed} PASS`}
+      </div>
     </div>
   )
 }

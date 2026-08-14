@@ -133,14 +133,25 @@ const markBoundaryGesture = (input: {
 function TimelineThinkingRow(props: {
   reasoningHeading?: string
   showReasoningSummaries: boolean
-  status: SessionStatus["type"]
+  status: SessionStatus
   model?: string
 }) {
   const language = useLanguage()
+  const [now, setNow] = createSignal(Date.now())
+  createEffect(() => {
+    if (props.status.type !== "cache_restore") return
+    setNow(Date.now())
+    const timer = window.setInterval(() => setNow(Date.now()), 1_000)
+    onCleanup(() => window.clearInterval(timer))
+  })
   const label = () => {
-    if (props.status === "verifying") return language.t("ui.sessionTurn.status.verifying")
-    if (props.status === "repairing") return language.t("ui.sessionTurn.status.repairing")
-    if (props.status === "verified") return language.t("ui.sessionTurn.status.verified")
+    if (props.status.type === "cache_restore")
+      return language.t("ui.sessionTurn.status.cacheRestore", {
+        seconds: Math.max(0, Math.floor((now() - props.status.startedAt) / 1_000)),
+      })
+    if (props.status.type === "verifying") return language.t("ui.sessionTurn.status.verifying")
+    if (props.status.type === "repairing") return language.t("ui.sessionTurn.status.repairing")
+    if (props.status.type === "verified") return language.t("ui.sessionTurn.status.verified")
     return language.t("ui.sessionTurn.status.thinking")
   }
 
@@ -297,6 +308,105 @@ export function MessageTimeline(props: {
   const initialMeasurements = cached?.measurements
   const coldBottomMount = !initialMeasurements?.length && props.shouldAnchorBottom()
   const platform = usePlatform()
+  const [responseSpeech, setResponseSpeech] = createStore<{
+    partID?: string
+    state: "idle" | "loading" | "playing"
+  }>({ state: "idle" })
+  let responseSpeechGeneration = 0
+  let responseSpeechAudio: HTMLAudioElement | undefined
+  let responseSpeechURL: string | undefined
+
+  const stopResponseSpeech = () => {
+    responseSpeechGeneration++
+    responseSpeechAudio?.pause()
+    responseSpeechAudio = undefined
+    if (responseSpeechURL) URL.revokeObjectURL(responseSpeechURL)
+    responseSpeechURL = undefined
+    setResponseSpeech({ partID: undefined, state: "idle" })
+  }
+
+  const failResponseSpeech = (generation: number, error: unknown) => {
+    if (generation !== responseSpeechGeneration) return
+    showToast({
+      title: language.t("voice.error.tts.title"),
+      description: language.t("voice.error.tts.description", {
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    })
+    stopResponseSpeech()
+  }
+
+  const speakResponse = async (input: { partID: string; text: string }) => {
+    if (responseSpeech.partID === input.partID) {
+      if (responseSpeech.state === "loading") void platform.cancelLocalSpeech?.()
+      stopResponseSpeech()
+      return
+    }
+    if (responseSpeech.state === "loading") void platform.cancelLocalSpeech?.()
+    stopResponseSpeech()
+    const generation = responseSpeechGeneration
+    if (!platform.synthesizeLocalSpeech) {
+      failResponseSpeech(generation, language.t("voice.error.unsupported.description"))
+      return
+    }
+    setResponseSpeech({ partID: input.partID, state: "loading" })
+    const result = await platform
+      .synthesizeLocalSpeech({
+        provider: settings.voice.ttsProvider(),
+        endpoint:
+          settings.voice.ttsProvider() === "fish-local"
+            ? settings.voice.fishEndpoint()
+            : settings.voice.ttsEndpoint(),
+        model: settings.voice.ttsModel(),
+        voice: settings.voice.ttsVoice(),
+        mode: settings.voice.ttsMode(),
+        latency: settings.voice.fishLatency(),
+        language: settings.voice.fishLanguage(),
+        temperature: settings.voice.fishTemperature(),
+        topP: settings.voice.fishTopP(),
+        repetitionPenalty: settings.voice.fishRepetitionPenalty(),
+        seed: settings.voice.fishSeed(),
+        chunkLength: settings.voice.fishChunkLength(),
+        normalize: settings.voice.fishNormalize(),
+        streaming: settings.voice.fishStreaming(),
+        useMemoryCache: settings.voice.fishMemoryCache(),
+        maxNewTokens: settings.voice.fishMaxNewTokens(),
+        text: input.text,
+      })
+      .then(
+        (value) => value,
+        (error: unknown) => {
+          failResponseSpeech(generation, error)
+          return undefined
+        },
+      )
+    if (!result || generation !== responseSpeechGeneration) return
+    responseSpeechURL = URL.createObjectURL(result.audio)
+    responseSpeechAudio = new Audio(responseSpeechURL)
+    if (settings.voice.ttsProvider() === "fish-local") {
+      responseSpeechAudio.playbackRate = settings.voice.fishPlaybackRate()
+      responseSpeechAudio.volume = settings.voice.fishVolume()
+    }
+    responseSpeechAudio.onended = () => {
+      if (generation !== responseSpeechGeneration) return
+      stopResponseSpeech()
+    }
+    responseSpeechAudio.onerror = () => failResponseSpeech(generation, new Error("Audio playback failed"))
+    const played = await responseSpeechAudio.play().then(
+      () => true,
+      (error: unknown) => {
+        failResponseSpeech(generation, error)
+        return false
+      },
+    )
+    if (!played || generation !== responseSpeechGeneration) return
+    setResponseSpeech("state", "playing")
+  }
+
+  onCleanup(() => {
+    if (responseSpeech.state === "loading") void platform.cancelLocalSpeech?.()
+    stopResponseSpeech()
+  })
 
   const [listRoot, setListRoot] = createSignal<HTMLDivElement>()
   const sessionID = createMemo(() => params.id)
@@ -1062,6 +1172,8 @@ export function MessageTimeline(props: {
                 part={part()}
                 message={message()}
                 showAssistantCopyPartID={assistantCopyPartID(row().userMessageID)}
+                speakingResponsePartID={responseSpeech.partID}
+                onSpeakResponse={speakResponse}
                 turnDurationMs={turnDurationMs(row().userMessageID)}
                 useV2Actions={settings.general.newLayoutDesigns()}
                 defaultOpen={defaultOpen()}

@@ -201,9 +201,19 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
   createEffect(() => {
     const el = optionsRef
     if (!el) return
-    const update = () => setStore("optionsHeight", (height) => Math.max(height, el.scrollHeight))
+    let frame: number | undefined
+    const update = () => {
+      if (frame !== undefined) return
+      frame = requestAnimationFrame(() => {
+        frame = undefined
+        setStore("optionsHeight", (height) => Math.max(height, el.scrollHeight))
+      })
+    }
     update()
     createResizeObserver(el, update)
+    onCleanup(() => {
+      if (frame !== undefined) cancelAnimationFrame(frame)
+    })
   })
 
   onCleanup(() => {

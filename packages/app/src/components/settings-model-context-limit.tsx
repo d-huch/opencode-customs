@@ -2,11 +2,7 @@ import { createEffect, createMemo, createSignal, Show } from "solid-js"
 import { useLanguage } from "@/context/language"
 import { useServerSync } from "@/context/server-sync"
 import { showToast } from "@/utils/toast"
-import {
-  MAX_CONTEXT_LIMIT,
-  minimumContextLimit,
-  parseContextLimit,
-} from "./settings-model-context-limit-value"
+import { MAX_CONTEXT_LIMIT, minimumContextLimit, parseContextLimit } from "./settings-model-context-limit-value"
 
 export function SettingsModelContextLimit(props: {
   providerID: string
@@ -15,6 +11,7 @@ export function SettingsModelContextLimit(props: {
   input?: number
   output: number
   variant?: "default" | "v2" | "runtime"
+  scope?: "model" | "chat"
 }) {
   const language = useLanguage()
   const serverSync = useServerSync()
@@ -33,14 +30,14 @@ export function SettingsModelContextLimit(props: {
     if (!context || saving()) return
     setSaving(true)
     const input = props.input ? Math.min(props.input, Math.max(1, context - props.output)) : undefined
+    const model =
+      props.scope === "chat" ? { chat_context: context } : { limit: { context, input, output: props.output } }
     await serverSync()
       .updateConfig({
         provider: {
           [props.providerID]: {
             models: {
-              [props.modelID]: {
-                limit: { context, input, output: props.output },
-              },
+              [props.modelID]: model,
             },
           },
         },
@@ -50,10 +47,17 @@ export function SettingsModelContextLimit(props: {
         showToast({
           variant: "success",
           icon: "circle-check",
-          title: language.t("settings.models.context.saved"),
-          description: language.t("settings.models.context.saved.description", {
-            limit: context.toLocaleString(language.intl()),
-          }),
+          title: language.t(
+            props.scope === "chat" ? "settings.models.chatContext.saved" : "settings.models.context.saved",
+          ),
+          description: language.t(
+            props.scope === "chat"
+              ? "settings.models.chatContext.saved.description"
+              : "settings.models.context.saved.description",
+            {
+              limit: context.toLocaleString(language.intl()),
+            },
+          ),
         })
       })
       .catch((error: unknown) => {
@@ -80,7 +84,7 @@ export function SettingsModelContextLimit(props: {
               props.variant === "v2" ? "text-12-regular text-v2-text-text-muted" : "text-12-regular text-text-weak"
             }
           >
-            {language.t("settings.models.context.label")}
+            {language.t(props.scope === "chat" ? "settings.models.chatContext.label" : "settings.models.context.label")}
           </label>
         </Show>
         <input
@@ -106,7 +110,13 @@ export function SettingsModelContextLimit(props: {
                 ? "h-6 w-20 rounded-md border border-border-weak-base bg-surface-base px-1.5 text-right text-10-regular tabular-nums text-text-base outline-none focus:border-border-focus"
                 : "h-8 w-28 rounded-md border border-border-weak-base bg-surface-base px-2 text-right text-13-regular tabular-nums text-text-strong outline-none focus:border-border-focus"
           }
-          aria-label={props.variant === "runtime" ? language.t("settings.models.context.label") : undefined}
+          aria-label={
+            props.variant === "runtime"
+              ? language.t(
+                  props.scope === "chat" ? "settings.models.chatContext.label" : "settings.models.context.label",
+                )
+              : undefined
+          }
           aria-invalid={dirty() && !value()}
         />
         <Show when={props.variant !== "runtime" || dirty()}>

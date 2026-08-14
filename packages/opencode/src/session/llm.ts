@@ -48,6 +48,9 @@ export type StreamInput = {
   tools: Record<string, Tool>
   retries?: number
   toolChoice?: "auto" | "required" | "none"
+  statefulResponses?: boolean
+  previousResponseID?: string
+  providerChainContext?: number
 }
 
 export type StreamRequest = StreamInput & {
@@ -256,7 +259,7 @@ const live: Layer.Layer<
 
       // Runtime seam: native is an opt-in adapter over @opencode-ai/llm. It
       // either returns a ready LLMEvent stream or a concrete fallback reason.
-      if (flags.experimentalNativeLlm) {
+      if (flags.experimentalNativeLlm || input.statefulResponses) {
         const native = LLMNativeRuntime.stream({
           model: input.model,
           provider: item,
@@ -272,6 +275,8 @@ const live: Layer.Layer<
           providerOptions: prepared.params.options,
           headers: prepared.headers,
           abort: input.abort,
+          statefulResponses: input.statefulResponses,
+          previousResponseID: input.previousResponseID,
         })
         if (native.type === "supported") {
           yield* Effect.logInfo("llm runtime selected", {
@@ -284,6 +289,10 @@ const live: Layer.Layer<
             stream: native.stream,
           }
         }
+        if (input.statefulResponses)
+          return yield* Effect.fail(
+            new Error(`Stateful Chat requires LM Studio Responses support: ${native.reason}`),
+          )
         yield* Effect.logInfo("llm runtime selected", {
           "llm.runtime": "ai-sdk",
           "llm.provider": input.model.providerID,

@@ -68,10 +68,11 @@ import { ModelSwitcher } from "@/local-agent-runtime/model-switcher"
 import { ToolCallRepair } from "./tool-call-repair"
 import { SessionLog } from "@/local-agent-runtime/session-log"
 import { SessionFreshness } from "./freshness"
-import { acquireModel } from "@/local-agent-runtime/resource-governor"
+import { acquireModel, recordProviderContext } from "@/local-agent-runtime/resource-governor"
 import { SessionExecutionBudget } from "./execution-budget"
 import { ProviderTransform } from "@/provider/transform"
 import { RequestPipelineScheduler } from "./request-pipeline"
+import { SessionChatMode } from "./chat-mode"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -97,7 +98,7 @@ IMPORTANT:
 
 const STRUCTURED_OUTPUT_SYSTEM_PROMPT = `IMPORTANT: The user has requested structured output. You MUST use the StructuredOutput tool to provide your final response. Do NOT respond with plain text - you MUST call the StructuredOutput tool with your answer formatted according to the schema.`
 
-const GENERAL_CONVERSATION_SYSTEM_PROMPT = `No repository context was selected for the current request. The request is still valid. If it is a general question, answer it directly from available knowledge and tools in the user's language. Never refuse merely because the question is unrelated to code or the open project. Do not mention the repository unless the user connects the request to it. If the request actually requires workspace work, inspect the workspace with the available tools.`
+const GENERAL_CONVERSATION_SYSTEM_PROMPT = `No repository context was selected for the current request. The request is still valid. If it is a general question, answer it directly from available knowledge and tools in the user's language. Never refuse merely because the question is unrelated to code or the open project. Do not mention or inspect the repository unless the user connects the request to it. Use external tools only when the request needs external or potentially changed facts. You can create complete software projects, inspect and modify workspace files, and execute available tools. When the user asks you to build or create software, perform the work instead of claiming that OpenCode or a coding assistant cannot create it. If the request requires workspace work, inspect the workspace and act within the available permissions.`
 
 function mcpResourceBase64Size(value: string) {
   const trimmed = value.replace(/\s/g, "")
@@ -225,13 +226,15 @@ const layer = Layer.effect(
       if (idx === -1) return
       if (input.history.filter(real).length !== 1) return
 
-      const context = input.history.slice(0, idx + 1)
-      const firstUser = context[idx]
+      const firstUser = input.history[idx]
       if (!firstUser || firstUser.info.role !== "user") return
       const firstInfo = firstUser.info
+      const visibleParts = firstUser.parts.filter(
+        (part) => !("synthetic" in part && part.synthetic === true) && !("ignored" in part && part.ignored === true),
+      )
 
-      const subtasks = firstUser.parts.filter((p): p is SessionV1.SubtaskPart => p.type === "subtask")
-      const onlySubtasks = subtasks.length > 0 && firstUser.parts.every((p) => p.type === "subtask")
+      const subtasks = visibleParts.filter((p): p is SessionV1.SubtaskPart => p.type === "subtask")
+      const onlySubtasks = subtasks.length > 0 && visibleParts.every((p) => p.type === "subtask")
 
       const ag = yield* agents.get("title")
       if (!ag) return
@@ -243,7 +246,7 @@ const layer = Layer.effect(
         !mdl || sameAsMain
           ? onlySubtasks
             ? subtasks.map((p) => p.prompt).join(" ")
-            : firstUser.parts
+            : visibleParts
                 .filter((part): part is SessionV1.TextPart => part.type === "text")
                 .map((part) => part.text)
                 .join(" ")
@@ -261,7 +264,7 @@ const layer = Layer.effect(
                   { role: "user", content: "Generate a title for this conversation:\n" },
                   ...(onlySubtasks
                     ? [{ role: "user" as const, content: subtasks.map((p) => p.prompt).join("\n") }]
-                    : yield* MessageV2.toModelMessagesEffect(context, mdl)),
+                    : yield* MessageV2.toModelMessagesEffect([{ ...firstUser, parts: visibleParts }], mdl)),
                 ],
               })
               .pipe(
@@ -1170,6 +1173,7 @@ const layer = Layer.effect(
       checkpoint: SessionExecutionCheckpoint.Token,
     ) {
       const ctx = yield* InstanceState.context
+      const chatMode = SessionChatMode.enabled(ctx.directory)
       let structured: unknown
       let step = 0
       const session = yield* sessions.get(sessionID).pipe(Effect.orDie)
@@ -1479,9 +1483,7 @@ const layer = Layer.effect(
             if (verification?.critic !== false) {
               const request = MessageV2.activeUserRequest(msgs)
               if (!request) throw new Error("Critic pass requires an active user request")
-              const reviewer = verification?.reviewer_agent
-                ? yield* agents.get(verification.reviewer_agent)
-                : undefined
+              const reviewer = verification?.reviewer_agent ? yield* agents.get(verification.reviewer_agent) : undefined
               if (verification?.reviewer_agent && !reviewer)
                 throw new Error(`Reviewer agent not found: "${verification.reviewer_agent}"`)
               const reviewModel =
@@ -1752,10 +1754,19 @@ const layer = Layer.effect(
             ModelV2.ID.make(selectedModelID),
             sessionID,
           )
-          selectedModel = {
+          const restoredModel = {
             ...restored,
             api: { ...restored.api, id: selectedInstanceID },
           }
+          selectedModel = ModelSwitcher.withContextLimit(
+            restoredModel,
+            chatMode
+              ? SessionChatMode.contextLimit({
+                  model: restoredModel,
+                  models: cfg.provider?.lmstudio?.models,
+                })
+              : undefined,
+          )
         }
         const task = tasks.pop()
 
@@ -1798,7 +1809,7 @@ const layer = Layer.effect(
           continue
         }
 
-        const agent = yield* agents.get(lastUser.agent)
+        const agent = yield* agents.get(chatMode ? "chat" : lastUser.agent)
         if (!agent) {
           const available = (yield* agents.list()).filter((a) => !a.hidden).map((a) => a.name)
           const hint = available.length ? ` Available agents: ${available.join(", ")}` : ""
@@ -1808,11 +1819,13 @@ const layer = Layer.effect(
         }
         const maxSteps = agent.steps ?? Infinity
         const isLastStep = step >= maxSteps || providerTurns + 1 >= SessionExecutionBudget.limits.provider_turns
-        msgs = yield* SessionReminders.apply({ messages: msgs, agent, session }).pipe(
-          Effect.provideService(RuntimeFlags.Service, flags),
-          Effect.provideService(FSUtil.Service, fsys),
-          Effect.provideService(Session.Service, sessions),
-        )
+        msgs = chatMode
+          ? msgs
+          : yield* SessionReminders.apply({ messages: msgs, agent, session }).pipe(
+              Effect.provideService(RuntimeFlags.Service, flags),
+              Effect.provideService(FSUtil.Service, fsys),
+              Effect.provideService(Session.Service, sessions),
+            )
 
         const routingRequest = MessageV2.activeUserRequest(msgs)
         const routingImages = (criticMode ? [] : (routingRequest?.parts ?? [])).filter(
@@ -1820,20 +1833,16 @@ const layer = Layer.effect(
         )
         const routingMemoryText = criticMode ? "" : MessageV2.userRequestText(routingRequest).trim()
         const modelRequestCharacters = criticMode
-          ? (lastUserMsg?.parts ?? [])
-              .flatMap((part) => (part.type === "text" ? [part.text] : []))
-              .join("\n")
-              .length
+          ? (lastUserMsg?.parts ?? []).flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n").length
           : MessageV2.userRequestText(routingRequest).length
-        const memoryRecallFiber =
-          criticMode
-            ? yield* RequestPipelineScheduler.skip({
-                db,
-                checkpoint,
-                phase: "memory_recall",
-                detail: "Critic pass uses only its compact evidence packet",
-              }).pipe(Effect.as(undefined))
-            : durableMemoryCache === null || durableMemoryCache === undefined
+        const memoryRecallFiber = criticMode
+          ? yield* RequestPipelineScheduler.skip({
+              db,
+              checkpoint,
+              phase: "memory_recall",
+              detail: "Critic pass uses only its compact evidence packet",
+            }).pipe(Effect.as(undefined))
+          : durableMemoryCache === null || durableMemoryCache === undefined
             ? routingMemoryText
               ? yield* RequestPipelineScheduler.optional({
                   db,
@@ -1879,13 +1888,19 @@ const layer = Layer.effect(
                         ModelSwitcher.activate({
                           config: cfg,
                           preferredModel,
+                          contextLimit: chatMode
+                            ? SessionChatMode.contextLimit({
+                                model: preferredModel,
+                                models: cfg.provider?.lmstudio?.models,
+                              })
+                            : undefined,
                           requestShape: {
                             textCharacters: modelRequestCharacters,
                             files: (routingRequest?.parts ?? []).filter((part) => part.type === "file").length,
                             images: routingImages.length,
                             // Tool overrides are usually empty even though the coding agent receives tools.
                             // Signal the real provider-turn requirement so utility models cannot take it over.
-                            tools: isLastStep ? 0 : Math.max(1, Object.keys(lastUser.tools ?? {}).length),
+                            tools: chatMode || isLastStep ? 0 : Math.max(1, Object.keys(lastUser.tools ?? {}).length),
                           },
                           vision,
                         }),
@@ -1958,7 +1973,7 @@ const layer = Layer.effect(
           throw error
         }
         if (firstSelection) {
-          const pinned = yield* (criticMode
+          const pinned = yield* criticMode
             ? SessionExecutionCheckpoint.pinReviewerModel(db, checkpoint, {
                 providerID: model.providerID,
                 modelID: model.id,
@@ -1968,7 +1983,7 @@ const layer = Layer.effect(
                 providerID: model.providerID,
                 modelID: model.id,
                 instanceID: model.api.id,
-              }))
+              })
           if (!pinned) throw new Error("The selected model does not match the durable execution checkpoint.")
           selectedModel = model
           selectedProviderID = model.providerID
@@ -2034,7 +2049,7 @@ const layer = Layer.effect(
           const responseLanguageInstruction = ResponseLanguage.instruction(responseLanguageSample ?? "")
           const bypassAgentCheck = requestUserMsg?.parts.some((p) => p.type === "agent") ?? false
           const evidenceRequired =
-            !criticMode && verification?.evidence !== false && SessionEvidence.requiresDeclaration(msgs)
+            !chatMode && !criticMode && verification?.evidence !== false && SessionEvidence.requiresDeclaration(msgs)
           const promptOps = yield* ops()
           const freshnessPart = requestUserMsg?.parts.find(
             (part): part is SessionV1.TextPart =>
@@ -2045,15 +2060,29 @@ const layer = Layer.effect(
           const requestFiles = (requestUserMsg?.parts ?? [])
             .filter((part) => part.type === "file")
             .map((part) => part.url)
-          const classifierTurn =
+          const smallClassifierModel =
             criticMode || !freshnessPart || !freshnessText || storedFreshness || requestFiles.length
+              ? undefined
+              : yield* provider.getSmallModel(model.providerID)
+          const classifierModel = SessionFreshness.classifierModel({
+            primary: model,
+            utility: smallClassifierModel,
+          })
+          const classifierTurn =
+            criticMode || !freshnessPart || !freshnessText || storedFreshness || requestFiles.length || !classifierModel
               ? undefined
               : yield* SessionExecutionCheckpoint.consume(db, checkpoint, {
                   counter: "classifier_turns",
                   limit: SessionExecutionBudget.limits.classifier_turns,
                 })
-          const freshnessDecision =
-            criticMode
+          const freshnessDecision = chatMode
+            ? yield* RequestPipelineScheduler.skip({
+                db,
+                checkpoint,
+                phase: "classification",
+                detail: "Dedicated Chat mode does not route into repository evidence",
+              }).pipe(Effect.as(undefined))
+            : criticMode
               ? yield* RequestPipelineScheduler.skip({
                   db,
                   checkpoint,
@@ -2061,65 +2090,78 @@ const layer = Layer.effect(
                   detail: "Critic pass uses only its compact evidence packet",
                 }).pipe(Effect.as(undefined))
               : !freshnessPart || !freshnessText
-              ? yield* RequestPipelineScheduler.skip({
-                  db,
-                  checkpoint,
-                  phase: "classification",
-                  detail: "No genuine request text",
-                }).pipe(Effect.as(undefined))
-              : storedFreshness
                 ? yield* RequestPipelineScheduler.skip({
                     db,
                     checkpoint,
                     phase: "classification",
-                    detail: "Reused the routing decision stored on the active request",
-                  }).pipe(Effect.as(storedFreshness))
-                : yield* RequestPipelineScheduler.phase({
-                    db,
-                    checkpoint,
-                    handle: requestPipeline,
-                    phase: "classification",
-                    detail: requestFiles.length
-                      ? "Attached files require repository scope"
-                      : "Epistemic request routing",
-                    effect: requestFiles.length
-                      ? Effect.succeed(SessionFreshness.repository(freshnessText))
-                      : classifierTurn
-                        ? Effect.gen(function* () {
-                            const [language, item] = yield* Effect.all([
-                              provider.getLanguage(model).pipe(Effect.orDie),
-                              provider.getProvider(model.providerID).pipe(Effect.orDie),
-                            ])
-                            return yield* Effect.acquireUseRelease(
-                              Effect.tryPromise((signal) =>
-                                acquireModel({
-                                  providerID: model.providerID,
-                                  apiURL:
-                                    typeof item.options.baseURL === "string" ? item.options.baseURL : model.api.url,
-                                  modelID: model.api.id,
-                                  priority: "interactive",
-                                  signal,
-                                }),
-                              ),
-                              () =>
-                                Effect.tryPromise(() =>
-                                  SessionFreshness.classify({
-                                    model: language,
-                                    request: MessageV2.routingRequest(msgs),
-                                    memoryContext: SessionFreshness.memoryContext(msgs, requestUserMsg?.info.id),
-                                    memoryAdmission: cfg.rag?.memory_admission,
-                                    signal: requestPipeline.signal,
-                                    providerOptions:
-                                      model.providerID === "lmstudio"
-                                        ? ProviderTransform.providerOptions(model, { reasoningEffort: "none" })
-                                        : undefined,
-                                  }),
-                                ),
-                              (permit) => Effect.promise(() => permit.release()),
-                            ).pipe(Effect.catch(() => Effect.succeed(SessionFreshness.conservative(freshnessText))))
-                          })
-                        : Effect.succeed(SessionFreshness.conservative(freshnessText)),
-                  })
+                    detail: "No genuine request text",
+                  }).pipe(Effect.as(undefined))
+                : storedFreshness
+                  ? yield* RequestPipelineScheduler.skip({
+                      db,
+                      checkpoint,
+                      phase: "classification",
+                      detail: "Reused the routing decision stored on the active request",
+                    }).pipe(Effect.as(storedFreshness))
+                  : !requestFiles.length && !classifierModel
+                    ? yield* RequestPipelineScheduler.skip({
+                        db,
+                        checkpoint,
+                        phase: "classification",
+                        detail: "No dedicated utility model; the primary turn will select evidence and tools",
+                      }).pipe(Effect.as(undefined))
+                    : yield* RequestPipelineScheduler.optional({
+                        db,
+                        checkpoint,
+                        handle: requestPipeline,
+                        phase: "classification",
+                        detail: requestFiles.length
+                          ? "Attached files require repository scope"
+                          : "Epistemic request routing",
+                        effect: requestFiles.length
+                          ? Effect.succeed(SessionFreshness.repository(freshnessText))
+                          : classifierTurn && classifierModel
+                            ? Effect.gen(function* () {
+                                const [language, item] = yield* Effect.all([
+                                  provider.getLanguage(classifierModel).pipe(Effect.orDie),
+                                  provider.getProvider(classifierModel.providerID).pipe(Effect.orDie),
+                                ])
+                                return yield* Effect.acquireUseRelease(
+                                  Effect.tryPromise((signal) =>
+                                    acquireModel({
+                                      providerID: classifierModel.providerID,
+                                      apiURL:
+                                        typeof item.options.baseURL === "string"
+                                          ? item.options.baseURL
+                                          : classifierModel.api.url,
+                                      modelID: classifierModel.api.id,
+                                      priority: "interactive",
+                                      signal,
+                                    }),
+                                  ),
+                                  () =>
+                                    Effect.tryPromise((signal) =>
+                                      SessionFreshness.classify({
+                                        model: language,
+                                        request: MessageV2.routingRequest(msgs),
+                                        memoryContext: SessionFreshness.memoryContext(msgs, requestUserMsg?.info.id),
+                                        memoryAdmission: cfg.rag?.memory_admission,
+                                        signal,
+                                        providerOptions:
+                                          classifierModel.providerID === "lmstudio"
+                                            ? ProviderTransform.providerOptions(classifierModel, {
+                                                reasoningEffort: "none",
+                                              })
+                                            : undefined,
+                                      }).catch(() => undefined),
+                                    ),
+                                  (permit) => Effect.promise(() => permit.release()),
+                                )
+                              })
+                            : Effect.succeed(undefined),
+                        timeout: 5_000,
+                        fallback: undefined,
+                      }).pipe(Effect.catch(() => Effect.succeed(undefined)))
           yield* SessionExecutionCheckpoint.setPhase(db, checkpoint, { phase: "recall", step })
           const repositoryContextCached = repositoryContextText !== null && repositoryContextText !== undefined
           const repositoryContext =
@@ -2248,6 +2290,34 @@ const layer = Layer.effect(
               ]
             : []
           const freshnessEvidence = SessionFreshness.evidence(msgs, requestUserMsg?.info.id)
+          const chatText = chatMode ? MessageV2.userRequestText(requestUserMsg) : ""
+          const chatWebEnabled = chatMode && SessionChatMode.webEnabled(chatText)
+          const chatContextLimit = chatMode
+            ? SessionChatMode.contextLimit({ model, models: cfg.provider?.lmstudio?.models })
+            : undefined
+          const chatChain =
+            chatMode && chatContextLimit
+              ? SessionChatMode.providerChain(
+                  msgs,
+                  model,
+                  chatContextLimit,
+                  Math.max(256, Math.ceil(chatText.length / 3)),
+                )
+              : undefined
+          const chatPreviousResponseID = chatChain?.previousResponseID
+          if (chatMode && chatContextLimit && chatChain)
+            recordProviderContext({
+              providerID: model.providerID,
+              modelID: model.id,
+              contextLimit: chatContextLimit,
+              providerTokens: chatChain.providerTokens,
+              cachedTokens: chatChain.cachedTokens,
+              currentTokens: Math.max(256, Math.ceil(chatText.length / 3)),
+              reason:
+                "previousResponseID" in chatChain
+                  ? "provider_chain_continued"
+                  : chatChain.reason ?? "provider_chain_reset",
+            })
 
           yield* RequestPipelineScheduler.mark({
             db,
@@ -2263,6 +2333,7 @@ const layer = Layer.effect(
             bypassAgentCheck,
             messages: msgs,
             promptOps,
+            toolIDs: chatMode ? (chatWebEnabled ? SessionChatMode.toolIDs : []) : undefined,
           }).pipe(
             Effect.provideService(Plugin.Service, plugin),
             Effect.provideService(Permission.Service, permission),
@@ -2272,10 +2343,11 @@ const layer = Layer.effect(
             Effect.provideService(RuntimeFlags.Service, flags),
             Effect.provideService(Database.Service, database),
           )
+          const scopedTools = chatMode ? SessionChatMode.tools(resolvedTools, chatWebEnabled) : resolvedTools
           const tools =
             criticMode && resolvedTools[SessionCritic.TOOL_ID]
               ? { [SessionCritic.TOOL_ID]: resolvedTools[SessionCritic.TOOL_ID] }
-              : resolvedTools
+              : scopedTools
           if (!evidenceRequired) delete tools[SessionEvidence.TOOL_ID]
 
           if (lastUser.format?.type === "json_schema") {
@@ -2300,16 +2372,47 @@ const layer = Layer.effect(
               })
           const freshnessPrompt = criticMode
             ? undefined
-            : SessionFreshness.systemPrompt(
-                freshnessDecision,
-                freshnessEvidence,
-                Boolean(freshnessRoute.unavailable),
-              )
+            : SessionFreshness.systemPrompt(freshnessDecision, freshnessEvidence, Boolean(freshnessRoute.unavailable))
 
           if (step === 1 && freshnessDecision?.scope === "repository")
             yield* summary.summarize({ sessionID, messageID: lastUser.id }).pipe(Effect.ignore, Effect.forkIn(scope))
 
-          yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
+          if (!chatMode) yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
+
+          const checkpointSummaryMessage = criticMode
+            ? undefined
+            : msgs
+                .filter((message) => message.info.role === "assistant" && message.info.summary === true)
+                .toSorted((left, right) => right.info.id.localeCompare(left.info.id))[0]
+          const checkpointSummary = checkpointSummaryMessage?.parts
+            .flatMap((part) => (part.type === "text" && part.text.trim() ? [part.text.trim()] : []))
+            .join("\n\n")
+
+          if (chatMode && SessionChatMode.requiresCompaction(chatChain, checkpointSummaryMessage?.info.id)) {
+            yield* Effect.promise(() =>
+              SessionLog.write({
+                sessionID,
+                type: "provider.chain_rebase_requested",
+                executionID: checkpoint.executionID,
+                messageID: requestUserMsg?.info.id,
+                data: {
+                  reason: "context_exhausted",
+                  contextLimit: chatContextLimit,
+                  providerTokens: chatChain?.providerTokens ?? 0,
+                  cachedTokens: chatChain?.cachedTokens ?? 0,
+                },
+              }),
+            )
+            yield* sessions.removeMessage({ sessionID, messageID: msg.id })
+            yield* compaction.create({
+              sessionID,
+              agent: "chat",
+              model: lastUser.model,
+              auto: true,
+              overflow: true,
+            })
+            return "continue" as const
+          }
 
           const context = criticMode
             ? {
@@ -2322,22 +2425,36 @@ const layer = Layer.effect(
                   model,
                 ),
               }
-            : yield* Effect.all({
-                skills: sys.skills(agent),
-                env: sys.environment(model),
-                instructions: instruction.system().pipe(Effect.orDie),
-                mcpInstructions: sys.mcp(agent, session.permission),
-                modelMsgs: MessageV2.toModelMessagesEffect(msgs, model),
-              })
+            : chatMode
+              ? {
+                  skills: undefined,
+                  env: [] as string[],
+                  instructions: [] as string[],
+                  mcpInstructions: undefined,
+                  modelMsgs: SessionChatMode.messages(
+                    yield* MessageV2.toModelMessagesEffect(msgs, model),
+                    Boolean(chatPreviousResponseID),
+                    checkpointSummary,
+                  ),
+                }
+              : yield* Effect.all({
+                  skills: sys.skills(agent),
+                  env: sys.environment(model),
+                  instructions: instruction.system().pipe(Effect.orDie),
+                  mcpInstructions: sys.mcp(agent, session.permission),
+                  modelMsgs: MessageV2.toModelMessagesEffect(msgs, model),
+                })
           const stableSystem = criticMode
             ? [SessionCritic.systemPrompt]
-            : [
-                ...context.env,
-                ...context.instructions,
-                ...(context.mcpInstructions ? [context.mcpInstructions] : []),
-                ...(context.skills ? [context.skills] : []),
-                ...(verification?.auto === false ? [] : [SessionVerification.systemPrompt(verification?.checks)]),
-              ]
+            : chatMode
+              ? []
+              : [
+                  ...context.env,
+                  ...context.instructions,
+                  ...(context.mcpInstructions ? [context.mcpInstructions] : []),
+                  ...(context.skills ? [context.skills] : []),
+                  ...(verification?.auto === false ? [] : [SessionVerification.systemPrompt(verification?.checks)]),
+                ]
           const dynamicSystem = criticMode
             ? []
             : [
@@ -2349,7 +2466,11 @@ const layer = Layer.effect(
                         evidenceAttempts >= Math.max(1, (verification?.evidence_attempts ?? 2) + 1),
                       ),
                     ]),
-                ...(!repositoryContext ? [GENERAL_CONVERSATION_SYSTEM_PROMPT] : []),
+                ...(chatMode
+                  ? []
+                  : freshnessDecision?.scope !== "repository"
+                    ? [GENERAL_CONVERSATION_SYSTEM_PROMPT]
+                    : []),
                 ...(freshnessPrompt ? [freshnessPrompt] : []),
                 ...(freshnessDecision?.scope === "external"
                   ? [`Current date: ${new Date().toISOString().slice(0, 10)}`]
@@ -2360,13 +2481,6 @@ const layer = Layer.effect(
             ? ({ type: "text" } as const)
             : (requestUserMsg?.info.format ?? lastUser.format ?? { type: "text" as const })
           if (format.type === "json_schema") dynamicSystem.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
-          const checkpointSummary = criticMode
-            ? undefined
-            : msgs
-                .filter((message) => message.info.role === "assistant" && message.info.summary === true)
-                .toSorted((left, right) => right.info.id.localeCompare(left.info.id))[0]
-                ?.parts.flatMap((part) => (part.type === "text" && part.text.trim() ? [part.text.trim()] : []))
-                .join("\n\n")
           const systemFragments = [
             ...stableSystem.map((content, index) => ({
               source: "stable_system_prefix" as const,
@@ -2409,7 +2523,13 @@ const layer = Layer.effect(
             ...(isLastStep ? [{ role: "assistant" as const, content: MAX_STEPS_PROMPT }] : []),
           ]
           const fitted = yield* compaction.fitRequest({
-            fixedSystem: criticMode ? [] : agent.prompt ? [agent.prompt] : SystemPrompt.provider(model),
+            fixedSystem: criticMode
+              ? []
+              : chatMode
+                ? [SessionChatMode.systemPrompt]
+                : agent.prompt
+                  ? [agent.prompt]
+                  : SystemPrompt.provider(model),
             system: [...stableSystem, ...dynamicSystem],
             systemFragments,
             messages: requestMessages,
@@ -2427,9 +2547,9 @@ const layer = Layer.effect(
             checkpoint,
             phase: "context_compilation",
             status: "completed",
-            detail: `${fitted.tokens}/${fitted.limit} tokens`,
+            detail: `${fitted.tokens + (chatPreviousResponseID ? (chatChain?.providerTokens ?? 0) : 0)}/${fitted.limit} tokens`,
           })
-          msg.tokens.input = fitted.tokens
+          msg.tokens.input = fitted.tokens + (chatPreviousResponseID ? (chatChain?.providerTokens ?? 0) : 0)
           yield* sessions.updateMessage(msg)
           yield* Effect.promise(() =>
             SessionLog.write({
@@ -2497,6 +2617,9 @@ const layer = Layer.effect(
               messages: fitted.messages,
               tools: fitted.tools,
               model,
+              statefulResponses: chatMode && model.providerID === "lmstudio",
+              previousResponseID: chatPreviousResponseID,
+              providerChainContext: chatContextLimit,
               toolChoice: isLastStep
                 ? "none"
                 : (freshnessRoute.toolChoice ?? (format.type === "json_schema" ? "required" : undefined)),

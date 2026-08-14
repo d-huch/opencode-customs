@@ -58,6 +58,19 @@ export const ResourceGovernorSnapshot = Schema.Struct({
       reason: Schema.String,
     }),
   ),
+  providerContext: Schema.optionalKey(
+    Schema.Struct({
+      time: Schema.Number,
+      providerID: Schema.String,
+      modelID: Schema.String,
+      contextLimit: Schema.Number,
+      providerTokens: Schema.Number,
+      cachedTokens: Schema.Number,
+      currentTokens: Schema.Number,
+      remainingTokens: Schema.Number,
+      reason: Schema.String,
+    }),
+  ),
 }).annotate({ identifier: "ResourceGovernorSnapshot" })
 export type ResourceGovernorSnapshot = typeof ResourceGovernorSnapshot.Type
 export type PressureStatus = typeof PressureStatus.Type
@@ -100,6 +113,7 @@ const state = {
   throttledModelRequests: 0,
   rejectedModelRequests: 0,
   lastDecision: undefined as ResourceGovernorSnapshot["lastDecision"],
+  providerContext: undefined as ResourceGovernorSnapshot["providerContext"],
   activeModels: new Map<string, number>(),
   lastModelCrash: undefined as
     | {
@@ -178,6 +192,7 @@ export function snapshot(): ResourceGovernorSnapshot {
       rejectedModelRequests: state.rejectedModelRequests,
     },
     ...(state.lastDecision ? { lastDecision: state.lastDecision } : {}),
+    ...(state.providerContext ? { providerContext: state.providerContext } : {}),
   }
 }
 
@@ -339,6 +354,46 @@ export function safeContextBudget(input: {
     safeInputTokens: Math.max(1, Math.floor(hardContext * (percent / 100)) - reservedOutput),
     percent,
   }
+}
+
+export function providerContextBudget(input: {
+  readonly contextLimit: number
+  readonly providerTokens: number
+  readonly cachedTokens: number
+  readonly currentTokens: number
+}) {
+  const headroom = Math.max(1_024, Math.min(4_096, Math.floor(input.contextLimit * 0.1)))
+  const usedTokens = input.providerTokens + input.currentTokens
+  return {
+    usedTokens,
+    headroom,
+    remainingTokens: Math.max(0, input.contextLimit - usedTokens - headroom),
+    allowed: usedTokens + headroom < input.contextLimit,
+  }
+}
+
+export function recordProviderContext(input: {
+  readonly providerID: string
+  readonly modelID: string
+  readonly contextLimit: number
+  readonly providerTokens: number
+  readonly cachedTokens: number
+  readonly currentTokens: number
+  readonly reason: string
+}) {
+  const budget = providerContextBudget(input)
+  state.providerContext = {
+    time: Date.now(),
+    providerID: input.providerID,
+    modelID: input.modelID,
+    contextLimit: input.contextLimit,
+    providerTokens: input.providerTokens,
+    cachedTokens: input.cachedTokens,
+    currentTokens: input.currentTokens,
+    remainingTokens: budget.remainingTokens,
+    reason: input.reason,
+  }
+  return budget
 }
 
 function permit(governed: boolean, model?: ModelIdentity): ModelPermit {

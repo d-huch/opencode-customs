@@ -41,6 +41,7 @@ export async function activate(input: {
   readonly signal?: AbortSignal
   readonly resources?: ReturnType<typeof snapshot>
   readonly vision?: ModelCapabilityRouter.Vision
+  readonly contextLimit?: number
 }): Promise<Result> {
   if (!CapabilityRouter.automaticRoutingEnabled(input.config)) return manual(input)
   const baseURL = input.config.provider?.lmstudio?.options?.baseURL
@@ -75,47 +76,72 @@ export async function activate(input: {
   return guarded.then((result) => withVision(input.config, result, input.vision))
 }
 
-function manual(input: Parameters<typeof activate>[0]): Result {
+async function manual(input: Parameters<typeof activate>[0]): Promise<Result> {
   const role = input.role ?? (input.requestShape.images > 0 ? "vision" : "coding")
-  const compatible = role !== "vision" || input.preferredModel.capabilities.input.image
+  const baseURL = input.config.provider?.lmstudio?.options?.baseURL
+  const probe = await probeLmStudio({
+    baseURL,
+    apiKey: input.config.provider?.lmstudio?.options?.apiKey,
+    request: input.request,
+  })
+  const selected =
+    findLmStudioModel(probe, input.preferredModel.api.id) ?? findLmStudioModel(probe, input.preferredModel.id)
+  const requiresPrimary = role !== "utility"
+  const reasons = [
+    ...(!selected?.loaded ? ["manual.model_not_loaded"] : []),
+    ...(requiresPrimary && selected?.loaded && selected.sizeBytes === undefined ? ["manual.primary_size_unknown"] : []),
+    ...(requiresPrimary &&
+    selected?.sizeBytes !== undefined &&
+    selected.sizeBytes < CapabilityRouter.minimumPrimarySizeBytes(input.config)
+      ? ["manual.primary_too_small"]
+      : []),
+    ...(input.requestShape.tools > 0 && !(selected?.capabilities.tools ?? input.preferredModel.capabilities.toolcall)
+      ? ["manual.tools_unsupported"]
+      : []),
+    ...(role === "vision" && !(selected?.capabilities.vision ?? input.preferredModel.capabilities.input.image)
+      ? ["manual.vision_unsupported"]
+      : []),
+  ]
+  const compatible = reasons.length === 0
   const selection = {
     role,
     providerID: String(input.preferredModel.providerID),
     modelID: String(input.preferredModel.id),
-    instanceID: input.preferredModel.api.id,
-    name: input.preferredModel.name,
+    instanceID: selected?.instances[0] ?? input.preferredModel.api.id,
+    name: selected?.name ?? input.preferredModel.name,
     score: 0,
-    context: input.preferredModel.limit.context,
+    context: selected?.context.active ?? selected?.context.supported ?? input.preferredModel.limit.context,
+    ...(selected?.sizeBytes ? { sizeBytes: selected.sizeBytes } : {}),
     capabilities: {
-      tools: input.preferredModel.capabilities.toolcall,
-      vision: input.preferredModel.capabilities.input.image,
-      reasoning: input.preferredModel.capabilities.reasoning,
+      tools: selected?.capabilities.tools ?? input.preferredModel.capabilities.toolcall,
+      vision: selected?.capabilities.vision ?? input.preferredModel.capabilities.input.image,
+      reasoning: selected?.capabilities.reasoning ?? input.preferredModel.capabilities.reasoning,
       embeddings: false,
     },
     reason: ["preference.explicit", "routing.disabled"],
   } satisfies ModelCapabilityRouter.Selection
   return {
-    model: input.preferredModel,
+    model: withContextLimit(input.preferredModel, input.contextLimit),
     plan: CapabilityRouter.record(input.config, {
-      status: compatible ? "ready" : "degraded",
+      status: compatible ? "ready" : "unavailable",
       checkedAt: Date.now(),
       providerID: String(input.preferredModel.providerID),
       complexity: ModelCapabilityRouter.complexity(input.requestShape),
       pressure: input.resources?.status ?? snapshot().status,
-      candidateCount: 1,
+      candidateCount: selected ? 1 : 0,
       selections: [selection],
-      reason: ["routing.disabled"],
+      reason: ["routing.disabled", ...reasons],
       activation: {
-        status: compatible ? "ready" : "degraded",
+        status: compatible ? "ready" : "failed",
         checkedAt: Date.now(),
         role,
         requestedModelID: String(input.preferredModel.id),
         activeModelID: String(input.preferredModel.id),
-        activeInstanceID: input.preferredModel.api.id,
+        ...(compatible ? { activeInstanceID: selection.instanceID } : {}),
         attempts: 0,
         failover: false,
         rollback: false,
-        reason: ["routing.disabled"],
+        reason: ["routing.disabled", ...reasons],
       },
       ...(input.vision ? { vision: input.vision } : {}),
     }),
@@ -152,13 +178,23 @@ export function failureMessage(result: Result) {
     ? providerError
     : reasons.includes("switch.primary.memory")
       ? "the Resource Governor refused the launch because there is not enough free memory. Unload another LM Studio model or reduce its context, then retry"
-      : reasons.includes("switch.no_candidate")
-        ? `no allowed ${role === "vision" ? "vision-capable " : ""}LM Studio model satisfies the request capabilities`
-        : reasons.includes("switch.unconfigured")
-          ? "the LM Studio base URL is missing or invalid"
-          : result.plan.vision?.status === "failed"
-            ? "no allowed vision-capable LM Studio model is available"
-            : "LM Studio did not make the selected model ready"
+      : reasons.includes("manual.primary_too_small")
+        ? "automatic model routing is disabled and the selected model is below the configured minimum size for primary answers. Select a stronger loaded model or enable automatic routing"
+        : reasons.includes("manual.primary_size_unknown")
+          ? "automatic model routing is disabled and LM Studio did not report the selected model size required by the primary-model policy. Refresh LM Studio metadata or enable automatic routing"
+          : reasons.includes("manual.model_not_loaded")
+            ? "automatic model routing is disabled and the selected model is not loaded in LM Studio. Load it explicitly or select a loaded model"
+            : reasons.includes("manual.tools_unsupported")
+              ? "automatic model routing is disabled and the selected model does not support the tools required by this request. Select a tool-capable model or enable automatic routing"
+              : reasons.includes("manual.vision_unsupported")
+                ? "automatic model routing is disabled and the selected model cannot process images. Select a vision-capable model or enable automatic routing"
+                : reasons.includes("switch.no_candidate")
+                  ? `no allowed ${role === "vision" ? "vision-capable " : ""}LM Studio model satisfies the request capabilities`
+                  : reasons.includes("switch.unconfigured")
+                    ? "the LM Studio base URL is missing or invalid"
+                    : result.plan.vision?.status === "failed"
+                      ? "no allowed vision-capable LM Studio model is available"
+                      : "LM Studio did not make the selected model ready"
   const preserved =
     activation?.status === "rolled_back" ? " The previously loaded model was preserved but not used." : ""
   return `LM Studio could not activate "${model}": ${detail}.${preserved} No fallback model was used.`
@@ -261,7 +297,13 @@ async function activateNow(
     const before = findLmStudioModel(probe, selection.modelID)
     const loadedInstanceID = selection.instanceID ?? before?.instances[0]
     if (loadedInstanceID) {
-      const result = routed(input.preferredModel, selection, loadedInstanceID, before?.context.active)
+      const result = routed(
+        input.preferredModel,
+        selection,
+        loadedInstanceID,
+        before?.context.active,
+        input.contextLimit,
+      )
       const cleanup =
         role === "utility"
           ? ["switch.previous.preserved"]
@@ -289,13 +331,15 @@ async function activateNow(
 
     let loaded: Awaited<ReturnType<typeof loadLmStudioModel>> | undefined
     try {
-      const preserveContext = input.config.provider?.lmstudio?.models?.[selection.modelID]?.preserve_context === true
+      const preserveContext =
+        input.contextLimit === undefined &&
+        input.config.provider?.lmstudio?.models?.[selection.modelID]?.preserve_context === true
       const budget = preserveContext
         ? undefined
         : await contextBudget({
             providerID: "lmstudio",
             modelID: selection.modelID,
-            requestedContext: selection.context ?? input.preferredModel.limit.context,
+            requestedContext: input.contextLimit ?? selection.context ?? input.preferredModel.limit.context,
             outputTokens: input.preferredModel.limit.output,
             baseURL: input.baseURL,
             apiKey,
@@ -324,6 +368,7 @@ async function activateNow(
         selection,
         loaded.instanceID,
         verified.context.active ?? loaded.contextLength,
+        input.contextLimit,
       )
       const cleanup =
         role === "utility"
@@ -430,8 +475,10 @@ function routed(
   selection: ModelCapabilityRouter.Selection,
   instanceID: string,
   context: number | undefined,
+  contextLimit?: number,
 ): Provider.Model {
-  const limit = Math.max(1, context ?? selection.context ?? preferred.limit.context)
+  const available = Math.max(1, context ?? selection.context ?? preferred.limit.context)
+  const limit = Math.min(available, Math.max(1, contextLimit ?? available))
   return {
     ...preferred,
     id: ModelV2.ID.make(selection.modelID),
@@ -449,6 +496,20 @@ function routed(
       context: limit,
       input: preferred.limit.input ? Math.min(preferred.limit.input, limit) : undefined,
       output: Math.min(preferred.limit.output, Math.max(1, Math.floor(limit / 4))),
+    },
+  }
+}
+
+export function withContextLimit(model: Provider.Model, contextLimit: number | undefined): Provider.Model {
+  if (contextLimit === undefined || contextLimit >= model.limit.context) return model
+  const context = Math.max(1, contextLimit)
+  return {
+    ...model,
+    limit: {
+      ...model.limit,
+      context,
+      input: model.limit.input ? Math.min(model.limit.input, context) : undefined,
+      output: Math.min(model.limit.output, Math.max(1, Math.floor(context / 4))),
     },
   }
 }

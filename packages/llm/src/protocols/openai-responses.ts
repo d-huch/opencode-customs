@@ -130,6 +130,7 @@ const OpenAIResponsesCoreFields = {
   tools: optionalArray(OpenAIResponsesTool),
   tool_choice: Schema.optional(OpenAIResponsesToolChoice),
   store: Schema.optional(Schema.Boolean),
+  previous_response_id: Schema.optional(Schema.String),
   service_tier: Schema.optional(OpenAIOptions.OpenAIServiceTier),
   prompt_cache_key: Schema.optional(Schema.String),
   include: optionalArray(OpenAIOptions.OpenAIResponseIncludable),
@@ -348,6 +349,7 @@ const lowerMessages = Effect.fn("OpenAIResponses.lowerMessages")(function* (requ
     request.system.length === 0 ? [] : [{ role: "system", content: ProviderShared.joinText(request.system) }]
   const input: OpenAIResponsesInputItem[] = [...system]
   const store = OpenAIOptions.store(request)
+  const previousResponseId = OpenAIOptions.previousResponseId(request)
 
   for (const message of request.messages) {
     if (message.role === "system") {
@@ -455,6 +457,7 @@ const lowerMessages = Effect.fn("OpenAIResponses.lowerMessages")(function* (requ
 
 const lowerOptions = Effect.fn("OpenAIResponses.lowerOptions")(function* (request: LLMRequest) {
   const store = OpenAIOptions.store(request)
+  const previousResponseId = OpenAIOptions.previousResponseId(request)
   const promptCacheKey = OpenAIOptions.promptCacheKey(request)
   const effort = OpenAIOptions.reasoningEffort(request)
   if (effort && !OpenAIOptions.isReasoningEffort(effort))
@@ -467,6 +470,7 @@ const lowerOptions = Effect.fn("OpenAIResponses.lowerOptions")(function* (reques
   return {
     ...(instructions ? { instructions } : {}),
     ...(store !== undefined ? { store } : {}),
+    ...(previousResponseId ? { previous_response_id: previousResponseId } : {}),
     ...(promptCacheKey ? { prompt_cache_key: promptCacheKey } : {}),
     ...(include ? { include } : {}),
     ...(effort || summary ? { reasoning: { effort, summary } } : {}),

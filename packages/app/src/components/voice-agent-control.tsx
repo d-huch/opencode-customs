@@ -5,11 +5,20 @@ import { createEffect, createMemo, createSignal, onCleanup, Show, type Accessor 
 import { useLanguage } from "@/context/language"
 import { usePlatform, type MicrophoneAccess } from "@/context/platform"
 import { useSettings } from "@/context/settings"
+import { useSDK } from "@/context/sdk"
 import { useSync } from "@/context/sync"
 import { createLocalDuplexSpeech, type DuplexSpeechEvent } from "@/utils/duplex-speech"
 import { createGaplessAudioPlayer } from "@/utils/gapless-audio-player"
 import { createLocalSpeechStream } from "@/utils/streaming-tts"
 import { showToast } from "@/utils/toast"
+import {
+  createVoiceSessionOrchestrator,
+  isCurrentVoiceEvent,
+  isVoiceResponse,
+  shouldRecoverVoiceTurn,
+  type VoiceSessionState,
+  type VoiceTurn,
+} from "@/utils/voice-session-orchestrator"
 import { configuredWakePhrases, extractWakeCommand, routeWakeTranscript } from "@/utils/wake-phrase"
 import {
   isDeliberateSpeechInterruption,
@@ -18,6 +27,16 @@ import {
   streamingSpeechChunks,
   voiceLanguage,
 } from "@/utils/voice-agent"
+import { inspectVoiceWatchdog } from "@/utils/voice-watchdog"
+import { stageVoiceRequestContext } from "@/utils/voice-request-context"
+import {
+  assessVoiceTranscript,
+  voicePersonalityInstruction,
+  type VoiceIntent,
+  type VoiceUnderstandingDecision,
+  type VoiceUnderstandingReason,
+} from "@/utils/voice-understanding"
+import { upsertVoiceDictionaryEntry } from "@/utils/voice-dictionary"
 
 type VoiceAgentControlProps = {
   sessionID: Accessor<string | undefined>
@@ -30,7 +49,7 @@ type VoiceAgentControlProps = {
 }
 
 export type VoiceAgentStatus = {
-  state: "listening" | "thinking" | "synthesizing" | "speaking"
+  state: Exclude<VoiceSessionState, "idle">
   text: string
   diagnostics?: {
     microphone: number
@@ -56,8 +75,15 @@ export type VoiceAgentStatus = {
     wakeModel?: string
     wakeConfidence?: number
     endpointReason?: string
+    finalConfidence?: number
+    languageProbability?: number
+    intent?: VoiceIntent
+    understandingDecision?: VoiceUnderstandingDecision
+    understandingReason?: VoiceUnderstandingReason
   }
 }
+
+const BARGE_IN_MIN_SPEECH_MS = 480
 
 const Microphone = (props: { active: boolean; level: number }) => (
   <span class="relative inline-flex size-5 items-center justify-center">
@@ -92,8 +118,9 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
   const language = useLanguage()
   const settings = useSettings()
   const platform = usePlatform()
+  const sdk = useSDK()
   const sync = useSync()
-  const [state, setState] = createSignal<"idle" | "listening" | "thinking" | "synthesizing" | "speaking">("idle")
+  const [state, setState] = createSignal<VoiceSessionState>("idle")
   const [microphoneLevel, setMicrophoneLevel] = createSignal(0)
   const [liveTranscript, setLiveTranscript] = createSignal("")
   const [waiting, setWaiting] = createSignal(false)
@@ -106,7 +133,9 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
   })
   const microphonePercent = createMemo(() => Math.round(microphoneLevel() * 10) * 10)
   let handsFree = false
-  let responseBeforeSubmit: string | undefined
+  let responseParentID: string | undefined
+  let submittedAt: number | undefined
+  let submittedTranscript = ""
   let responseTimer: ReturnType<typeof setTimeout> | undefined
   let restartTimer: ReturnType<typeof setTimeout> | undefined
   let wakeFollowupTimer: ReturnType<typeof setTimeout> | undefined
@@ -125,6 +154,7 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
   let duplexStarting: Promise<void> | undefined
   let bargeInActive = false
   let observedSessionID: string | undefined
+  let recoveredSessionID: string | undefined
   let observedAssistantID: string | undefined
   let passiveSpeechMessageID: string | undefined
   let microphoneAccess: MicrophoneAccess = "unknown"
@@ -160,6 +190,26 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
       .catch((error) => console.warn("[voice-agent] failed to persist diagnostic event", error))
   }
 
+  const orchestrator = createVoiceSessionOrchestrator({
+    onTransition: (transition) => {
+      voiceTurnID = transition.turn?.id
+      setState(transition.to)
+      recordVoice("agent", "turn_checkpoint", {
+        state: transition.to,
+        diagnostics: {
+          from: transition.from,
+          reason: transition.reason,
+          turn_generation: transition.turn?.generation,
+        },
+      })
+      if (transition.to === "idle") voiceTurnID = undefined
+    },
+  })
+
+  const activeTurn = () => orchestrator.snapshot().turn
+  const move = (next: VoiceSessionState, reason: string, turn = activeTurn()) =>
+    orchestrator.transition(turn, next, reason)
+
   let previousDiagnosticState: ReturnType<typeof state> | undefined
   createEffect(() => {
     const current = state()
@@ -169,7 +219,7 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
   })
 
   createEffect(() => {
-    if (state() === "listening" || state() === "speaking") return
+    if (state() === "listening" || state() === "transcribing" || state() === "speaking") return
     setMicrophoneLevel(0)
   })
 
@@ -181,11 +231,49 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
       .find((item): item is Message & { role: "assistant" } => item.role === "assistant")
     if (!message) return undefined
     const text = (sync().data.part[message.id] ?? [])
+      .filter(
+        (part): part is Part & { type: "text"; text: string } =>
+          part.type === "text" && !part.synthetic && !part.ignored,
+      )
+      .map((part) => part.text)
+      .join("\n")
+      .trim()
+    return { id: message.id, parentID: message.parentID, text }
+  })
+
+  const recentConversation = () => {
+    const sessionID = props.sessionID()
+    if (!sessionID) return ""
+    return (sync().data.message[sessionID] ?? [])
+      .slice(-8)
+      .flatMap((message) =>
+        (sync().data.part[message.id] ?? [])
+          .filter(
+            (part): part is Part & { type: "text"; text: string } =>
+              part.type === "text" && !part.synthetic && !part.ignored,
+          )
+          .map((part) => part.text.trim()),
+      )
+      .filter(Boolean)
+      .join("\n")
+      .slice(-4_000)
+  }
+
+  createEffect(() => {
+    const sessionID = props.sessionID()
+    if (!sessionID || !waiting() || responseParentID || submittedAt === undefined) return
+    const message = [...(sync().data.message[sessionID] ?? [])]
+      .reverse()
+      .find((item) => item.role === "user" && item.time.created >= submittedAt! - 1_000)
+    if (!message) return
+    const text = (sync().data.part[message.id] ?? [])
       .filter((part): part is Part & { type: "text"; text: string } => part.type === "text")
       .map((part) => part.text)
       .join("\n")
       .trim()
-    return { id: message.id, text }
+    if (submittedTranscript && !text.includes(submittedTranscript)) return
+    responseParentID = message.id
+    recordVoice("agent", "request_correlated", { diagnostics: { parent_id: message.id } })
   })
 
   const usesWakePhrase = () =>
@@ -230,10 +318,10 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
   const restart = () => {
     clearTimeout(restartTimer)
     if (!handsFree || !settings.voice.enabled()) {
-      setState("idle")
+      orchestrator.cancel("conversation_complete")
       return
     }
-    setState("idle")
+    orchestrator.cancel("conversation_complete")
     setLiveTranscript("")
     openWakeFollowup()
     restartTimer = setTimeout(() => void start(true), 250)
@@ -262,17 +350,17 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
 
   const failSpeech = (generation: number, error: unknown) => {
     if (generation !== speechGeneration) return
-    stopSpeech()
-    resetSpeechStream()
-    setWaiting(false)
-    responseBeforeSubmit = undefined
-    clearTimeout(responseTimer)
-    handsFree = false
-    clearWakePhrase()
-    setState("idle")
     recordVoice("tts", "error", {
       error: error instanceof Error ? error.message : String(error),
     })
+    stopSpeech()
+    resetSpeechStream()
+    setWaiting(false)
+    setLiveTranscript("")
+    clearTimeout(responseTimer)
+    handsFree = false
+    clearWakePhrase()
+    orchestrator.cancel("tts_error")
     showToast({
       title: language.t("voice.error.tts.title"),
       description: language.t("voice.error.tts.description", {
@@ -284,8 +372,9 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
     })
   }
 
-  const interrupt = () => {
+  const interrupt = (reason: string) => {
     setWaiting(false)
+    setLiveTranscript("")
     clearTimeout(responseTimer)
     clearTimeout(restartTimer)
     stopDuplex()
@@ -294,10 +383,33 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
     resetSpeechStream()
     clearWakePhrase()
     if (props.working()) props.onInterrupt()
-    setState("idle")
+    orchestrator.cancel(reason)
   }
 
+  const watchdogTimer = setInterval(() => {
+    const issue = inspectVoiceWatchdog(orchestrator.snapshot())
+    if (!issue) return
+    recordVoice("agent", "watchdog_timeout", {
+      state: issue.state,
+      durationMs: issue.elapsedMs,
+      diagnostics: { limit_ms: issue.limitMs },
+    })
+    interrupt("watchdog_timeout")
+    showToast({
+      variant: "error",
+      title: language.t("voice.error.watchdog.title"),
+      description: language.t("voice.error.watchdog.description", {
+        state: language.t(`voice.status.${issue.state}`),
+        seconds: Math.round(issue.elapsedMs / 1_000),
+      }),
+    })
+  }, 2_000)
+
   const queueSpeech = (messageID: string, value: string, final: boolean) => {
+    if (!activeTurn()) {
+      const turn = orchestrator.begin("passive_response")
+      move("thinking", "passive_response_ready", turn)
+    }
     const text = speechText(value).slice(0, 6_000)
     if (speechMessageID !== messageID || !text.startsWith(speechObserved)) {
       speechGeneration += 1
@@ -327,11 +439,13 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
     try {
       speechPlayer = createGaplessAudioPlayer({
         context: duplex?.audioContext(),
+        playbackRate: settings.voice.ttsProvider() === "fish-local" ? settings.voice.fishPlaybackRate() : 1,
+        volume: settings.voice.ttsProvider() === "fish-local" ? settings.voice.fishVolume() : 1,
         onReferenceNode: (node) => duplex?.setPlaybackReference(node),
         onStart: () => {
           if (generation !== speechGeneration) return
           speechPlaybackStarted = true
-          setState("speaking")
+          move("speaking", "tts_playback_started")
           duplex?.setState("speaking", speechObserved)
           const firstSoundMs = performance.now() - (speechStartedAt ?? performance.now())
           setVoiceDiagnostics((current) => ({ ...current, firstSoundMs }))
@@ -382,8 +496,91 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
     const synthesisStarted = performance.now()
     speechStartedAt ??= synthesisStarted
     speechBusy = true
-    if (!speechPlaybackStarted) setState("synthesizing")
+    if (!speechPlaybackStarted) move("synthesizing", "tts_synthesis_started")
     recordVoice("tts", "synthesis_started", { text })
+    if (settings.voice.ttsProvider() === "fish-local") {
+      if (!platform.synthesizeLocalSpeech) {
+        failSpeech(generation, new Error(language.t("voice.error.unsupported.description")))
+        return
+      }
+      speechStreamCancel = () => void platform.cancelLocalSpeech?.()
+      const result = await platform
+        .synthesizeLocalSpeech({
+          provider: "fish-local",
+          endpoint: settings.voice.fishEndpoint(),
+          model: settings.voice.ttsModel(),
+          voice: settings.voice.ttsVoice(),
+          mode: settings.voice.ttsMode(),
+          latency: settings.voice.fishLatency(),
+          language: settings.voice.fishLanguage(),
+          temperature: settings.voice.fishTemperature(),
+          topP: settings.voice.fishTopP(),
+          repetitionPenalty: settings.voice.fishRepetitionPenalty(),
+          seed: settings.voice.fishSeed(),
+          chunkLength: settings.voice.fishChunkLength(),
+          normalize: settings.voice.fishNormalize(),
+          streaming: settings.voice.fishStreaming(),
+          useMemoryCache: settings.voice.fishMemoryCache(),
+          maxNewTokens: settings.voice.fishMaxNewTokens(),
+          text,
+        })
+        .catch((error: unknown) => {
+          failSpeech(generation, error)
+          return undefined
+        })
+      if (!result || generation !== speechGeneration) return
+      const decodeContext = duplex?.audioContext() ?? new AudioContext({ latencyHint: "interactive" })
+      const decoded = await decodeContext.decodeAudioData(await result.audio.arrayBuffer()).catch((error: unknown) => {
+        failSpeech(generation, error)
+        return undefined
+      })
+      if (!decoded || generation !== speechGeneration) return
+      const pcm = new Int16Array(decoded.length)
+      decoded.getChannelData(0).forEach((sample, index) => {
+        pcm[index] = Math.max(-1, Math.min(1, sample)) * 0x7fff
+      })
+      if (!duplex) void decodeContext.close()
+      const firstChunkMs = performance.now() - synthesisStarted
+      setVoiceDiagnostics((current) => ({
+        ...current,
+        ttsFirstChunkMs: current.ttsFirstChunkMs ?? firstChunkMs,
+        ttsChunks: 1,
+      }))
+      recordVoice("tts", "stream_chunk_ready", {
+        text,
+        durationMs: firstChunkMs,
+        diagnostics: {
+          chunk: 0,
+          cache: result.metrics.cache,
+          synthesis_ms: result.metrics.synthesisMs,
+          total_ms: result.metrics.totalMs,
+        },
+      })
+      const player = ensureSpeechPlayer(generation, text)
+      if (!player) return
+      const buffered = await player.enqueue(pcm, decoded.sampleRate).then(
+        () => true,
+        (error: unknown) => {
+          failSpeech(generation, error)
+          return false
+        },
+      )
+      if (!buffered || generation !== speechGeneration) return
+      speechStreamCancel = undefined
+      speechBusy = false
+      recordVoice("tts", "stream_completed", {
+        text,
+        durationMs: performance.now() - synthesisStarted,
+        diagnostics: {
+          chunks: 1,
+          stream_ms: result.metrics.totalMs,
+          provider: "fish-local",
+          model: "server-selected",
+        },
+      })
+      void drainSpeech()
+      return
+    }
     let chunks = 0
     const stream = (() => {
       try {
@@ -449,28 +646,119 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
     void drainSpeech()
   }
 
-  const submitTranscript = (text: string) => {
+  const submitTranscript = (
+    raw: string,
+    turn = activeTurn(),
+    diagnostics?: DuplexSpeechEvent["diagnostics"],
+  ) => {
+    if (!turn || !orchestrator.isCurrent(turn)) return
+    const assessment = assessVoiceTranscript({
+      text: raw,
+      confidence: diagnostics?.final_confidence,
+      averageLogProbability: diagnostics?.average_log_probability,
+      noSpeechProbability: diagnostics?.no_speech_probability,
+      languageProbability: diagnostics?.language_probability,
+      alternatives: diagnostics?.alternatives,
+      dictionary: settings.voice.dictionaryEntries(),
+      dictionaryContext: {
+        language: document.documentElement.lang || navigator.language,
+        project: sdk().directory,
+        sessionID: props.sessionID(),
+      },
+      contextualCorrection: settings.voice.contextualCorrection(),
+      confirmRiskyCommands: settings.voice.confirmRiskyCommands(),
+      recentContext: recentConversation(),
+    })
+    setVoiceDiagnostics((current) => ({
+      ...current,
+      finalConfidence: diagnostics?.final_confidence,
+      languageProbability: diagnostics?.language_probability,
+      intent: assessment.intent,
+      understandingDecision: assessment.decision,
+      understandingReason: assessment.reason,
+    }))
+    recordVoice("agent", "transcript_assessed", {
+      text: assessment.text,
+      diagnostics: {
+        original: assessment.original,
+        intent: assessment.intent,
+        decision: assessment.decision,
+        reason: assessment.reason,
+        corrections: assessment.appliedCorrections.join(", "),
+        final_confidence: diagnostics?.final_confidence,
+      },
+    })
+    if (assessment.decision === "learned" && assessment.learned) {
+      const learnedScope = props.sessionID() ? "session" : "project"
+      settings.voice.setDictionaryEntries(
+        upsertVoiceDictionaryEntry(settings.voice.dictionaryEntries(), {
+          correct: assessment.learned.replacement,
+          variants: [assessment.learned.heard],
+          language: document.documentElement.lang || navigator.language,
+          scope: learnedScope,
+          scopeID: props.sessionID() ?? sdk().directory,
+          confidence: diagnostics?.final_confidence ?? 0.8,
+          confirmed: false,
+        }),
+      )
+      setLiveTranscript("")
+      orchestrator.cancel("voice_correction_learned")
+      showToast({
+        title: language.t("voice.understanding.learned.title"),
+        description: language.t("voice.understanding.learned.description", assessment.learned),
+      })
+      if (handsFree) restartTimer = setTimeout(() => void start(true), 250)
+      return
+    }
+    if (assessment.decision === "review") {
+      setLiveTranscript("")
+      props.onTranscript(assessment.text)
+      duplex?.setState("paused")
+      handsFree = false
+      orchestrator.cancel(`voice_review_${assessment.reason}`)
+      showToast({
+        title: language.t(`voice.understanding.review.${assessment.reason}.title`),
+        description: language.t(`voice.understanding.review.${assessment.reason}.description`),
+      })
+      return
+    }
+    const text = assessment.text
+    if (!orchestrator.acceptTranscript(turn, text)) {
+      recordVoice("agent", "duplicate_transcript_ignored", { text })
+      return
+    }
     voiceTurnSubmittedAt = performance.now()
+    submittedAt = Date.now()
+    submittedTranscript = text.trim()
+    responseParentID = undefined
     responseStartedForTurn = false
     responseCompletedForTurn = false
     recordVoice("agent", "transcript_accepted", { text })
+    stageVoiceRequestContext(
+      text,
+      voicePersonalityInstruction({
+        mode: settings.voice.personalityMode(),
+        intent: assessment.intent,
+        language: document.documentElement.lang || navigator.language,
+      }),
+    )
     setLiveTranscript("")
     props.onTranscript(text)
     if (!settings.voice.autoSubmit()) {
-      setState("idle")
+      orchestrator.cancel("manual_submit_required")
       return
     }
-    responseBeforeSubmit = latestAssistant()?.id
     setWaiting(true)
-    setState("thinking")
+    move("thinking", "transcript_submitted", turn)
     duplex?.setState("paused")
     clearTimeout(responseTimer)
     responseTimer = setTimeout(() => {
       if (!waiting()) return
       setWaiting(false)
+      setLiveTranscript("")
       handsFree = false
       clearWakePhrase()
-      setState("idle")
+      orchestrator.cancel("response_timeout")
       showToast({
         title: language.t("voice.error.timeout.title"),
         description: language.t("voice.error.timeout.description"),
@@ -479,15 +767,20 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
     queueMicrotask(props.onSubmit)
   }
 
-  const acceptTranscript = (text: string) => {
+  const acceptTranscript = (
+    text: string,
+    turn = activeTurn(),
+    diagnostics?: DuplexSpeechEvent["diagnostics"],
+  ) => {
+    if (!turn || !orchestrator.isCurrent(turn)) return
     if (!usesWakePhrase()) {
-      submitTranscript(text)
+      submitTranscript(text, turn, diagnostics)
       return
     }
     const wake = routeWakeTranscript(text, settings.voice.wakePhrases(), !wakeArmed())
     if (wake.action === "submit") {
       if (wake.activated) recordVoice("stt", "wake_activated", { text: wake.text })
-      submitWakeCommand(wake.text)
+      submitWakeCommand(wake.text, diagnostics)
       return
     }
     if (wake.action === "ignore") {
@@ -502,14 +795,34 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
     duplex?.setState("listening")
   }
 
-  function submitWakeCommand(text: string) {
+  function submitWakeCommand(text: string, diagnostics?: DuplexSpeechEvent["diagnostics"]) {
     clearTimeout(wakeFollowupTimer)
     wakeFollowupTimer = undefined
     setWakeArmed(false)
     setWakeActivated(false)
     updateDuplexWake(true, false)
-    submitTranscript(text)
+    submitTranscript(text, activeTurn(), diagnostics)
   }
+
+  createEffect(() => {
+    const sessionID = props.sessionID()
+    if (!sessionID || recoveredSessionID === sessionID || !platform.getVoiceDiagnostics) return
+    recoveredSessionID = sessionID
+    void platform.getVoiceDiagnostics(sessionID).then(({ entries }) => {
+      if (props.sessionID() !== sessionID) return
+      const last = [...entries].reverse().find((entry) => entry.event === "turn_checkpoint")
+      if (!last || !shouldRecoverVoiceTurn(last.state)) return
+      return platform.appendVoiceDiagnostic?.({
+        sessionID,
+        turnID: last.turnID,
+        source: "agent",
+        event: "turn_recovered_to_idle",
+        state: "idle",
+        generation: last.generation,
+        diagnostics: { previous_state: last.state, reason: "renderer_recovery" },
+      })
+    })
+  })
 
   createEffect(() => {
     const sessionID = props.sessionID()
@@ -525,26 +838,27 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
       observedAssistantID = current.id
       if (!waiting()) passiveSpeechMessageID = current.id
     }
-    if (waiting() && current.id !== responseBeforeSubmit && !responseStartedForTurn) {
+    const belongsToTurn = waiting() && isVoiceResponse(current.parentID, responseParentID)
+    if (belongsToTurn && !responseStartedForTurn) {
       responseStartedForTurn = true
       recordVoice("agent", "response_started", {
         durationMs: voiceTurnSubmittedAt === undefined ? undefined : performance.now() - voiceTurnSubmittedAt,
       })
     }
-    if (waiting() && current.id !== responseBeforeSubmit && !props.working() && !responseCompletedForTurn) {
+    if (belongsToTurn && !props.working() && !responseCompletedForTurn) {
       responseCompletedForTurn = true
       recordVoice("agent", "response_completed", {
         durationMs: voiceTurnSubmittedAt === undefined ? undefined : performance.now() - voiceTurnSubmittedAt,
       })
     }
-    if (waiting() && current.id !== responseBeforeSubmit && settings.voice.speakResponses()) {
+    if (belongsToTurn && settings.voice.speakResponses()) {
       queueSpeech(current.id, current.text, !props.working())
       if (props.working()) return
       setWaiting(false)
       clearTimeout(responseTimer)
       return
     }
-    if (waiting() && current.id !== responseBeforeSubmit && !settings.voice.speakResponses() && !props.working()) {
+    if (belongsToTurn && !settings.voice.speakResponses() && !props.working()) {
       setWaiting(false)
       clearTimeout(responseTimer)
       restart()
@@ -568,15 +882,30 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
     recordVoice("agent", "interrupted", { state: "speaking" })
     bargeInActive = true
     speechGeneration += 1
+    setLiveTranscript("")
     stopSpeech()
     resetSpeechStream()
     if (props.working()) props.onInterrupt()
     handsFree = true
-    setState("listening")
+    move("interrupted", "barge_in_detected")
+    move("listening", "barge_in_listening")
     duplex?.setState("listening")
   }
 
   function handleDuplexEvent(event: DuplexSpeechEvent) {
+    const turn = activeTurn()
+    if (!turn || !orchestrator.isCurrent(turn)) {
+      recordVoice("stt", "stale_event_ignored", { state: event.mode, text: event.text })
+      return
+    }
+    if (!isCurrentVoiceEvent(turn, event)) {
+      recordVoice("stt", "stale_event_ignored", {
+        state: event.mode,
+        text: event.text,
+        diagnostics: { event_turn: event.turn_id, event_generation: event.turn_generation },
+      })
+      return
+    }
     if (event.type === "speech_start") microphoneTrace = []
     const closesUtterance = event.type === "final" || event.type === "discard" || event.type === "wake_ignored"
     const levelTrace = closesUtterance ? microphoneTrace.map((value) => value.toFixed(2)).join(",") : undefined
@@ -598,11 +927,20 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
             decode_count: event.diagnostics?.decode_count,
             decoded_audio_ms: event.diagnostics?.decoded_audio_ms,
             committed_audio_ms: event.diagnostics?.committed_audio_ms,
+            partial_count: event.diagnostics?.partial_count,
+            frame_rms: event.diagnostics?.frame_rms,
+            peak_rms: event.diagnostics?.peak_rms,
+            min_rms: event.diagnostics?.min_rms,
+            recognition_model: event.diagnostics?.recognition_model,
             transcript_stability: event.diagnostics?.transcript_stability,
             endpoint_reason: event.diagnostics?.endpoint_reason,
             wake_recognition_ms: event.diagnostics?.wake_recognition_ms,
             wake_model: event.diagnostics?.wake_model,
             wake_armed: event.diagnostics?.wake_armed,
+            final_confidence: event.diagnostics?.final_confidence,
+            average_log_probability: event.diagnostics?.average_log_probability,
+            no_speech_probability: event.diagnostics?.no_speech_probability,
+            language_probability: event.diagnostics?.language_probability,
             wake_confidence: event.confidence,
             level_trace: levelTrace,
             microphone_peak: peak,
@@ -613,6 +951,11 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
     if (event.type === "error") {
       failRecognition(new Error(event.error || "The local streaming STT backend failed."))
       return
+    }
+    if (event.type === "speech_start" && state() === "listening") move("transcribing", "speech_start", turn)
+    if (event.type === "discard") setLiveTranscript("")
+    if ((event.type === "discard" || event.type === "wake_ignored") && state() === "transcribing") {
+      move("listening", event.type, turn)
     }
     const diagnostics = event.diagnostics
     setVoiceDiagnostics((current) => ({
@@ -643,6 +986,8 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
       wakeConfidence: event.confidence ?? current.wakeConfidence,
       endpointReason:
         event.type === "speech_start" ? undefined : diagnostics?.endpoint_reason ?? current.endpointReason,
+      finalConfidence: diagnostics?.final_confidence ?? current.finalConfidence,
+      languageProbability: diagnostics?.language_probability ?? current.languageProbability,
     }))
     const text = event.text?.trim() ?? ""
     if (event.type === "wake_ignored") {
@@ -650,32 +995,31 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
       return
     }
     if (event.type === "wake_detected") {
-      setLiveTranscript(text)
       if (event.command) return
       openWakeFollowup(true)
       setLiveTranscript("")
       duplex?.setState("listening")
       return
     }
-    if ((event.type === "partial" || event.type === "final") && text) setLiveTranscript(text)
     if (event.mode !== "speaking" || (event.type !== "partial" && event.type !== "final")) {
-      if (event.type === "final" && text && state() === "listening") {
+      if (event.type === "final" && text && (state() === "listening" || state() === "transcribing")) {
         bargeInActive = false
         if (event.wake) {
-          submitWakeCommand(text)
+          submitWakeCommand(text, diagnostics)
           return
         }
-        acceptTranscript(text)
+        acceptTranscript(text, turn, diagnostics)
       }
       return
     }
     if (isLikelySpeechEcho(text, event.reference || speechObserved)) return
     if (wakeArmed() && !extractWakeCommand(text, settings.voice.wakePhrases()).matched) return
+    if ((event.diagnostics?.speech_ms ?? 0) < BARGE_IN_MIN_SPEECH_MS) return
     if (!isDeliberateSpeechInterruption(text)) return
     performBargeIn()
     if (event.type !== "final") return
     bargeInActive = false
-    acceptTranscript(text)
+    acceptTranscript(text, turn, diagnostics)
   }
 
   async function ensureDuplex() {
@@ -688,11 +1032,12 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
         armed: wakeArmed(),
         phrases: configuredWakePhrases(settings.voice.wakePhrases()),
       },
+      turn: activeTurn(),
       onEvent: handleDuplexEvent,
       onLevel: (level) => {
         const normalized = Math.min(1, Math.max(0, level))
         setMicrophoneLevel(normalized)
-        if (state() === "listening" || state() === "speaking") {
+        if (state() === "listening" || state() === "transcribing" || state() === "speaking") {
           microphoneTrace.push(normalized)
           if (microphoneTrace.length > 720) microphoneTrace = microphoneTrace.slice(-720)
         }
@@ -710,7 +1055,35 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
         }))
         if (performance.now() - lastEchoLogAt < 1_000) return
         lastEchoLogAt = performance.now()
-        recordVoice("stt", "echo_reference_compared", { diagnostics })
+        recordVoice("stt", "echo_reference_compared", {
+          diagnostics: {
+            ...diagnostics,
+            alternatives: diagnostics.alternatives ? JSON.stringify(diagnostics.alternatives) : undefined,
+          },
+        })
+      },
+      onUtteranceAudio: (audio) => {
+        if (!platform.storeVoiceTurnAudio) return
+        const sessionID = props.sessionID() ?? "default"
+        void platform
+          .storeVoiceTurnAudio({ sessionID, turnID: audio.turnID, pcm: audio.pcm, sampleRate: audio.sampleRate })
+          .then((result) =>
+            platform.appendVoiceDiagnostic?.({
+              sessionID,
+              turnID: audio.turnID,
+              source: "stt",
+              event: "audio_saved",
+              generation: audio.turnGeneration,
+              durationMs: result.durationMs,
+              diagnostics: {
+                path: result.path,
+                bytes: result.bytes,
+                sample_rate: result.sampleRate,
+                terminal_event: audio.terminalEvent,
+              },
+            }),
+          )
+          .catch((error) => console.warn("[voice-agent] failed to persist turn audio", error))
       },
       onError: failRecognition,
     })
@@ -733,10 +1106,11 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
 
   function failRecognition(error: unknown) {
     handsFree = false
+    setLiveTranscript("")
     clearWakePhrase()
     stopDuplex()
-    setState("idle")
     recordVoice("stt", "error", { error: error instanceof Error ? error.message : String(error) })
+    orchestrator.cancel("recognition_error")
     showToast({
       title: language.t("voice.error.service.title"),
       description: language.t("voice.error.service.description", {
@@ -756,28 +1130,34 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
     speechGeneration += 1
     stopSpeech()
     resetSpeechStream()
-    setState("idle")
+    setLiveTranscript("")
+    orchestrator.cancel("voice_disabled")
   })
 
   async function start(preserveWake = false) {
-    if (state() === "listening") {
+    if (preserveWake && state() !== "idle") return
+    if (state() === "listening" || state() === "transcribing" || state() === "interrupted") {
       handsFree = false
-      interrupt()
+      interrupt("user_interrupt")
       return
     }
     if (state() === "thinking" || state() === "synthesizing") {
       handsFree = false
-      interrupt()
+      interrupt("user_interrupt")
       return
     }
     if (state() === "speaking") {
-      interrupt()
+      interrupt("user_interrupt")
       await start()
       return
     }
+    const turn = orchestrator.begin(preserveWake ? "hands_free_restart" : "microphone_start")
     microphoneAccess = (await platform.requestMicrophoneAccess?.().catch(() => "unknown")) ?? "unknown"
+    if (!orchestrator.isCurrent(turn)) return
     recordVoice("ui", "microphone_access", { state: microphoneAccess })
     if (microphoneAccess === "denied" || microphoneAccess === "restricted") {
+      setLiveTranscript("")
+      orchestrator.cancel("microphone_denied")
       showToast({
         title: language.t("voice.error.permission.title"),
         description: language.t("voice.error.permission.description", { error: microphoneAccess }),
@@ -796,8 +1176,10 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
     }
     clearTimeout(restartTimer)
     speechGeneration += 1
-    voiceTurnID = crypto.randomUUID()
     voiceTurnSubmittedAt = undefined
+    responseParentID = undefined
+    submittedAt = undefined
+    submittedTranscript = ""
     responseStartedForTurn = false
     responseCompletedForTurn = false
     microphoneTrace = []
@@ -806,11 +1188,12 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
     if (!preserveWake) armWakePhrase()
     setLiveTranscript("")
     setVoiceDiagnostics({ microphone: 0, vad: "silence", phase: "ready" })
-    setState("listening")
     recordVoice("agent", "listening_started", {
       diagnostics: { hands_free: handsFree, language: voiceLanguage(document.documentElement.lang, navigator.language) },
     })
     await ensureDuplex().catch(failRecognition)
+    if (!orchestrator.isCurrent(turn)) return
+    duplex?.setTurn(turn)
     duplex?.setState("listening")
   }
 
@@ -828,28 +1211,33 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
     }
     if (working || wakeAutoStartScheduled || state() !== "idle") return
     wakeAutoStartScheduled = true
-    queueMicrotask(() => void start())
+    queueMicrotask(() => void start(true))
   })
 
   onCleanup(() => {
     handsFree = false
     clearTimeout(responseTimer)
     clearTimeout(restartTimer)
+    clearInterval(watchdogTimer)
     clearWakePhrase()
     stopDuplex()
     speechGeneration += 1
     stopSpeech()
     resetSpeechStream()
+    setLiveTranscript("")
+    orchestrator.cancel("component_cleanup")
     props.onStatusChange?.(undefined)
   })
 
   const label = () => language.t(`voice.action.${state()}`)
   const status = () => {
-    const value = language.t(`voice.status.${state() as "listening" | "thinking" | "synthesizing" | "speaking"}`)
+    const value = language.t(
+      `voice.status.${state() as "listening" | "transcribing" | "thinking" | "synthesizing" | "speaking" | "interrupted"}`,
+    )
     const transcript = liveTranscript().trim()
     if (state() === "listening" && wakeArmed()) return language.t("voice.status.wake")
     if (state() === "listening" && wakeActivated() && !transcript) return language.t("voice.status.wakeActivated")
-    if (!transcript || (state() !== "listening" && state() !== "speaking")) return value
+    if (!transcript || (state() !== "listening" && state() !== "transcribing" && state() !== "speaking")) return value
     return `${value} “${transcript.slice(0, 80)}${transcript.length > 80 ? "…" : ""}”`
   }
 
@@ -939,16 +1327,22 @@ export function VoiceAgentChatStatus(props: { status: VoiceAgentStatus | undefin
               <span
                 class="absolute inline-flex size-full animate-ping rounded-full opacity-35"
                 classList={{
-                  "bg-icon-info-base": status().state === "listening",
-                  "bg-icon-warning-base": status().state === "thinking" || status().state === "synthesizing",
+                  "bg-icon-info-base": status().state === "listening" || status().state === "transcribing",
+                  "bg-icon-warning-base":
+                    status().state === "thinking" ||
+                    status().state === "synthesizing" ||
+                    status().state === "interrupted",
                   "bg-icon-success-base": status().state === "speaking",
                 }}
               />
               <span
                 class="relative inline-flex size-2 rounded-full"
                 classList={{
-                  "bg-icon-info-base": status().state === "listening",
-                  "bg-icon-warning-base": status().state === "thinking" || status().state === "synthesizing",
+                  "bg-icon-info-base": status().state === "listening" || status().state === "transcribing",
+                  "bg-icon-warning-base":
+                    status().state === "thinking" ||
+                    status().state === "synthesizing" ||
+                    status().state === "interrupted",
                   "bg-icon-success-base": status().state === "speaking",
                 }}
               />
@@ -1011,6 +1405,15 @@ export function VoiceAgentChatStatus(props: { status: VoiceAgentStatus | undefin
                 </Show>
                 <Show when={diagnostics().endpointReason}>
                   {(value) => <span>{language.t("voice.diagnostics.endpoint")} {endpointLabel(value())}</span>}
+                </Show>
+                <Show when={diagnostics().finalConfidence !== undefined}>
+                  <span>{language.t("voice.diagnostics.confidence")} {Math.round(diagnostics().finalConfidence! * 100)}%</span>
+                </Show>
+                <Show when={diagnostics().intent}>
+                  {(value) => <span>{language.t("voice.diagnostics.intent")} {value()}</span>}
+                </Show>
+                <Show when={diagnostics().understandingDecision}>
+                  {(value) => <span>{language.t("voice.diagnostics.admission")} {value()}</span>}
                 </Show>
               </div>
             )}

@@ -21,12 +21,22 @@ export function CommentCardV2(props: {
     const element = title
     if (!element) return
     const sync = () => setTruncated(element.scrollWidth > element.clientWidth)
-    const measure = () => requestAnimationFrame(sync)
-    const observer = new ResizeObserver(sync)
+    let frame: number | undefined
+    const measure = () => {
+      if (frame !== undefined) return
+      frame = requestAnimationFrame(() => {
+        frame = undefined
+        sync()
+      })
+    }
+    const observer = new ResizeObserver(measure)
     observer.observe(element)
     measure()
     void document.fonts?.ready.then(measure)
-    onCleanup(() => observer.disconnect())
+    onCleanup(() => {
+      observer.disconnect()
+      if (frame !== undefined) cancelAnimationFrame(frame)
+    })
   })
 
   return (

@@ -4,6 +4,8 @@ type GaplessAudioPlayerOptions = {
   onBuffer?: (bufferedMs: number) => void
   onUnderrun?: (count: number) => void
   onReferenceNode?: (node: AudioNode | undefined) => void
+  playbackRate?: number
+  volume?: number
 }
 
 export function adaptivePrebufferFrames(sampleRate: number, underruns: number) {
@@ -123,6 +125,7 @@ export function createGaplessAudioPlayer(options: GaplessAudioPlayerOptions = {}
   const context = options.context ?? new AudioContext({ latencyHint: "interactive" })
   const ownsContext = !options.context
   let node: AudioWorkletNode | undefined
+  let gain: GainNode | undefined
   let cancelled = false
   let finishing = false
   let readyError: unknown
@@ -147,8 +150,11 @@ export function createGaplessAudioPlayer(options: GaplessAudioPlayerOptions = {}
       if (event.data.type !== "drained") return
       resolveDrain?.()
     }
-    node.connect(context.destination)
-    options.onReferenceNode?.(node)
+    gain = context.createGain()
+    gain.gain.value = Math.min(1, Math.max(0, options.volume ?? 1))
+    node.connect(gain)
+    gain.connect(context.destination)
+    options.onReferenceNode?.(gain)
     await context.resume()
   })().catch((error: unknown) => {
     readyError = error
@@ -170,7 +176,11 @@ export function createGaplessAudioPlayer(options: GaplessAudioPlayerOptions = {}
       pending = pending.then(async () => {
         await requireReady()
         if (cancelled || !node) return
-        const samples = resamplePlaybackPCM(audio, sampleRate, context.sampleRate)
+        const samples = resamplePlaybackPCM(
+          audio,
+          sampleRate * Math.min(2, Math.max(0.5, options.playbackRate ?? 1)),
+          context.sampleRate,
+        )
         node.port.postMessage({ type: "chunk", samples }, [samples.buffer])
       })
       return pending
@@ -184,6 +194,7 @@ export function createGaplessAudioPlayer(options: GaplessAudioPlayerOptions = {}
       node.port.postMessage({ type: "finish" })
       await drained
       node.disconnect()
+      gain?.disconnect()
       await close()
     },
     cancel() {
@@ -191,6 +202,7 @@ export function createGaplessAudioPlayer(options: GaplessAudioPlayerOptions = {}
       cancelled = true
       node?.port.postMessage({ type: "reset" })
       node?.disconnect()
+      gain?.disconnect()
       resolveDrain?.()
       void close()
     },

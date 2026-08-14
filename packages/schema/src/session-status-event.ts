@@ -30,6 +30,10 @@ export const Info = Schema.Union([
     type: Schema.Literal("busy"),
   }),
   Schema.Struct({
+    type: Schema.Literal("cache_restore"),
+    startedAt: NonNegativeInt,
+  }),
+  Schema.Struct({
     type: Schema.Literal("verifying"),
     attempt: NonNegativeInt,
     checks: NonNegativeInt,

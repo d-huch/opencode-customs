@@ -5,6 +5,7 @@ import { encodeFilePath } from "@/context/file/path"
 import type { AgentPart, FileAttachmentPart, ImageAttachmentPart, Prompt } from "@/context/prompt"
 import { Identifier } from "@/utils/id"
 import { createCommentMetadata, formatCommentNote } from "@/utils/comment-note"
+import { takeVoiceRequestContext } from "@/utils/voice-request-context"
 
 type PromptRequestPart = (TextPartInput | FilePartInput | AgentPartInput) & { id: string }
 
@@ -27,6 +28,7 @@ type BuildRequestPartsInput = {
   messageID: string
   sessionID: string
   sessionDirectory: string
+  personalizationInstruction?: string
 }
 
 const absolute = (directory: string, path: string) => {
@@ -99,6 +101,27 @@ export function buildRequestParts(input: BuildRequestPartsInput) {
       text: input.text,
     },
   ]
+
+  if (input.personalizationInstruction) {
+    requestParts.push({
+      id: Identifier.ascending("part"),
+      type: "text",
+      text: input.personalizationInstruction,
+      synthetic: true,
+      metadata: { opencodePersonalization: { version: 1 } },
+    })
+  }
+
+  const voiceContext = takeVoiceRequestContext(input.text)
+  if (voiceContext) {
+    requestParts.push({
+      id: Identifier.ascending("part"),
+      type: "text",
+      text: voiceContext,
+      synthetic: true,
+      metadata: { opencodeVoice: { version: 1 } },
+    })
+  }
 
   const files = input.prompt.filter(isFileAttachment).map((attachment) => {
     const path = absolute(input.sessionDirectory, attachment.path)

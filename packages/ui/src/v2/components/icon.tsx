@@ -141,6 +141,14 @@ const icons = {
     viewBox: "0 0 20 20",
     body: `<path d="M5.83333 4.16406L2.5 7.4974L5.83333 10.8307M3.33333 7.4974H17.9167V15.4141H10" stroke="currentColor" stroke-linecap="square"/>`,
   },
+  speaker: {
+    viewBox: "0 0 16 16",
+    body: `<path d="M1.55566 6.22222H4.22233L7.55566 3.55556V12.4444L4.22233 9.77778H1.55566V6.22222ZM9.55566 5.55556C10.889 6.88889 10.889 9.11111 9.55566 10.4444M11.5557 3.55556C14.2223 6.22222 14.2223 9.77778 11.5557 12.4444" stroke="currentColor" stroke-linecap="square"/>`,
+  },
+  stop: {
+    viewBox: "0 0 16 16",
+    body: `<rect x="4" y="4" width="8" height="8" fill="currentColor"/>`,
+  },
   "outline-reset": {
     viewBox: "0 0 20 20",
     body: `<path d="M5.83333 4.16406L2.5 7.4974L5.83333 10.8307M3.33333 7.4974H17.9167V15.4141H10" stroke="currentColor" stroke-linecap="square"/>`,

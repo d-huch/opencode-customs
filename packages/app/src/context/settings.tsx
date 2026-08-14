@@ -3,6 +3,13 @@ import { createEffect, createMemo, createSignal, onCleanup } from "solid-js"
 import { createSimpleContext } from "@opencode-ai/ui/context"
 import { persisted } from "@/utils/persist"
 import { usePlatform } from "@/context/platform"
+import { normalizeVoiceDictionary, type VoiceDictionaryEntry } from "@/utils/voice-dictionary"
+import type {
+  AgentDetail,
+  AgentHumor,
+  AgentProactivity,
+  AgentTone,
+} from "@/utils/agent-personalization"
 
 export interface NotificationSettings {
   agent: boolean
@@ -19,19 +26,56 @@ export interface SoundSettings {
   errors: string
 }
 
+export type VoicePersonalityMode = "normal" | "work" | "night" | "emergency"
+export type FishSpeechLanguage = "auto" | "uk" | "en" | "mixed"
+
 export interface VoiceSettings {
   enabled: boolean
   autoSubmit: boolean
   speakResponses: boolean
+  contextualCorrection: boolean
+  confirmRiskyCommands: boolean
+  personalDictionary: string
+  dictionaryEntries: VoiceDictionaryEntry[]
+  personalityMode: VoicePersonalityMode
   handsFree: boolean
   wakePhraseEnabled: boolean
   wakePhrases: string
   wakeFollowupSeconds: number
   wakeOnLaunch: boolean
+  ttsProvider: "local" | "fish-local"
   ttsMode: "quality" | "fast"
   ttsEndpoint: string
   ttsModel: string
   ttsVoice: string
+  fishEndpoint: string
+  fishLatency: "normal" | "balanced"
+  fishLanguage: FishSpeechLanguage
+  fishPlaybackRate: number
+  fishVolume: number
+  fishTemperature: number
+  fishTopP: number
+  fishRepetitionPenalty: number
+  fishSeed: number | null
+  fishChunkLength: number
+  fishNormalize: boolean
+  fishStreaming: boolean
+  fishMemoryCache: boolean
+  fishMaxNewTokens: number
+}
+
+export interface AgentPersonalizationSettings {
+  enabled: boolean
+  assistantName: string
+  userName: string
+  addressAs: string
+  language: string
+  tone: AgentTone
+  detail: AgentDetail
+  proactivity: AgentProactivity
+  humor: AgentHumor
+  catchphrases: string
+  customInstructions: string
 }
 
 export interface Settings {
@@ -66,6 +110,7 @@ export interface Settings {
   }
   notifications: NotificationSettings
   sounds: SoundSettings
+  personalization: AgentPersonalizationSettings
   voice: VoiceSettings
 }
 
@@ -225,19 +270,52 @@ const defaultSettings: Settings = {
     errorsEnabled: true,
     errors: "nope-03",
   },
+  personalization: {
+    enabled: true,
+    assistantName: "OpenCode Customs",
+    userName: "",
+    addressAs: "",
+    language: "auto",
+    tone: "natural",
+    detail: "balanced",
+    proactivity: "balanced",
+    humor: "subtle",
+    catchphrases: "",
+    customInstructions: "",
+  },
   voice: {
     enabled: true,
     autoSubmit: true,
     speakResponses: true,
+    contextualCorrection: true,
+    confirmRiskyCommands: true,
+    personalDictionary: "",
+    dictionaryEntries: [],
+    personalityMode: "normal",
     handsFree: false,
     wakePhraseEnabled: false,
     wakePhrases: "джарвіс, jarvis",
     wakeFollowupSeconds: 30,
     wakeOnLaunch: false,
+    ttsProvider: "local",
     ttsMode: "quality",
     ttsEndpoint: "http://127.0.0.1:8880/v1/audio/speech",
     ttsModel: "silero-v5-ukrainian",
     ttsVoice: "kateryna",
+    fishEndpoint: "http://127.0.0.1:8080/v1/tts",
+    fishLatency: "balanced",
+    fishLanguage: "auto",
+    fishPlaybackRate: 1,
+    fishVolume: 1,
+    fishTemperature: 0.8,
+    fishTopP: 0.8,
+    fishRepetitionPenalty: 1.1,
+    fishSeed: null,
+    fishChunkLength: 300,
+    fishNormalize: true,
+    fishStreaming: false,
+    fishMemoryCache: true,
+    fishMaxNewTokens: 1024,
   },
 }
 
@@ -548,6 +626,67 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
           setStore("sounds", "errors", value)
         },
       },
+      personalization: {
+        enabled: withFallback(() => store.personalization?.enabled, defaultSettings.personalization.enabled),
+        setEnabled(value: boolean) {
+          setStore("personalization", "enabled", value)
+        },
+        assistantName: withFallback(
+          () => store.personalization?.assistantName,
+          defaultSettings.personalization.assistantName,
+        ),
+        setAssistantName(value: string) {
+          setStore("personalization", "assistantName", value.slice(0, 80))
+        },
+        userName: withFallback(() => store.personalization?.userName, defaultSettings.personalization.userName),
+        setUserName(value: string) {
+          setStore("personalization", "userName", value.slice(0, 80))
+        },
+        addressAs: withFallback(() => store.personalization?.addressAs, defaultSettings.personalization.addressAs),
+        setAddressAs(value: string) {
+          setStore("personalization", "addressAs", value.slice(0, 80))
+        },
+        language: withFallback(() => store.personalization?.language, defaultSettings.personalization.language),
+        setLanguage(value: string) {
+          setStore("personalization", "language", value.slice(0, 80))
+        },
+        tone: withFallback(() => store.personalization?.tone, defaultSettings.personalization.tone),
+        setTone(value: AgentTone) {
+          setStore("personalization", "tone", value)
+        },
+        detail: withFallback(() => store.personalization?.detail, defaultSettings.personalization.detail),
+        setDetail(value: AgentDetail) {
+          setStore("personalization", "detail", value)
+        },
+        proactivity: withFallback(
+          () => store.personalization?.proactivity,
+          defaultSettings.personalization.proactivity,
+        ),
+        setProactivity(value: AgentProactivity) {
+          setStore("personalization", "proactivity", value)
+        },
+        humor: withFallback(() => store.personalization?.humor, defaultSettings.personalization.humor),
+        setHumor(value: AgentHumor) {
+          setStore("personalization", "humor", value)
+        },
+        catchphrases: withFallback(
+          () => store.personalization?.catchphrases,
+          defaultSettings.personalization.catchphrases,
+        ),
+        setCatchphrases(value: string) {
+          setStore("personalization", "catchphrases", value.slice(0, 2_000))
+        },
+        customInstructions: withFallback(
+          () => store.personalization?.customInstructions,
+          defaultSettings.personalization.customInstructions,
+        ),
+        setCustomInstructions(value: string) {
+          setStore("personalization", "customInstructions", value.slice(0, 4_000))
+        },
+        reset() {
+          setStore("personalization", reconcile(defaultSettings.personalization))
+        },
+      },
       voice: {
         enabled: withFallback(() => store.voice?.enabled, defaultSettings.voice.enabled),
         setEnabled(value: boolean) {
@@ -560,6 +699,38 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         speakResponses: withFallback(() => store.voice?.speakResponses, defaultSettings.voice.speakResponses),
         setSpeakResponses(value: boolean) {
           setStore("voice", "speakResponses", value)
+        },
+        contextualCorrection: withFallback(
+          () => store.voice?.contextualCorrection,
+          defaultSettings.voice.contextualCorrection,
+        ),
+        setContextualCorrection(value: boolean) {
+          setStore("voice", "contextualCorrection", value)
+        },
+        confirmRiskyCommands: withFallback(
+          () => store.voice?.confirmRiskyCommands,
+          defaultSettings.voice.confirmRiskyCommands,
+        ),
+        setConfirmRiskyCommands(value: boolean) {
+          setStore("voice", "confirmRiskyCommands", value)
+        },
+        personalDictionary: withFallback(() => store.voice?.personalDictionary, defaultSettings.voice.personalDictionary),
+        setPersonalDictionary(value: string) {
+          setStore("voice", "personalDictionary", value.slice(0, 10_000))
+        },
+        dictionaryEntries: createMemo(() =>
+          normalizeVoiceDictionary([
+            ...normalizeVoiceDictionary(store.voice?.personalDictionary),
+            ...normalizeVoiceDictionary(store.voice?.dictionaryEntries),
+          ]),
+        ),
+        setDictionaryEntries(value: VoiceDictionaryEntry[]) {
+          setStore("voice", "dictionaryEntries", reconcile(normalizeVoiceDictionary(value)))
+          if (store.voice?.personalDictionary) setStore("voice", "personalDictionary", "")
+        },
+        personalityMode: withFallback(() => store.voice?.personalityMode, defaultSettings.voice.personalityMode),
+        setPersonalityMode(value: VoicePersonalityMode) {
+          setStore("voice", "personalityMode", value)
         },
         handsFree: withFallback(() => store.voice?.handsFree, defaultSettings.voice.handsFree),
         setHandsFree(value: boolean) {
@@ -586,6 +757,14 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         wakeOnLaunch: withFallback(() => store.voice?.wakeOnLaunch, defaultSettings.voice.wakeOnLaunch),
         setWakeOnLaunch(value: boolean) {
           setStore("voice", "wakeOnLaunch", value)
+        },
+        ttsProvider: createMemo(() => {
+          const value = store.voice?.ttsProvider as string | undefined
+          if (value === "fish") return "fish-local" as const
+          return value === "fish-local" ? value : "local"
+        }),
+        setTTSProvider(value: "local" | "fish-local") {
+          setStore("voice", "ttsProvider", value)
         },
         ttsMode: withFallback(() => store.voice?.ttsMode, defaultSettings.voice.ttsMode),
         setTTSMode(value: "quality" | "fast") {
@@ -620,6 +799,71 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         }),
         setTTSVoice(value: string) {
           setStore("voice", "ttsVoice", value)
+        },
+        fishEndpoint: withFallback(() => store.voice?.fishEndpoint, defaultSettings.voice.fishEndpoint),
+        setFishEndpoint(value: string) {
+          setStore("voice", "fishEndpoint", value.slice(0, 500))
+        },
+        fishLatency: withFallback(() => store.voice?.fishLatency, defaultSettings.voice.fishLatency),
+        setFishLatency(value: "normal" | "balanced") {
+          setStore("voice", "fishLatency", value)
+        },
+        fishLanguage: withFallback(() => store.voice?.fishLanguage, defaultSettings.voice.fishLanguage),
+        setFishLanguage(value: FishSpeechLanguage) {
+          setStore("voice", "fishLanguage", value)
+        },
+        fishPlaybackRate: withFallback(
+          () => store.voice?.fishPlaybackRate,
+          defaultSettings.voice.fishPlaybackRate,
+        ),
+        setFishPlaybackRate(value: number) {
+          setStore("voice", "fishPlaybackRate", Math.min(2, Math.max(0.5, value || 1)))
+        },
+        fishVolume: withFallback(() => store.voice?.fishVolume, defaultSettings.voice.fishVolume),
+        setFishVolume(value: number) {
+          setStore("voice", "fishVolume", Math.min(1, Math.max(0, Number.isFinite(value) ? value : 1)))
+        },
+        fishTemperature: withFallback(() => store.voice?.fishTemperature, defaultSettings.voice.fishTemperature),
+        setFishTemperature(value: number) {
+          setStore("voice", "fishTemperature", Math.min(1, Math.max(0.1, value || 0.8)))
+        },
+        fishTopP: withFallback(() => store.voice?.fishTopP, defaultSettings.voice.fishTopP),
+        setFishTopP(value: number) {
+          setStore("voice", "fishTopP", Math.min(1, Math.max(0.1, value || 0.8)))
+        },
+        fishRepetitionPenalty: withFallback(
+          () => store.voice?.fishRepetitionPenalty,
+          defaultSettings.voice.fishRepetitionPenalty,
+        ),
+        setFishRepetitionPenalty(value: number) {
+          setStore("voice", "fishRepetitionPenalty", Math.min(2, Math.max(0.9, value || 1.1)))
+        },
+        fishSeed: createMemo(() => store.voice?.fishSeed ?? null),
+        setFishSeed(value: number | null) {
+          setStore("voice", "fishSeed", value === null || !Number.isFinite(value) ? null : Math.round(value))
+        },
+        fishChunkLength: withFallback(() => store.voice?.fishChunkLength, defaultSettings.voice.fishChunkLength),
+        setFishChunkLength(value: number) {
+          setStore("voice", "fishChunkLength", Math.min(1_000, Math.max(100, Math.round(value || 300))))
+        },
+        fishNormalize: withFallback(() => store.voice?.fishNormalize, defaultSettings.voice.fishNormalize),
+        setFishNormalize(value: boolean) {
+          setStore("voice", "fishNormalize", value)
+        },
+        fishStreaming: withFallback(() => store.voice?.fishStreaming, defaultSettings.voice.fishStreaming),
+        setFishStreaming(value: boolean) {
+          setStore("voice", "fishStreaming", value)
+        },
+        fishMemoryCache: withFallback(() => store.voice?.fishMemoryCache, defaultSettings.voice.fishMemoryCache),
+        setFishMemoryCache(value: boolean) {
+          setStore("voice", "fishMemoryCache", value)
+        },
+        fishMaxNewTokens: withFallback(
+          () => store.voice?.fishMaxNewTokens,
+          defaultSettings.voice.fishMaxNewTokens,
+        ),
+        setFishMaxNewTokens(value: number) {
+          setStore("voice", "fishMaxNewTokens", Math.min(4_096, Math.max(128, Math.round(value || 1_024))))
         },
       },
     }

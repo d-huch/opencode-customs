@@ -159,7 +159,6 @@ async def replay_stream(
                         }
                     )
                     continue
-                cached_transcript = session.cached_transcript()
                 pcm, active_mode, active_reference, generation, diagnostics = session.finish(
                     event.get("reason", "silence")
                 )
@@ -171,9 +170,6 @@ async def replay_stream(
                         wake = report_wake(await detect_wake(pcm, language, wake_phrases))
                         recognition_ms += round((time.perf_counter() - started) * 1000)
                         transcript = wake.get("text", "")
-                elif cached_transcript:
-                    transcript = cached_transcript
-                    diagnostics["transcription_cache"] = "hit"
                 else:
                     started = time.perf_counter()
                     transcript = await transcribe(pcm, language)
@@ -192,7 +188,6 @@ async def replay_stream(
                 )
 
     if session.snapshot():
-        cached_transcript = session.cached_transcript()
         pcm, active_mode, active_reference, generation, diagnostics = session.finish("replay_flush")
         if wake_phrases:
             if detect_wake is None:
@@ -202,9 +197,6 @@ async def replay_stream(
                 wake = report_wake(await detect_wake(pcm, language, wake_phrases))
                 recognition_ms += round((time.perf_counter() - started) * 1000)
                 transcript = wake.get("text", "")
-        elif cached_transcript:
-            transcript = cached_transcript
-            diagnostics["transcription_cache"] = "hit"
         else:
             started = time.perf_counter()
             transcript = await transcribe(pcm, language)

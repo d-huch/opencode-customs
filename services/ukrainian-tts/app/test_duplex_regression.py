@@ -21,9 +21,9 @@ class DuplexRegressionTest(unittest.IsolatedAsyncioTestCase):
             {"matched": True, "text": "Джарвіс покажи", "command_pcm_bytes": 3},
         )
 
-    async def test_internal_pause_does_not_finalize_before_the_second_clause(self):
+    async def test_internal_pause_runs_one_separate_final_decode_after_preview(self):
         session = DuplexSession()
-        session.vad = VoiceActivity([*([True] * 10), *([False] * 45), *([True] * 10), *([False] * 100)])
+        session.vad = VoiceActivity([*([True] * 20), *([False] * 45), *([True] * 20), *([False] * 100)])
         transcriptions = 0
 
         async def transcribe(_pcm, _language):
@@ -33,9 +33,9 @@ class DuplexRegressionTest(unittest.IsolatedAsyncioTestCase):
 
         result = await replay_stream(
             [
-                bytes([1]) * STT_FRAME_BYTES * 10,
+                bytes([1]) * STT_FRAME_BYTES * 20,
                 bytes(STT_FRAME_BYTES * 45),
-                bytes([1]) * STT_FRAME_BYTES * 10,
+                bytes([1]) * STT_FRAME_BYTES * 20,
                 bytes(STT_FRAME_BYTES * 100),
             ],
             "listening",
@@ -50,7 +50,7 @@ class DuplexRegressionTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(finals[0]["input_index"], 3)
         self.assertEqual(result["transcript"], "Розкажи мені про Мобі Діка.")
         self.assertEqual(transcriptions, 3)
-        self.assertEqual(result["diagnostics"]["transcription_cache"], "hit")
+        self.assertEqual(result["diagnostics"]["transcription_cache"], "miss")
 
     async def test_low_background_noise_does_not_create_an_utterance(self):
         session = DuplexSession()

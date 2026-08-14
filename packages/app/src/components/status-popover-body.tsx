@@ -387,9 +387,7 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
     if (status === "completed") return language.t("status.popover.runtime.vision.status.completed")
     return language.t("status.popover.runtime.vision.status.failed")
   }
-  const agentTurnPhase = (
-    phase: "classify" | "recall" | "execute" | "verify" | "critic" | "complete" | "failed",
-  ) => {
+  const agentTurnPhase = (phase: "classify" | "recall" | "execute" | "verify" | "critic" | "complete" | "failed") => {
     if (phase === "classify") return language.t("status.popover.runtime.turn.phase.classify")
     if (phase === "recall") return language.t("status.popover.runtime.turn.phase.recall")
     if (phase === "execute") return language.t("status.popover.runtime.turn.phase.execute")
@@ -513,9 +511,9 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
       .finally(() => setRuntimeState("clearingLogs", false))
   }
   const modelContextLocked = (modelID: string) => lmStudioModelConfig(modelID)?.[1].preserve_context === true
-  const automaticModelRouting = createMemo(
-    () => serverSync().data.config.provider?.lmstudio?.auto_route !== false,
-  )
+  const modelChatContext = (modelID: string, maximum: number) =>
+    Math.min(maximum, lmStudioModelConfig(modelID)?.[1].chat_context ?? 32_768)
+  const automaticModelRouting = createMemo(() => serverSync().data.config.provider?.lmstudio?.auto_route !== false)
   const modelAutomaticRouting = (modelID: string) => lmStudioModelConfig(modelID)?.[1].auto_route !== false
   const setModelContextLocked = async (modelID: string, checked: boolean) => {
     if (runtimeState.contextLocking) return
@@ -905,6 +903,31 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
                           </div>
                         )}
                       </Show>
+
+                      <Show when={runtime().providerContext}>
+                        {(context) => (
+                          <div class="flex flex-col gap-1 rounded-md bg-surface-raised-base px-2 py-1.5">
+                            <div class="flex items-center gap-2">
+                              <span class="text-11-regular text-text-weaker">
+                                {language.t("status.popover.runtime.governor.providerChain")}
+                              </span>
+                              <span class="ml-auto text-12-medium tabular-nums text-text-base">
+                                {(
+                                  Number(context().providerTokens) + Number(context().currentTokens)
+                                ).toLocaleString(language.intl())}
+                                {" / "}
+                                {Number(context().contextLimit).toLocaleString(language.intl())}
+                              </span>
+                            </div>
+                            <span class="truncate text-10-regular text-text-weaker">
+                              {Number(context().cachedTokens).toLocaleString(language.intl())}{" "}
+                              {language.t("status.popover.runtime.governor.cachedTokens")} ·{" "}
+                              {Number(context().remainingTokens).toLocaleString(language.intl())}{" "}
+                              {language.t("status.popover.runtime.governor.remainingTokens")} · {context().reason}
+                            </span>
+                          </div>
+                        )}
+                      </Show>
                     </div>
                   )}
                 </Show>
@@ -1207,6 +1230,23 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
                                   />
                                   <RuntimeCapability label="Embeddings" enabled={model.capabilities.embeddings} />
                                 </div>
+                                <Show when={configured()}>
+                                  {(info) => (
+                                    <div class="flex items-center justify-between gap-2 pt-1">
+                                      <span class="text-11-regular text-text-weaker">
+                                        {language.t("settings.models.chatContext.label")}
+                                      </span>
+                                      <SettingsModelContextLimit
+                                        providerID="lmstudio"
+                                        modelID={configModelID()}
+                                        context={modelChatContext(configModelID(), info().limit.context)}
+                                        output={info().limit.output}
+                                        variant="runtime"
+                                        scope="chat"
+                                      />
+                                    </div>
+                                  )}
+                                </Show>
                                 <label class="flex items-center gap-2 pt-1 text-11-regular text-text-weaker">
                                   <Switch
                                     checked={modelAutomaticRouting(configModelID())}

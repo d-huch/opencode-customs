@@ -85,6 +85,7 @@ const LatencyPhase = Schema.Literals([
   "memory",
   "capability_probe",
   "model_activation",
+  "cache_restore",
   "context_compilation",
   "prompt_processing",
   "generation",

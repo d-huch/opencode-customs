@@ -27,10 +27,16 @@ successful backend synthesis so a silent renderer can be distinguished from a TT
 
 The desktop keeps one microphone stream open and sends 16 kHz mono PCM frames to
 `WS /v1/audio/transcriptions/stream`. Chromium WebRTC echo cancellation receives the active renderer output as its
-playback reference before the microphone reaches the backend. The server then applies WebRTC VAD, preserves the latest
-1.5 seconds in a ring buffer, streams bounded Whisper partials, and uses a two-stage endpoint. A short pause requests a
+playback reference before the microphone reaches the backend. The server then combines an RMS noise gate with aggressive
+WebRTC VAD, preserves the latest 700 milliseconds in a ring buffer, streams at most two Whisper previews, and uses a
+two-stage endpoint. A short pause requests a
 candidate transcript; an unfinished phrase receives a semantic continuation window before it becomes final. This
 means an interruption includes speech that began before TTS playback was stopped instead of losing its first words.
+
+Preview recognition uses the dedicated tiny recognizer and never blocks the accurate final decode. The final transcript
+is decoded once from the complete utterance by the configured main recognizer, without feeding earlier hypotheses back as
+a prompt. Repeated sentence and phrase blocks are removed before the transcript reaches the desktop, stale previews are
+discarded, and sub-360-millisecond noise bursts never create a user request.
 
 Each streaming event includes the VAD state, captured audio and speech/silence duration, pre-roll, transcription
 latency, transcript stability, and endpoint reason used by the in-chat voice diagnostics view.
@@ -40,6 +46,11 @@ Mono and stereo input are supported and resampled to 16 kHz before passing throu
 The response includes the transcript, source sample rate, channel count, audio duration, and transcription time. The
 desktop Voice Inspector invokes this endpoint only after the user explicitly selects a WAV file; the live stream itself
 does not write microphone audio to disk.
+
+`POST /v1/audio/duplex/reliability` runs a bounded real-audio reliability suite. It repeats the same synthesized PCM
+duplex regression for 1–20 cycles, optionally injects deterministic input delay and a reconnect boundary, continues after
+an isolated failed cycle, and reports RSS, peak RSS, active thread, and open file-descriptor deltas. It does not retry a
+real backend failure and does not switch to another voice or recognizer.
 
 The client also sends the spoken response text with the duplex state. It is used only to reject residual semantic echo;
 audio never enters the LLM context. A distinct partial transcript interrupts playback and the active model turn, while
@@ -95,15 +106,22 @@ Edit `app/pronunciations.json` to add project-specific names, abbreviations, and
 - `TTS_CHUNK_CHARS` — maximum Silero synthesis chunk, default `350`.
 - `TTS_CACHE_ROOT` — model and audio cache directory.
 - `TTS_DOWNLOAD_ATTEMPTS` and `TTS_DOWNLOAD_TIMEOUT_SECONDS` — bounded model download retry policy.
-- `STT_MODEL` — faster-whisper model, default `small`.
+- `STT_MODEL` — faster-whisper model used for final command transcription, default `large-v3-turbo`. The smaller wake model may produce provisional live text, but it is never accepted as the final user message.
 - `STT_WAKE_MODEL` — dedicated low-latency wake-word recognizer, default `tiny`. It is not used as an answer,
   coding, command, or fallback model.
 - `STT_DEVICE` and `STT_COMPUTE_TYPE` — inference target, default `cpu` and `int8`.
-- `STT_PRE_ROLL_MS` — server-side microphone ring buffer, default `1500`.
+- `STT_PRE_ROLL_MS` — server-side microphone ring buffer, default `700`.
 - `STT_SILENCE_MS` — initial pause before endpoint analysis, default `700`.
 - `STT_SEMANTIC_GRACE_MS` — maximum continuation window for an unfinished phrase, default `1800`.
-- `STT_PARTIAL_MS` — minimum interval between partial transcriptions, default `900`.
-- `STT_VAD_MODE` — WebRTC VAD aggressiveness from `0` to `3`, default `2`.
+- `STT_PARTIAL_MS` — minimum interval between preview transcriptions, default `2400`.
+- `STT_MAX_PARTIALS` — maximum preview decodes per utterance, default `2`.
+- `STT_MAX_UTTERANCE_MS` — hard upper bound for one utterance, default `15000`.
+- `STT_MIN_SPEECH_MS` — minimum accepted voiced duration, default `360`.
+- `STT_MIN_RMS` — normalized PCM energy required in addition to WebRTC VAD, default `0.0012`.
+- `STT_MIN_FINAL_CONFIDENCE` — minimum final large-model confidence admitted to chat, history, and memory, default `0.45`.
+- `STT_ENDPOINT_COMMIT_MS` — minimum silence before a sufficiently long, complete phrase is committed, default `1300` ms.
+- `STT_SEMANTIC_MIN_SPEECH_MS` — minimum detected speech required for an early semantic commit, default `1200` ms; shorter fragments wait for the semantic grace period.
+- `STT_VAD_MODE` — WebRTC VAD aggressiveness from `0` to `3`, default `2` to preserve quieter Ukrainian syllables.
 - `STT_WAKE_MATCH_THRESHOLD` — generic similarity threshold for configured wake phrases, default `0.78`.
 - `STT_WAKE_COMMAND_OVERLAP_MS` — audio retained before the detected wake-word boundary, default `80` ms.
 

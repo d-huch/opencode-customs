@@ -553,6 +553,21 @@ export function NewHome() {
     tabs.newDraft({ server: ServerConnection.key(conn), directory })
   }
 
+  function openChat() {
+    const conn = focusedServer()
+    if (!conn || !platform.ensureChatWorkspace) return
+    if (global.servers.health[ServerConnection.key(conn)]?.healthy === false) return
+    platform
+      .ensureChatWorkspace()
+      .then((directory) => tabs.newDraft({ server: ServerConnection.key(conn), directory }))
+      .catch((error: unknown) =>
+        showToast({
+          title: language.t("common.requestFailed"),
+          description: errorMessage(error, language.t("common.requestFailed")),
+        }),
+      )
+  }
+
   function editProject(conn: ServerConnection.Any, project: LocalProject) {
     void import("@/components/dialog-edit-project-v2").then((x) => {
       void dialog.show(() => <x.DialogEditProjectV2 server={conn} project={project} />)
@@ -711,6 +726,7 @@ export function NewHome() {
             clearNotifications={clearNotifications}
             unseenCount={unseenCount}
             openSettings={openSettings}
+            openChat={platform.ensureChatWorkspace ? openChat : undefined}
             openHelp={() => platform.openLink("https://opencode.ai/desktop-feedback")}
             language={language}
             onWheel={(event) => {
@@ -818,6 +834,7 @@ export function NewHome() {
           </section>
           <HomeUtilityNav
             class="flex lg:hidden"
+            openChat={platform.ensureChatWorkspace ? openChat : undefined}
             openSettings={openSettings}
             openHelp={() => platform.openLink("https://opencode.ai/desktop-feedback")}
             language={language}
@@ -843,6 +860,7 @@ function HomeProjectColumn(props: {
   clearNotifications: (server: ServerConnection.Any, project: LocalProject) => void
   unseenCount: (server: ServerConnection.Any, project: LocalProject) => number
   openSettings: () => void
+  openChat?: () => void
   openHelp: () => void
   language: ReturnType<typeof useLanguage>
   onWheel: (event: WheelEvent) => void
@@ -947,6 +965,7 @@ function HomeProjectColumn(props: {
       </ScrollView>
       <HomeUtilityNav
         class="mb-8 mt-4 hidden shrink-0 lg:flex"
+        openChat={props.openChat}
         openSettings={props.openSettings}
         openHelp={props.openHelp}
         language={props.language}
@@ -957,12 +976,24 @@ function HomeProjectColumn(props: {
 
 function HomeUtilityNav(props: {
   class?: string
+  openChat?: () => void
   openSettings: () => void
   openHelp: () => void
   language: ReturnType<typeof useLanguage>
 }) {
   return (
     <div class={`${props.class ?? ""} min-w-0 flex-col gap-1 pr-3`}>
+      <Show when={props.openChat}>
+        <button
+          type="button"
+          data-action="home-chat"
+          class={`${HOME_PROJECT_NAV_ROW} text-v2-text-text-faint [&>[data-slot=icon-svg]]:text-v2-icon-icon-muted`}
+          onClick={() => props.openChat?.()}
+        >
+          <IconV2 name="edit" size="small" />
+          <span class={HOME_PROJECT_NAV_LABEL}>{props.language.t("sidebar.chat")}</span>
+        </button>
+      </Show>
       <button
         type="button"
         class={`${HOME_PROJECT_NAV_ROW} text-v2-text-text-faint [&>[data-slot=icon-svg]]:text-v2-icon-icon-muted`}

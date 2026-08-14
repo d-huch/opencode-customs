@@ -81,6 +81,7 @@ export interface Interface {
     modelID: ModelV2.ID
     agent: Agent.Info
     permission?: PermissionV1.Ruleset
+    ids?: readonly string[]
   }) => Effect.Effect<Tool.Def[]>
 }
 
@@ -297,7 +298,13 @@ const layer = Layer.effect(
     })
 
     const tools: Interface["tools"] = Effect.fn("ToolRegistry.tools")(function* (input) {
-      const filtered = (yield* all()).filter((tool) => {
+      const available = input.ids
+        ? (yield* Effect.all([Tool.init(webfetch), Tool.init(websearch)])).filter((tool) =>
+            input.ids?.includes(tool.id),
+          )
+        : yield* all()
+      const filtered = available.filter((tool) => {
+        if (input.ids && !input.ids.includes(tool.id)) return false
         if (tool.id === WebSearchTool.id) {
           return webSearchEnabled(input.providerID, { exa: flags.enableExa, parallel: flags.enableParallel })
         }

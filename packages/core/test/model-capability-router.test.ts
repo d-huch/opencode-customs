@@ -111,6 +111,43 @@ describe("ModelCapabilityRouter", () => {
     expect(plan.selections.find((selection) => selection.role === "coding")?.reason).toContain("preference.explicit")
   })
 
+  test("redirects an undersized preferred utility model to an eligible loaded primary model", () => {
+    const plan = ModelCapabilityRouter.plan({
+      providerID: "lmstudio",
+      pressure: "healthy",
+      complexity: "low",
+      preferredModelID: "utility",
+      minimumPrimarySizeBytes: 12 * gib,
+      primaryLoadedOnly: true,
+      candidates: [
+        candidate("utility", "llm", 2 * gib, { tools: true, reasoning: true }),
+        candidate("primary", "llm", 16 * gib, { tools: true, reasoning: true }),
+      ],
+    })
+
+    expect(plan.selections.find((selection) => selection.role === "utility")?.modelID).toBe("utility")
+    expect(plan.selections.find((selection) => selection.role === "coding")?.modelID).toBe("primary")
+  })
+
+  test("fails closed when no loaded model satisfies the primary policy", () => {
+    const plan = ModelCapabilityRouter.plan({
+      providerID: "lmstudio",
+      pressure: "healthy",
+      complexity: "low",
+      preferredModelID: "utility",
+      minimumPrimarySizeBytes: 12 * gib,
+      primaryLoadedOnly: true,
+      allowUnloaded: true,
+      candidates: [
+        candidate("utility", "llm", 2 * gib, { tools: true, reasoning: true }),
+        { ...candidate("primary", "llm", 16 * gib, { tools: true, reasoning: true }), loaded: false },
+      ],
+    })
+
+    expect(plan.status).toBe("unavailable")
+    expect(plan.selections.some((selection) => selection.role === "coding")).toBe(false)
+  })
+
   test("fails closed when the explicitly selected coding model cannot handle the turn", () => {
     const plan = ModelCapabilityRouter.plan({
       providerID: "lmstudio",

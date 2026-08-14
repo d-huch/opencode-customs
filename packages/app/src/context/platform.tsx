@@ -102,6 +102,9 @@ type PlatformBase = {
   /** Set the default server URL to use on app startup (platform-specific) */
   setDefaultServer?(url: ServerConnection.Key | null): Promise<void> | void
 
+  /** Create and return the dedicated repository-free chat workspace (desktop only) */
+  ensureChatWorkspace?(): Promise<string>
+
   /** Manage WSL sidecar servers (Electron on Windows only) */
   wslServers?: WslServersPlatform
 
@@ -149,16 +152,52 @@ type PlatformBase = {
 
   /** Synthesize speech through a user-managed local OpenAI-compatible TTS endpoint. */
   synthesizeLocalSpeech?(input: {
+    provider?: "local" | "fish-local"
     endpoint: string
     model: string
     voice: string
     mode: "quality" | "fast"
     speed?: number
     text: string
+    latency?: "normal" | "balanced"
+    language?: "auto" | "uk" | "en" | "mixed"
+    temperature?: number
+    topP?: number
+    repetitionPenalty?: number
+    seed?: number | null
+    chunkLength?: number
+    normalize?: boolean
+    streaming?: boolean
+    useMemoryCache?: boolean
+    maxNewTokens?: number
   }): Promise<{
     audio: Blob
     metrics: { cache: string; prepareMs: number; synthesisMs: number; totalMs: number }
   }>
+
+  /** Read the locally persisted Fish Audio voice reference. */
+  getFishAudioLocalReference?(): Promise<
+    { filename: string; contentType: string; transcript: string; bytes: number } | undefined
+  >
+
+  /** Check the user-managed Fish Speech API without sending voice data. */
+  getFishAudioLocalStatus?(endpoint: string): Promise<{
+    status: "ready" | "offline" | "error"
+    endpoint: string
+    latencyMs?: number
+    detail?: string
+  }>
+
+  /** Persist a Fish Audio voice reference on this computer. */
+  setFishAudioLocalReference?(input: {
+    filename: string
+    contentType: string
+    audio: ArrayBuffer
+    transcript: string
+  }): Promise<{ filename: string; contentType: string; transcript: string; bytes: number }>
+
+  /** Delete the locally persisted Fish Audio voice reference. */
+  clearFishAudioLocalReference?(): Promise<void>
 
   /** Cancel an in-flight local TTS request. */
   cancelLocalSpeech?(): Promise<void>
@@ -172,6 +211,20 @@ type PlatformBase = {
   /** Clear one session's voice log, or every voice log when no session is supplied. */
   clearVoiceDiagnostics?(sessionID?: string): Promise<{ files: number; bytes: number }>
   exportVoiceDiagnostics?(sessionID: string): Promise<string>
+
+  /** Persist one microphone utterance as a local WAV file outside the JSONL event log. */
+  storeVoiceTurnAudio?(input: {
+    sessionID: string
+    turnID: string
+    pcm: ArrayBuffer
+    sampleRate: number
+  }): Promise<{ path: string; bytes: number; durationMs: number; sampleRate: number }>
+
+  /** Read the WAV recording associated with one durable voice turn. */
+  getVoiceTurnAudio?(
+    sessionID: string,
+    turnID: string,
+  ): Promise<{ path: string; contentType: string; audio: ArrayBuffer } | undefined>
 
   /** Export collected diagnostic logs (desktop only) */
   exportDebugLogs?(): Promise<string>

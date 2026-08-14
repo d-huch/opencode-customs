@@ -47,6 +47,13 @@ model:
   restoration, pinning, expiration, conflict resolution, usage-history inspection, deletion, and clearing. A
   deterministic preview-before-apply consolidation pass merges duplicates, reviews conflicts, ages stale confidence,
   strengthens independently reconfirmed reusable rules, archives unused records, and never mutates pinned memory.
+- A local agent-personalization profile for text and voice requests. Users can set assistant and user names, preferred
+  form of address, response language, tone, detail, proactivity, humor, and bounded custom instructions. The profile is
+  injected as hidden per-request context, remains out of the visible chat, and cannot override permissions, safety,
+  factual accuracy, or verification requirements.
+- A dedicated ordinary-chat workspace with an independent per-model context limit. LM Studio chat models default to a
+  bounded 32,768-token context (configurable down to 8,192) without reducing the model context used by project and Build
+  sessions.
 - A local full-duplex voice path with incremental tail-only STT, live partial transcripts, streamed bilingual TTS, and
   gapless `AudioWorklet` PCM playback. Exact playback PCM feeds a residual echo canceller after native WebRTC echo
   cancellation, so barge-in does not depend on volume or recognized-text overlap alone. Adaptive buffering absorbs synthesis jitter, durable diagnostics expose time to
@@ -67,8 +74,10 @@ model:
   deduplicated, a newer message cancels stale preparation, optional recall has a deadline, and independent memory recall
   overlaps model readiness. Conversation-only turns skip repository RAG and Git analysis; tool continuations reuse
   checkpointed classification and recall instead of repeating them. Classifier, RAG, memory, and main-model calls retain
-  separate durable budgets, while the interactive model is pinned for the request and never replaced by a hidden
-  fallback.
+  separate durable budgets. Local classification runs only on an explicitly configured, distinct utility model and has
+  a five-second deadline; OpenCode never runs the selected interactive LM Studio model a second time as hidden preflight.
+  Without that utility model, the primary turn selects evidence and tools directly. The interactive model stays pinned
+  for the request and is never replaced by a hidden fallback.
 - A resource-aware Tool Planner that runs independent read and search calls concurrently, serializes mutations behind
   active reads and earlier writes, and records a small dependency graph for every call. Equivalent safe reads are
   deduplicated and cached per session, every mutation invalidates that cache, and accepted evidence stops unnecessary
@@ -81,8 +90,9 @@ model:
   closed at a separate approval boundary, and each assessment is persisted in the execution checkpoint and session log.
 - A capability-based multi-model router that assigns embedding, utility, coding, and vision roles from
   metadata, task shape, context capacity, model size, and live resource pressure without model-name or project-specific
-  keyword tables. A compatible model explicitly selected in the composer remains the primary coding model; larger
-  context windows on utility models do not silently take over an agent turn. Utility models are used only for explicit
+  keyword tables. Interactive requests use a configurable minimum installed-size policy (12 GiB by default), so a
+  compact utility model cannot become the primary assistant merely because it is already loaded or exposes more context.
+  Utility models are used only for explicit
   background work such as history compaction, without unloading the active coding model. Coding and vision handoffs use
   LM Studio's native model-management API with readiness checks, checkpointed failure state, and guarded cleanup of idle
   runtime-managed instances. Interactive execution fails closed if the selected model cannot be activated; it is never
@@ -91,8 +101,10 @@ model:
   every model reported by LM Studio and can exclude individual models from automatic embedding, utility, and vision
   routing without hiding them from explicit model selection or unloading a running instance. Capability probes are
   coalesced into a shared 30-second snapshot, while successful OpenCode-managed load and unload operations invalidate it
-  immediately. A provider-wide switch can disable automatic handoffs entirely: foreground and compaction requests then
-  stay on the model selected in the chat, with no automatic probe, load, unload, or substitution. Dedicated embedding
+  immediately. A provider-wide switch can disable automatic handoffs entirely: foreground requests stay on the model
+  selected in the chat, with no automatic load, unload, or substitution. A read-only probe still enforces the primary
+  size and capability policy, so an undersized or incompatible manual selection fails visibly rather than receiving the
+  interactive turn. Dedicated embedding
   retrieval remains independent.
 - A screenshot vision pipeline that keeps durable history file-based, resizes large images against model and live-memory
   limits, selects only a probed vision-capable model, and records preparation, token, activation, and failure metrics in
@@ -142,10 +154,11 @@ model:
   agent, and starts enabled bundled MCP servers alongside native OpenCode plugins.
 - Custom OpenCode Customs desktop branding and macOS application/Dock icons.
 - A desktop voice agent with push-to-talk dictation and a hands-free Jarvis conversation mode. A persistent local
-  full-duplex stream uses WebRTC echo cancellation, a 1.5-second pre-roll buffer, VAD, and streaming Whisper STT. Live partial
-  transcription is visible in the composer, and two-stage semantic endpointing distinguishes a finished request from a
+  full-duplex stream uses WebRTC echo cancellation, a 1.5-second pre-roll buffer, VAD, and streaming Whisper STT. Tiny-model
+  hypotheses remain hidden previews, and two-stage semantic endpointing distinguishes a finished request from a
   short pause inside an unfinished phrase before submitting it. Endpoint timing follows received audio rather than model
-  processing time, and unchanged endpoint transcripts are reused for final delivery instead of being decoded twice. In-chat voice diagnostics expose microphone activity,
+  processing time. Exactly one final decode from the configured main recognizer may enter chat; low-confidence results are
+  discarded before history or memory admission. In-chat voice diagnostics expose microphone activity,
   VAD state, STT phase, pre-roll, recognition latency, and the endpoint decision. Completed response sentences are spoken
   while the model is still generating. Speaking over the response
   interrupts both playback and the active model turn, then submits the new utterance through the same durable request
@@ -161,6 +174,28 @@ model:
   through the production VAD, semantic endpointing, pre-roll, streaming STT, wake-word, and client echo/barge-in rules.
   It covers self-echo rejection, interruption, preserved speech starts, internal pauses, wake commands, background noise,
   and the complete wake-to-interruption cycle, with durable diagnostics and baseline comparison.
+  A deterministic Voice Session Orchestrator owns every turn from listening through transcription, model work, synthesis,
+  playback, interruption, and idle. Duplex events carry a turn ID and generation, assistant output is correlated to the
+  exact submitted user message, duplicate final transcripts are admitted once, and late callbacks from cancelled or
+  superseded turns are ignored. Turn checkpoints are written to the voice diagnostic log so a renderer restart recovers
+  an unfinished voice interaction to idle instead of replaying stale work. A deterministic Voice Turn Recovery Runner
+  verifies the complete microphone-to-playback lifecycle plus duplicate finals, stale callbacks, previous-turn responses,
+  STT/TTS failures, renderer recovery, duplex reconnects, and spoken interruption. Its JSON and HTML reports preserve the
+  exact transition evidence without sending a synthetic prompt to the active project session.
+  A Voice Soak & Chaos Runner repeats those production state transitions across 500 deterministic turns. It records stale
+  event rejection, duplicate finals, crash recovery, reconnects, interruptions, generation growth, and any state leak in
+  bounded batches, while remaining completely isolated from the model, tools, RAG, memory, and active session.
+  A separate Voice Reliability Runtime runs bounded real PCM cycles through the Docker TTS, production `DuplexSession`,
+  streaming STT, wake-word detection, and echo/barge-in evaluation. It injects deterministic input delay and transport
+  reconnect boundaries, records per-cycle failures, and measures backend RSS, thread, and file-descriptor deltas. A live
+  watchdog also closes stalled transcription, model, synthesis, playback, or interruption phases with a durable reason
+  and returns the composer to idle instead of leaving an endless activity indicator.
+  Before a final transcript reaches chat, a deterministic voice-understanding stage applies user-managed vocabulary,
+  preserves Ukrainian/English mixed technical speech, adds conservative punctuation, classifies intent, and uses recent
+  conversation context to resolve short references. Low-confidence, ambiguous, and destructive requests stay in the
+  composer for review and never enter session history or memory. Explicit corrections such as “I said deploy, not
+  display” update the personal dictionary without invoking the model. A separate personality stage supports normal,
+  work, night, and emergency delivery modes while leaving factual reasoning and complete code work unchanged.
   An optional configurable wake-phrase gate keeps background
   conversation out of the request pipeline, strips the activation phrase from the submitted command, and opens a bounded
   follow-up window for natural conversation. The wake listener can be started automatically only after the user enables
@@ -199,6 +234,12 @@ Ukrainian ONNX voice, the contextual Ukrainian accentor, and explicit main/wake 
 configured names and technical terms can receive explicit pronunciation and stress overrides. If the selected mode is
 unavailable, the voice loop stops with a visible error and does not switch engines or fall back to Apple speech synthesis. See
 [`services/ukrainian-tts/README.md`](services/ukrainian-tts/README.md) for configuration and license details.
+
+As an optional fully local voice, **Settings → General → Voice agent** can use Fish Speech S2 Pro natively on Apple
+Silicon through PyTorch MPS. Install and start it from [`services/fish-speech-macos`](services/fish-speech-macos), keep
+the loopback `/v1/tts` endpoint, select a reference recording such as OGG, and enter the recording's exact transcript.
+OpenCode Customs stores that reference under its local application data and sends it only to the loopback process during
+synthesis. There is no Fish Audio API key, Docker CPU inference, cloud request, reference ID, or cloud/Apple fallback.
 
 ### Upstream OpenCode installation
 

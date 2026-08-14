@@ -1,8 +1,68 @@
 import { describe, expect, test } from "bun:test"
 import type { Prompt } from "@/context/prompt"
+import { stageVoiceRequestContext } from "@/utils/voice-request-context"
 import { buildRequestParts } from "./build-request-parts"
 
 describe("buildRequestParts", () => {
+  test("adds personalization as hidden context exactly once", () => {
+    const result = buildRequestParts({
+      prompt: [{ type: "text", content: "Привіт", start: 0, end: 6 }],
+      context: [],
+      images: [],
+      text: "Привіт",
+      personalizationInstruction: "Reply naturally in Ukrainian.",
+      messageID: "msg_personalized",
+      sessionID: "ses_personalized",
+      sessionDirectory: "/repo",
+    })
+
+    expect(result.requestParts[0]).toMatchObject({ type: "text", text: "Привіт" })
+    expect(
+      result.requestParts.filter(
+        (part) => part.type === "text" && part.metadata?.opencodePersonalization,
+      ),
+    ).toHaveLength(1)
+    expect(result.requestParts[1]).toMatchObject({
+      type: "text",
+      text: "Reply naturally in Ukrainian.",
+      synthetic: true,
+      metadata: { opencodePersonalization: { version: 1 } },
+    })
+  })
+
+  test("adds voice personality context once without changing the visible transcript", () => {
+    stageVoiceRequestContext("відкрий terminal", "Reply briefly in Ukrainian.")
+
+    const first = buildRequestParts({
+      prompt: [{ type: "text", content: "відкрий terminal", start: 0, end: 16 }],
+      context: [],
+      images: [],
+      text: "відкрий terminal",
+      messageID: "msg_voice_1",
+      sessionID: "ses_voice",
+      sessionDirectory: "/repo",
+    })
+    const second = buildRequestParts({
+      prompt: [{ type: "text", content: "відкрий terminal", start: 0, end: 16 }],
+      context: [],
+      images: [],
+      text: "відкрий terminal",
+      messageID: "msg_voice_2",
+      sessionID: "ses_voice",
+      sessionDirectory: "/repo",
+    })
+
+    expect(first.requestParts[0]).toMatchObject({ type: "text", text: "відкрий terminal" })
+    expect(first.requestParts[0]?.type === "text" && first.requestParts[0].synthetic).not.toBe(true)
+    expect(first.requestParts[1]).toMatchObject({
+      type: "text",
+      text: "Reply briefly in Ukrainian.",
+      synthetic: true,
+      metadata: { opencodeVoice: { version: 1 } },
+    })
+    expect(second.requestParts).toHaveLength(1)
+  })
+
   test("builds typed request and optimistic parts without cast path", () => {
     const prompt: Prompt = [
       { type: "text", content: "hello", start: 0, end: 5 },
