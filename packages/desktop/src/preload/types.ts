@@ -67,6 +67,15 @@ export type FishAudioLocalReferenceInput = {
   audio: ArrayBuffer
   transcript: string
 }
+export type FishAudioVoicePreset = FishAudioLocalReference & {
+  id: string
+  name: string
+  createdAt: string
+  active: boolean
+}
+export type FishAudioVoicePresetInput = FishAudioLocalReferenceInput & {
+  name: string
+}
 export type VoiceDiagnosticInput = {
   sessionID: string
   turnID?: string
@@ -162,6 +171,10 @@ export type ElectronAPI = {
   }>
   setFishAudioLocalReference: (input: FishAudioLocalReferenceInput) => Promise<FishAudioLocalReference>
   clearFishAudioLocalReference: () => Promise<void>
+  listFishAudioVoicePresets: () => Promise<FishAudioVoicePreset[]>
+  saveFishAudioVoicePreset: (input: FishAudioVoicePresetInput) => Promise<FishAudioVoicePreset>
+  activateFishAudioVoicePreset: (id: string) => Promise<FishAudioVoicePreset>
+  deleteFishAudioVoicePreset: (id: string) => Promise<void>
   cancelLocalSpeech: () => Promise<void>
   appendVoiceDiagnostic: (input: VoiceDiagnosticInput) => Promise<void>
   getVoiceDiagnostics: (sessionID: string) => Promise<{ path: string; entries: VoiceDiagnosticEntry[] }>

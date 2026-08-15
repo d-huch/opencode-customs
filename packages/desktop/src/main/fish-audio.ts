@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto"
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { app } from "electron"
@@ -9,6 +10,8 @@ const requestTimeout = 90_000
 const referenceDirectory = () => join(app.getPath("userData"), "fish-audio-local")
 const referenceAudioPath = () => join(referenceDirectory(), "reference.audio")
 const referenceMetadataPath = () => join(referenceDirectory(), "reference.json")
+const presetDirectory = () => join(referenceDirectory(), "presets")
+const presetIndexPath = () => join(referenceDirectory(), "presets.json")
 
 export type FishAudioLocalReference = {
   filename: string
@@ -22,6 +25,22 @@ export type FishAudioLocalReferenceInput = {
   contentType: string
   audio: ArrayBuffer
   transcript: string
+}
+
+export type FishAudioVoicePreset = FishAudioLocalReference & {
+  id: string
+  name: string
+  createdAt: string
+  active: boolean
+}
+
+export type FishAudioVoicePresetInput = FishAudioLocalReferenceInput & {
+  name: string
+}
+
+type FishAudioVoicePresetIndex = {
+  activeID?: string
+  presets: Array<Omit<FishAudioVoicePreset, "active">>
 }
 
 export type FishAudioLocalSpeechInput = {
@@ -54,24 +73,10 @@ export async function getFishAudioLocalReference() {
 }
 
 export async function setFishAudioLocalReference(input: FishAudioLocalReferenceInput) {
-  if (!input.audio.byteLength) throw new Error("Choose a non-empty Fish Audio reference recording.")
-  if (input.audio.byteLength > maximumAudioBytes) throw new Error("Voice reference audio must be 25 MB or smaller.")
-  if (!input.transcript.trim()) throw new Error("Enter the exact transcript of the Fish Audio reference recording.")
-  const letters = input.transcript.match(/\p{L}/gu) ?? []
-  if (letters.length < 4 || new Set(letters.map((letter) => letter.toLocaleLowerCase())).size < 2) {
-    throw new Error("Enter a meaningful exact transcript of the reference recording, not placeholder letters.")
-  }
-  await mkdir(referenceDirectory(), { recursive: true })
-  const metadata = {
-    filename: input.filename.slice(0, 255),
-    contentType: input.contentType || "application/octet-stream",
-    transcript: input.transcript.trim().slice(0, 10_000),
-    bytes: input.audio.byteLength,
-  }
-  await writeFile(`${referenceAudioPath()}.tmp`, new Uint8Array(input.audio))
-  await writeFile(`${referenceMetadataPath()}.tmp`, JSON.stringify(metadata))
-  await rename(`${referenceAudioPath()}.tmp`, referenceAudioPath())
-  await rename(`${referenceMetadataPath()}.tmp`, referenceMetadataPath())
+  const metadata = validateReference(input)
+  await writeActiveReference(metadata, new Uint8Array(input.audio))
+  const index = await readPresetIndex()
+  await writePresetIndex({ ...index, activeID: undefined })
   writeLog("voice", "Fish Audio local reference saved", {
     filename: metadata.filename,
     contentType: metadata.contentType,
@@ -85,6 +90,59 @@ export async function clearFishAudioLocalReference() {
     unlink(referenceAudioPath()).catch(() => undefined),
     unlink(referenceMetadataPath()).catch(() => undefined),
   ])
+  const index = await readPresetIndex()
+  await writePresetIndex({ ...index, activeID: undefined })
+}
+
+export async function listFishAudioVoicePresets(): Promise<FishAudioVoicePreset[]> {
+  const index = await readPresetIndex()
+  return index.presets.map((preset) => ({ ...preset, active: preset.id === index.activeID }))
+}
+
+export async function saveFishAudioVoicePreset(input: FishAudioVoicePresetInput) {
+  const name = input.name.trim().slice(0, 120)
+  if (!name) throw new Error("Enter a name for the voice preset.")
+  const metadata = validateReference(input)
+  const id = randomUUID()
+  const preset = { id, name, createdAt: new Date().toISOString(), ...metadata }
+  await mkdir(presetDirectory(), { recursive: true })
+  await writeFile(`${join(presetDirectory(), `${id}.audio`)}.tmp`, new Uint8Array(input.audio))
+  await rename(`${join(presetDirectory(), `${id}.audio`)}.tmp`, join(presetDirectory(), `${id}.audio`))
+  const index = await readPresetIndex()
+  await writePresetIndex({ activeID: id, presets: [...index.presets, preset] })
+  await writeActiveReference(metadata, new Uint8Array(input.audio))
+  writeLog("voice", "Fish Audio voice preset saved", { id, name, filename: metadata.filename })
+  return { ...preset, active: true }
+}
+
+export async function activateFishAudioVoicePreset(id: string) {
+  const index = await readPresetIndex()
+  const preset = index.presets.find((item) => item.id === id)
+  if (!preset) throw new Error("Voice preset was not found.")
+  const audio = await readFile(join(presetDirectory(), `${preset.id}.audio`)).catch(() => undefined)
+  if (!audio?.byteLength) throw new Error("Voice preset audio is missing. Save the preset again.")
+  await writeActiveReference(preset, audio)
+  await writePresetIndex({ ...index, activeID: preset.id })
+  writeLog("voice", "Fish Audio voice preset activated", { id: preset.id, name: preset.name })
+  return { ...preset, active: true }
+}
+
+export async function deleteFishAudioVoicePreset(id: string) {
+  const index = await readPresetIndex()
+  const preset = index.presets.find((item) => item.id === id)
+  if (!preset) return
+  await unlink(join(presetDirectory(), `${preset.id}.audio`)).catch(() => undefined)
+  await writePresetIndex({
+    activeID: index.activeID === id ? undefined : index.activeID,
+    presets: index.presets.filter((item) => item.id !== id),
+  })
+  if (index.activeID === id) {
+    await Promise.all([
+      unlink(referenceAudioPath()).catch(() => undefined),
+      unlink(referenceMetadataPath()).catch(() => undefined),
+    ])
+  }
+  writeLog("voice", "Fish Audio voice preset deleted", { id, name: preset.name })
 }
 
 export async function getFishAudioLocalStatus(value: string): Promise<FishAudioLocalStatus> {
@@ -209,4 +267,41 @@ function requireLocalEndpoint(value: string) {
 function clamp(value: number | undefined, minimum: number, maximum: number, fallback: number) {
   if (value === undefined || !Number.isFinite(value)) return fallback
   return Math.min(maximum, Math.max(minimum, value))
+}
+
+function validateReference(input: FishAudioLocalReferenceInput): FishAudioLocalReference {
+  if (!input.audio.byteLength) throw new Error("Choose a non-empty Fish Audio reference recording.")
+  if (input.audio.byteLength > maximumAudioBytes) throw new Error("Voice reference audio must be 25 MB or smaller.")
+  if (!input.transcript.trim()) throw new Error("Enter the exact transcript of the Fish Audio reference recording.")
+  const letters = input.transcript.match(/\p{L}/gu) ?? []
+  if (letters.length < 4 || new Set(letters.map((letter) => letter.toLocaleLowerCase())).size < 2) {
+    throw new Error("Enter a meaningful exact transcript of the reference recording, not placeholder letters.")
+  }
+  return {
+    filename: input.filename.slice(0, 255),
+    contentType: input.contentType || "application/octet-stream",
+    transcript: input.transcript.trim().slice(0, 10_000),
+    bytes: input.audio.byteLength,
+  }
+}
+
+async function writeActiveReference(metadata: FishAudioLocalReference, audio: Uint8Array) {
+  await mkdir(referenceDirectory(), { recursive: true })
+  await writeFile(`${referenceAudioPath()}.tmp`, audio)
+  await writeFile(`${referenceMetadataPath()}.tmp`, JSON.stringify(metadata))
+  await rename(`${referenceAudioPath()}.tmp`, referenceAudioPath())
+  await rename(`${referenceMetadataPath()}.tmp`, referenceMetadataPath())
+}
+
+async function readPresetIndex(): Promise<FishAudioVoicePresetIndex> {
+  return readFile(presetIndexPath(), "utf8")
+    .then((value) => JSON.parse(value) as FishAudioVoicePresetIndex)
+    .then((value) => ({ activeID: value.activeID, presets: Array.isArray(value.presets) ? value.presets : [] }))
+    .catch(() => ({ presets: [] }))
+}
+
+async function writePresetIndex(index: FishAudioVoicePresetIndex) {
+  await mkdir(referenceDirectory(), { recursive: true })
+  await writeFile(`${presetIndexPath()}.tmp`, JSON.stringify(index))
+  await rename(`${presetIndexPath()}.tmp`, presetIndexPath())
 }

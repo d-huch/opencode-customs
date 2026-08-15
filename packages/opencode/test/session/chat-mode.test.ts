@@ -20,19 +20,22 @@ describe("session chat mode", () => {
         models: { alias: { id: "gemma", chat_context: 16_384 } },
       }),
     ).toBe(16_384)
+    expect(
+      SessionChatMode.contextLimit({
+        model,
+        models: { alias: { id: "gemma", chat_context: 8_192 } },
+      }),
+    ).toBe(16_384)
+    expect(
+      SessionChatMode.contextLimit({
+        model,
+        models: { alias: { id: "gemma", chat_context: 65_536 } },
+      }),
+    ).toBe(32_768)
   })
 
-  test("keeps only general-purpose web tools after explicit opt-in", () => {
-    expect(SessionChatMode.tools({ read: 1, grep: 2, websearch: 3, webfetch: 4, bash: 5 }, true)).toEqual({
-      websearch: 3,
-      webfetch: 4,
-    })
-  })
-
-  test("requires an explicit web marker or URL", () => {
-    expect(SessionChatMode.webEnabled("Хто зараз президент?")).toBe(false)
-    expect(SessionChatMode.webEnabled("/web хто зараз президент?")).toBe(true)
-    expect(SessionChatMode.webEnabled("Перевір https://example.com")).toBe(true)
+  test("never exposes tool schemas in chat mode", () => {
+    expect(SessionChatMode.tools({ read: 1, grep: 2, websearch: 3, webfetch: 4, bash: 5 })).toEqual({})
   })
 
   test("sends only the latest user message for a stateful continuation", () => {

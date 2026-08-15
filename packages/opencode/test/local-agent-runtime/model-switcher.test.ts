@@ -26,7 +26,8 @@ describe("LM Studio model switcher", () => {
       request: bridge([native("selected", "selected-instance", { tools: true })], requests),
     })
 
-    expect(result.model).toBe(selected)
+    expect(result.model.api.id).toBe("selected-instance")
+    expect(result.model.limit.context).toBe(32_768)
     expect(result.plan.activation).toMatchObject({
       status: "ready",
       activeModelID: "selected",
@@ -39,6 +40,35 @@ describe("LM Studio model switcher", () => {
   })
 
   test("caps a manually selected model to the independent chat context", async () => {
+    const requests: string[] = []
+    const cacheInitialization: Array<{
+      type: "started" | "finished"
+      startedAt: number
+      completedAt?: number
+      status?: "completed" | "failed"
+    }> = []
+    let instanceID = "selected-instance"
+    let context = 91_648
+    const request: LmStudioRequest = async (input, init) => {
+      const url = new URL(String(input))
+      requests.push(`${init?.method ?? "GET"} ${url.pathname}`)
+      if (url.pathname === "/v1/models") return Response.json({ data: instanceID ? [{ id: instanceID }] : [] })
+      if (url.pathname === "/api/v1/models")
+        return Response.json({
+          models: [native("selected", instanceID || undefined, {}, context, 20 * 1024 ** 3)],
+        })
+      if (url.pathname === "/api/v1/models/unload") {
+        instanceID = ""
+        return Response.json({})
+      }
+      if (url.pathname === "/api/v1/models/load") {
+        const body = JSON.parse(String(init?.body)) as { model: string; context_length: number }
+        context = body.context_length
+        instanceID = "selected-chat-instance"
+        return Response.json({ instance_id: instanceID, load_config: { context_length: context } })
+      }
+      return Response.json({})
+    }
     const result = await ModelSwitcher.activate({
       config: {
         provider: {
@@ -55,10 +85,27 @@ describe("LM Studio model switcher", () => {
       contextLimit: 32_768,
       requestShape: { textCharacters: 30, files: 0, images: 0, tools: 0 },
       resources: healthyResources(),
-      request: bridge([native("selected", "selected-instance", {}, 91_648, 20 * 1024 ** 3)], []),
+      request,
+      onCacheInitialization: async (event) => {
+        cacheInitialization.push(event)
+      },
     })
 
     expect(result.model.limit.context).toBe(32_768)
+    expect(result.model.api.id).toBe("selected-chat-instance")
+    expect(result.plan.activation).toMatchObject({ status: "switched", failover: false })
+    expect(result.telemetry).toMatchObject({ cacheInitializationStatus: "completed" })
+    expect(cacheInitialization).toEqual([
+      { type: "started", startedAt: expect.any(Number) },
+      {
+        type: "finished",
+        startedAt: cacheInitialization[0]!.startedAt,
+        completedAt: expect.any(Number),
+        status: "completed",
+      },
+    ])
+    expect(requests).toContain("POST /api/v1/models/unload")
+    expect(requests).toContain("POST /api/v1/models/load")
   })
 
   test("reapplies a chat context cap to a model restored from a durable checkpoint", () => {

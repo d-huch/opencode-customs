@@ -18,7 +18,8 @@ export type LatencyPhase =
   | "memory"
   | "capability_probe"
   | "model_activation"
-  | "cache_restore"
+  | "cache_initialization"
+  | "provider_wait"
   | "context_compilation"
   | "prompt_processing"
   | "generation"
@@ -413,6 +414,8 @@ function summarizeLatency(
   const capabilityCompletedAt = number(telemetry?.capabilityProbeCompletedAt)
   const activationStartedAt = number(telemetry?.activationStartedAt)
   const activationCompletedAt = number(telemetry?.activationCompletedAt)
+  const cacheInitializationStartedAt = number(telemetry?.cacheInitializationStartedAt)
+  const cacheInitializationCompletedAt = number(telemetry?.cacheInitializationCompletedAt)
   const readiness = exactPipeline.find((item) => item.phase === "model_activation")
   const modelPhases = telemetry
     ? [
@@ -435,6 +438,21 @@ function summarizeLatency(
           cache: telemetry.activationStatus === "ready" ? "hit" : "miss",
           detail: typeof telemetry.activationStatus === "string" ? telemetry.activationStatus : readiness?.detail,
         }),
+        ...(cacheInitializationStartedAt === undefined
+          ? []
+          : [
+              metric({
+                phase: "cache_initialization",
+                startedAt: cacheInitializationStartedAt,
+                completedAt: cacheInitializationCompletedAt,
+                durationMs: number(telemetry.cacheInitializationMs),
+                cache: "miss",
+                detail:
+                  telemetry.cacheInitializationStatus === "failed"
+                    ? "LM Studio model context reload failed"
+                    : "LM Studio model context initialized",
+              }),
+            ]),
       ]
     : readiness
       ? [readiness]
@@ -564,10 +582,10 @@ function prefixHash(records: readonly Record<string, unknown>[]) {
 function modelIntervals(records: readonly Record<string, unknown>[]) {
   const starts = records.filter((record) => record.type === "execution.started")
   const firstOutputs = records.filter((record) => record.type === "model.first_output")
-  const cacheStarts = records.filter((record) => record.type === "model.cache_restore.started")
-  const cacheFinishes = records.filter((record) => record.type === "model.cache_restore.finished")
+  const waitStarts = records.filter((record) => record.type === "model.provider_wait.started")
+  const waitFinishes = records.filter((record) => record.type === "model.provider_wait.finished")
   const finishes = records.filter((record) => record.type === "execution.finished" || record.type === "execution.error")
-  const restores: ReturnType<typeof metric>[] = []
+  const waits: ReturnType<typeof metric>[] = []
   const prompt: ReturnType<typeof metric>[] = []
   const generation: ReturnType<typeof metric>[] = []
   for (const start of starts) {
@@ -581,37 +599,37 @@ function modelIntervals(records: readonly Record<string, unknown>[]) {
     const finish = finishes.find((record) => timestamp(record)! >= startedAt && matches(record))
     const firstAt = timestamp(first)
     const completedAt = timestamp(finish)
-    const cacheStart = cacheStarts.find((record) => timestamp(record)! >= startedAt && matches(record))
-    const cacheStartData = object(cacheStart?.data)
-    const cacheStartedAt = number(cacheStartData?.startedAt) ?? (cacheStart ? startedAt : undefined)
-    const cacheFinish = cacheFinishes.find(
+    const waitStart = waitStarts.find((record) => timestamp(record)! >= startedAt && matches(record))
+    const waitStartData = object(waitStart?.data)
+    const waitStartedAt = number(waitStartData?.startedAt) ?? (waitStart ? startedAt : undefined)
+    const waitFinish = waitFinishes.find(
       (record) =>
-        cacheStartedAt !== undefined &&
-        timestamp(record)! >= (timestamp(cacheStart) ?? cacheStartedAt) &&
+        waitStartedAt !== undefined &&
+        timestamp(record)! >= (timestamp(waitStart) ?? waitStartedAt) &&
         matches(record),
     )
-    const cacheFinishData = object(cacheFinish?.data)
-    const cacheDurationMs = number(cacheFinishData?.durationMs)
-    const cacheCompletedAt =
-      cacheStartedAt === undefined
+    const waitFinishData = object(waitFinish?.data)
+    const waitDurationMs = number(waitFinishData?.durationMs)
+    const waitCompletedAt =
+      waitStartedAt === undefined
         ? undefined
-        : cacheDurationMs !== undefined
-          ? cacheStartedAt + cacheDurationMs
-          : (timestamp(cacheFinish) ?? firstAt ?? completedAt)
-    if (cacheStartedAt !== undefined)
-      restores.push(
+        : waitDurationMs !== undefined
+          ? waitStartedAt + waitDurationMs
+          : (timestamp(waitFinish) ?? firstAt ?? completedAt)
+    if (waitStartedAt !== undefined)
+      waits.push(
         metric({
-          phase: "cache_restore",
-          startedAt: cacheStartedAt,
-          completedAt: cacheCompletedAt,
+          phase: "provider_wait",
+          startedAt: waitStartedAt,
+          completedAt: waitCompletedAt,
           cache: "unknown",
-          detail: "Inferred while waiting for the first LM Studio output",
+          detail: "Waiting for the first LM Studio provider output",
         }),
       )
     prompt.push(
       metric({
         phase: "prompt_processing",
-        startedAt: cacheCompletedAt ?? startedAt,
+        startedAt: waitCompletedAt ?? startedAt,
         completedAt: firstAt ?? completedAt,
         cache: "unknown",
         detail: firstAt === undefined ? "No model output observed" : "Time to first model output",
@@ -629,7 +647,7 @@ function modelIntervals(records: readonly Record<string, unknown>[]) {
       )
   }
   return [
-    aggregate("cache_restore", restores),
+    aggregate("provider_wait", waits),
     aggregate("prompt_processing", prompt),
     aggregate("generation", generation),
   ].filter((item): item is NonNullable<typeof item> => item !== undefined)
@@ -920,10 +938,10 @@ function detail(type: string, value: unknown) {
   const values =
     type === "prompt.received"
       ? [data.text]
-      : type === "model.cache_restore.started"
-        ? [data.inferred === true ? "inferred" : undefined, data.thresholdMs]
-        : type === "model.cache_restore.finished"
-          ? [data.durationMs, data.outcome]
+      : type === "model.provider_wait.started"
+        ? [data.stage, data.thresholdMs]
+        : type === "model.provider_wait.finished"
+          ? [data.stage, data.durationMs, data.outcome]
           : type === "model.cache"
             ? [data.read, data.write, data.reusePercent]
             : type === "freshness.routed"

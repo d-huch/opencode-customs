@@ -4,13 +4,14 @@ import { TabsV2 } from "@opencode-ai/ui/v2/tabs-v2"
 import { Icon } from "@opencode-ai/ui/icon"
 import { useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
-import { SettingsGeneralV2 } from "./general"
+import { SettingsGeneralV2, SettingsVoiceV2 } from "./general"
 import { SettingsKeybinds } from "../settings-keybinds"
 import { SettingsProvidersV2 } from "./providers"
 import { SettingsModelsV2 } from "./models"
 import "./settings-v2.css"
 import { SettingsServersV2 } from "./servers"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
+import { SettingsPersonalizationV2 } from "./personalization"
 
 export const DialogSettings: Component<{
   sessionID?: string
@@ -44,6 +45,14 @@ export const DialogSettings: Component<{
                     <TabsV2.Trigger value="general">
                       <Icon name="sliders" />
                       {language.t("settings.tab.general")}
+                    </TabsV2.Trigger>
+                    <TabsV2.Trigger value="personalization" data-action="settings-personalization-tab">
+                      <Icon name="brain" />
+                      {language.t("settings.tab.personalization")}
+                    </TabsV2.Trigger>
+                    <TabsV2.Trigger value="voice">
+                      <Icon name="speaker" />
+                      {language.t("settings.tab.voice")}
                     </TabsV2.Trigger>
                     <TabsV2.Trigger value="shortcuts">
                       <Icon name="keyboard" />
@@ -79,6 +88,12 @@ export const DialogSettings: Component<{
         </TabsV2.List>
         <TabsV2.Content value="general" class="settings-v2-panel">
           <SettingsGeneralV2 sessionID={props.sessionID} />
+        </TabsV2.Content>
+        <TabsV2.Content value="personalization" class="settings-v2-panel">
+          <SettingsPersonalizationV2 />
+        </TabsV2.Content>
+        <TabsV2.Content value="voice" class="settings-v2-panel">
+          <SettingsVoiceV2 sessionID={props.sessionID} />
         </TabsV2.Content>
         <TabsV2.Content value="shortcuts" class="settings-v2-panel">
           <SettingsKeybinds v2 />

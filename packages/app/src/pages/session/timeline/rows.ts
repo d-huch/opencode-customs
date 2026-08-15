@@ -124,7 +124,7 @@ export namespace Timeline {
       assistantGroupIndex += 1
     })
 
-    if (isActive && ["busy", "cache_restore", "verifying", "repairing", "verified"].includes(status.type) && !error) {
+    if (isActive && ["busy", "provider_wait", "verifying", "repairing", "verified"].includes(status.type) && !error) {
       const heading = assistantMessages
         .flatMap((message) => getMessageParts(message.id))
         .map((part) => (part.type === "reasoning" && part.text ? reasoningHeading(part.text) : undefined))

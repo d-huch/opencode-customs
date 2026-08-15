@@ -693,8 +693,9 @@ export type SessionStatus =
       type: "busy"
     }
   | {
-      type: "cache_restore"
+      type: "provider_wait"
       startedAt: number
+      stage: "cache_initialization" | "provider_processing"
     }
   | {
       type: "verifying"
@@ -10467,7 +10468,8 @@ export type SessionInspectResponses = {
           | "memory"
           | "capability_probe"
           | "model_activation"
-          | "cache_restore"
+          | "cache_initialization"
+          | "provider_wait"
           | "context_compilation"
           | "prompt_processing"
           | "generation"
@@ -10494,7 +10496,8 @@ export type SessionInspectResponses = {
           | "memory"
           | "capability_probe"
           | "model_activation"
-          | "cache_restore"
+          | "cache_initialization"
+          | "provider_wait"
           | "context_compilation"
           | "prompt_processing"
           | "generation"
@@ -10512,7 +10515,8 @@ export type SessionInspectResponses = {
           | "memory"
           | "capability_probe"
           | "model_activation"
-          | "cache_restore"
+          | "cache_initialization"
+          | "provider_wait"
           | "context_compilation"
           | "prompt_processing"
           | "generation"

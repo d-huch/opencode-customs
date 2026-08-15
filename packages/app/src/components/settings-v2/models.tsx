@@ -115,11 +115,9 @@ export const SettingsModelsV2: Component = () => {
                         return (
                           <SettingsRowV2
                             title={item.name}
-                            description={language.t("settings.models.context.current", {
-                              limit: item.limit.context.toLocaleString(language.intl()),
-                            })}
+                            description=""
                           >
-                            <div class="flex flex-wrap items-center justify-end gap-3">
+                            <div class="settings-v2-model-controls">
                               <SettingsModelContextLimit
                                 providerID={item.provider.id}
                                 modelID={item.id}

@@ -139,16 +139,21 @@ function TimelineThinkingRow(props: {
   const language = useLanguage()
   const [now, setNow] = createSignal(Date.now())
   createEffect(() => {
-    if (props.status.type !== "cache_restore") return
+    if (props.status.type !== "provider_wait") return
     setNow(Date.now())
     const timer = window.setInterval(() => setNow(Date.now()), 1_000)
     onCleanup(() => window.clearInterval(timer))
   })
   const label = () => {
-    if (props.status.type === "cache_restore")
-      return language.t("ui.sessionTurn.status.cacheRestore", {
+    if (props.status.type === "provider_wait")
+      return language.t(
+        props.status.stage === "cache_initialization"
+          ? "ui.sessionTurn.status.cacheInitialization"
+          : "ui.sessionTurn.status.providerWait",
+        {
         seconds: Math.max(0, Math.floor((now() - props.status.startedAt) / 1_000)),
-      })
+        },
+      )
     if (props.status.type === "verifying") return language.t("ui.sessionTurn.status.verifying")
     if (props.status.type === "repairing") return language.t("ui.sessionTurn.status.repairing")
     if (props.status.type === "verified") return language.t("ui.sessionTurn.status.verified")

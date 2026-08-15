@@ -1,14 +1,13 @@
 import path from "path"
 import type { ModelMessage } from "ai"
-import { ModelV2 } from "@opencode-ai/core/model"
 import { isRecord } from "@/util/record"
 import PROMPT_CHAT from "@/agent/prompt/chat.txt"
 import { providerContextBudget } from "@/local-agent-runtime/resource-governor"
 
 export namespace SessionChatMode {
   export const DIRECTORY = "OpenCode Customs Chat"
+  export const MIN_CONTEXT_LIMIT = 16_384
   export const DEFAULT_CONTEXT_LIMIT = 32_768
-  export const toolIDs = ["websearch", "webfetch"] as const
 
   export const systemPrompt = PROMPT_CHAT
 
@@ -27,20 +26,13 @@ export namespace SessionChatMode {
         model.id === input.model.id ||
         model.id === input.model.api.id,
     )?.[1].chat_context
-    const maximum = Math.max(1, Math.floor(input.model.limit.context))
-    const minimum = Math.min(ModelV2.MIN_CONTEXT_LIMIT, maximum)
+    const maximum = Math.max(1, Math.min(DEFAULT_CONTEXT_LIMIT, Math.floor(input.model.limit.context)))
+    const minimum = Math.min(MIN_CONTEXT_LIMIT, maximum)
     return Math.min(maximum, Math.max(minimum, Math.floor(configured ?? DEFAULT_CONTEXT_LIMIT)))
   }
 
-  export function webEnabled(text: string) {
-    return /^\/(?:web|search)(?:\s|$)/i.test(text.trim()) || /(?:^|\s)https?:\/\//i.test(text)
-  }
-
-  export function tools<T>(available: Record<string, T>, enabled = false) {
-    if (!enabled) return {}
-    return Object.fromEntries(
-      Object.entries(available).filter(([name]) => toolIDs.includes(name as (typeof toolIDs)[number])),
-    )
+  export function tools<T>(_available: Record<string, T>) {
+    return {} as Record<string, T>
   }
 
   export function messages(messages: ModelMessage[], continued: boolean, summary?: string) {

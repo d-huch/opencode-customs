@@ -29,6 +29,10 @@ export type Result = {
     readonly activationCompletedAt: number
     readonly modelActivationMs: number
     readonly probeCache: "hit" | "miss" | "bypass"
+    readonly cacheInitializationStartedAt?: number
+    readonly cacheInitializationCompletedAt?: number
+    readonly cacheInitializationMs?: number
+    readonly cacheInitializationStatus?: "completed" | "failed"
   }
 }
 
@@ -42,10 +46,16 @@ export async function activate(input: {
   readonly resources?: ReturnType<typeof snapshot>
   readonly vision?: ModelCapabilityRouter.Vision
   readonly contextLimit?: number
+  readonly onCacheInitialization?: (event: {
+    readonly type: "started" | "finished"
+    readonly startedAt: number
+    readonly completedAt?: number
+    readonly status?: "completed" | "failed"
+  }) => Promise<void>
 }): Promise<Result> {
-  if (!CapabilityRouter.automaticRoutingEnabled(input.config)) return manual(input)
   const baseURL = input.config.provider?.lmstudio?.options?.baseURL
   if (typeof baseURL !== "string" || !URL.canParse(baseURL)) {
+    if (!CapabilityRouter.automaticRoutingEnabled(input.config)) return manual(input)
     const plan = await CapabilityRouter.route({
       config: input.config,
       preferredModelID: input.preferredModel.id,
@@ -68,7 +78,13 @@ export async function activate(input: {
 
   const key = baseURL.replace(/\/$/, "")
   const previous = serial.get(key) ?? Promise.resolve()
-  const execution = previous.catch(() => undefined).then(() => activateNow({ ...input, baseURL: key }))
+  const execution = previous
+    .catch(() => undefined)
+    .then(() =>
+      CapabilityRouter.automaticRoutingEnabled(input.config)
+        ? activateNow({ ...input, baseURL: key })
+        : manual({ ...input, baseURL: key }),
+    )
   const guarded = execution.finally(() => {
     if (serial.get(key) === guarded) serial.delete(key)
   })
@@ -76,14 +92,21 @@ export async function activate(input: {
   return guarded.then((result) => withVision(input.config, result, input.vision))
 }
 
-async function manual(input: Parameters<typeof activate>[0]): Promise<Result> {
+async function manual(input: Parameters<typeof activate>[0] & { readonly baseURL?: string }): Promise<Result> {
   const role = input.role ?? (input.requestShape.images > 0 ? "vision" : "coding")
   const baseURL = input.config.provider?.lmstudio?.options?.baseURL
+  const capabilityProbeStartedAt = Date.now()
+  let probeCache = "miss" as "hit" | "miss" | "bypass"
   const probe = await probeLmStudio({
     baseURL,
     apiKey: input.config.provider?.lmstudio?.options?.apiKey,
     request: input.request,
+    onCache: (status) => {
+      probeCache = status
+    },
   })
+  const capabilityProbeCompletedAt = Date.now()
+  const activationStartedAt = capabilityProbeCompletedAt
   const selected =
     findLmStudioModel(probe, input.preferredModel.api.id) ?? findLmStudioModel(probe, input.preferredModel.id)
   const requiresPrimary = role !== "utility"
@@ -120,10 +143,40 @@ async function manual(input: Parameters<typeof activate>[0]): Promise<Result> {
     },
     reason: ["preference.explicit", "routing.disabled"],
   } satisfies ModelCapabilityRouter.Selection
+  const loadedInstanceID = selected?.instances[0]
+  const reconciled =
+    compatible && loadedInstanceID && input.baseURL
+      ? await reconcileContext({
+          config: input.config,
+          baseURL: input.baseURL,
+          apiKey: input.config.provider?.lmstudio?.options?.apiKey,
+          modelID: selected.id,
+          instanceID: loadedInstanceID,
+          activeContext: selected.context.active,
+          requestedContext: input.contextLimit,
+          outputTokens: input.preferredModel.limit.output,
+          request: input.request,
+          signal: input.signal,
+          preserveContext: contextLocked(
+            input.config,
+            selected.id,
+            input.preferredModel.id,
+            input.preferredModel.api.id,
+          ),
+          onCacheInitialization: input.onCacheInitialization,
+        })
+      : undefined
+  const ready = compatible && reconciled?.status !== "failed"
+  const activeInstanceID = reconciled?.instanceID ?? loadedInstanceID ?? selection.instanceID
+  const context = reconciled?.context ?? selected?.context.active
+  const contextLimit = reconciled?.preserved ? undefined : input.contextLimit
+  const activationCompletedAt = Date.now()
   return {
-    model: withContextLimit(input.preferredModel, input.contextLimit),
+    model: ready
+      ? routed(input.preferredModel, selection, activeInstanceID, context, contextLimit)
+      : input.preferredModel,
     plan: CapabilityRouter.record(input.config, {
-      status: compatible ? "ready" : "unavailable",
+      status: ready ? "ready" : "unavailable",
       checkedAt: Date.now(),
       providerID: String(input.preferredModel.providerID),
       complexity: ModelCapabilityRouter.complexity(input.requestShape),
@@ -132,19 +185,36 @@ async function manual(input: Parameters<typeof activate>[0]): Promise<Result> {
       selections: [selection],
       reason: ["routing.disabled", ...reasons],
       activation: {
-        status: compatible ? "ready" : "failed",
+        status: ready ? (reconciled?.reloaded ? "switched" : "ready") : reconciled?.rolledBack ? "rolled_back" : "failed",
         checkedAt: Date.now(),
         role,
         requestedModelID: String(input.preferredModel.id),
         activeModelID: String(input.preferredModel.id),
-        ...(compatible ? { activeInstanceID: selection.instanceID } : {}),
-        attempts: 0,
+        ...(ready || reconciled?.rolledBack ? { activeInstanceID } : {}),
+        attempts: reconciled?.reloaded || reconciled?.status === "failed" ? 1 : 0,
         failover: false,
-        rollback: false,
-        reason: ["routing.disabled", ...reasons],
+        rollback: reconciled?.rolledBack ?? false,
+        reason: ["routing.disabled", ...reasons, ...(reconciled?.reason ?? [])],
       },
       ...(input.vision ? { vision: input.vision } : {}),
     }),
+    telemetry: {
+      capabilityProbeStartedAt,
+      capabilityProbeCompletedAt,
+      capabilityProbeMs: Math.max(0, capabilityProbeCompletedAt - capabilityProbeStartedAt),
+      activationStartedAt,
+      activationCompletedAt,
+      modelActivationMs: Math.max(0, activationCompletedAt - activationStartedAt),
+      probeCache,
+      ...(reconciled?.timing
+        ? {
+            cacheInitializationStartedAt: reconciled.timing.startedAt,
+            cacheInitializationCompletedAt: reconciled.timing.completedAt,
+            cacheInitializationMs: Math.max(0, reconciled.timing.completedAt - reconciled.timing.startedAt),
+            cacheInitializationStatus: reconciled.timing.status,
+          }
+        : {}),
+    },
   }
 }
 
@@ -220,7 +290,14 @@ async function activateNow(
   })
   const capabilityProbeCompletedAt = Date.now()
   const activationStartedAt = capabilityProbeCompletedAt
-  const complete = (result: Result): Result => {
+  const complete = (
+    result: Result,
+    timing?: {
+      readonly startedAt: number
+      readonly completedAt: number
+      readonly status: "completed" | "failed"
+    },
+  ): Result => {
     const activationCompletedAt = Date.now()
     return {
       ...result,
@@ -232,6 +309,14 @@ async function activateNow(
         activationCompletedAt,
         modelActivationMs: Math.max(0, activationCompletedAt - activationStartedAt),
         probeCache,
+        ...(timing
+          ? {
+              cacheInitializationStartedAt: timing.startedAt,
+              cacheInitializationCompletedAt: timing.completedAt,
+              cacheInitializationMs: Math.max(0, timing.completedAt - timing.startedAt),
+              cacheInitializationStatus: timing.status,
+            }
+          : {}),
       },
     }
   }
@@ -291,32 +376,68 @@ async function activateNow(
     previous?.instances.find((instance) => instance === input.preferredModel.api.id) ??
     previous?.instances[0]
   const reasons: string[] = []
+  let cacheInitializationTiming:
+    | { readonly startedAt: number; readonly completedAt: number; readonly status: "completed" | "failed" }
+    | undefined
 
   for (const selection of selections) {
     if (input.signal?.aborted) throw input.signal.reason
     const before = findLmStudioModel(probe, selection.modelID)
     const loadedInstanceID = selection.instanceID ?? before?.instances[0]
     if (loadedInstanceID) {
+      const reconciled = await reconcileContext({
+        config: input.config,
+        baseURL: input.baseURL,
+        apiKey,
+        modelID: before?.id ?? selection.modelID,
+        instanceID: loadedInstanceID,
+        activeContext: before?.context.active,
+        requestedContext: input.contextLimit,
+        outputTokens: input.preferredModel.limit.output,
+        request: input.request,
+        signal: input.signal,
+        preserveContext: contextLocked(input.config, before?.id, selection.modelID, input.preferredModel.id),
+        onCacheInitialization: input.onCacheInitialization,
+      })
+      if (reconciled.status === "failed")
+        return complete(
+          failed(
+            input.config,
+            plan,
+            input.preferredModel,
+            role,
+            reconciled.reason,
+            before,
+            reconciled.rolledBack ? reconciled.instanceID : undefined,
+            1,
+          ),
+          reconciled.timing,
+        )
       const result = routed(
         input.preferredModel,
         selection,
-        loadedInstanceID,
-        before?.context.active,
-        input.contextLimit,
+        reconciled.instanceID,
+        reconciled.context,
+        reconciled.preserved ? undefined : input.contextLimit,
       )
-      const cleanup =
-        role === "utility"
+      const cleanup = reconciled.reloaded
+        ? reconciled.reason
+        : role === "utility"
           ? ["switch.previous.preserved"]
           : await unloadPrevious({
               baseURL: input.baseURL,
               apiKey,
               previousInstanceID,
-              activeInstanceID: loadedInstanceID,
+              activeInstanceID: reconciled.instanceID,
               request: input.request,
               signal: input.signal,
-            })
-      if (role !== "utility") active.set(input.baseURL, { modelID: selection.modelID, instanceID: loadedInstanceID })
-      return complete(success(input.config, plan, result, role, selection, previous, previousInstanceID, cleanup))
+            }).then((reason) => [...reason, ...reconciled.reason])
+      if (role !== "utility")
+        active.set(input.baseURL, { modelID: selection.modelID, instanceID: reconciled.instanceID })
+      return complete(
+        success(input.config, plan, result, role, selection, previous, previousInstanceID, cleanup),
+        reconciled.timing,
+      )
     }
 
     const resources = input.resources ?? snapshot()
@@ -330,10 +451,13 @@ async function activateNow(
     }
 
     let loaded: Awaited<ReturnType<typeof loadLmStudioModel>> | undefined
+    const cacheInitializationStartedAt = Date.now()
+    await notifyCacheInitialization(input.onCacheInitialization, {
+      type: "started",
+      startedAt: cacheInitializationStartedAt,
+    })
     try {
-      const preserveContext =
-        input.contextLimit === undefined &&
-        input.config.provider?.lmstudio?.models?.[selection.modelID]?.preserve_context === true
+      const preserveContext = contextLocked(input.config, selection.modelID, input.preferredModel.id)
       const budget = preserveContext
         ? undefined
         : await contextBudget({
@@ -382,8 +506,31 @@ async function activateNow(
               signal: input.signal,
             }).then((reason) => [...reason, ...(preserveContext ? ["switch.context.preserved"] : [])])
       if (role !== "utility") active.set(input.baseURL, { modelID: selection.modelID, instanceID: loaded.instanceID })
-      return complete(success(input.config, plan, result, role, selection, previous, previousInstanceID, cleanup))
+      const completedAt = Date.now()
+      await notifyCacheInitialization(input.onCacheInitialization, {
+        type: "finished",
+        startedAt: cacheInitializationStartedAt,
+        completedAt,
+        status: "completed",
+      })
+      return complete(success(input.config, plan, result, role, selection, previous, previousInstanceID, cleanup), {
+        startedAt: cacheInitializationStartedAt,
+        completedAt,
+        status: "completed",
+      })
     } catch (error) {
+      const completedAt = Date.now()
+      await notifyCacheInitialization(input.onCacheInitialization, {
+        type: "finished",
+        startedAt: cacheInitializationStartedAt,
+        completedAt,
+        status: "failed",
+      })
+      cacheInitializationTiming = {
+        startedAt: cacheInitializationStartedAt,
+        completedAt,
+        status: "failed",
+      }
       reasons.push("switch.primary.failed")
       reasons.push(`switch.error:${errorMessage(error)}`)
       if (loaded) {
@@ -401,6 +548,7 @@ async function activateNow(
 
   return complete(
     failed(input.config, plan, input.preferredModel, role, reasons, previous, previousInstanceID, selections.length),
+    cacheInitializationTiming,
   )
 }
 
@@ -512,6 +660,177 @@ export function withContextLimit(model: Provider.Model, contextLimit: number | u
       output: Math.min(model.limit.output, Math.max(1, Math.floor(context / 4))),
     },
   }
+}
+
+async function reconcileContext(input: {
+  readonly config: ConfigV1.Info
+  readonly baseURL: string
+  readonly apiKey: unknown
+  readonly modelID: string
+  readonly instanceID: string
+  readonly activeContext?: number
+  readonly requestedContext?: number
+  readonly outputTokens: number
+  readonly request?: LmStudioRequest
+  readonly signal?: AbortSignal
+  readonly preserveContext: boolean
+  readonly onCacheInitialization?: Parameters<typeof activate>[0]["onCacheInitialization"]
+}) {
+  if (input.requestedContext === undefined)
+    return {
+      status: "ready" as const,
+      instanceID: input.instanceID,
+      context: input.activeContext,
+      preserved: false,
+      reloaded: false,
+      rolledBack: false,
+      reason: [] as string[],
+    }
+  if (input.preserveContext)
+    return {
+      status: "ready" as const,
+      instanceID: input.instanceID,
+      context: input.activeContext,
+      preserved: true,
+      reloaded: false,
+      rolledBack: false,
+      reason: ["switch.context.preserved"],
+    }
+
+  const budget = await contextBudget({
+    providerID: "lmstudio",
+    modelID: input.modelID,
+    requestedContext: input.requestedContext,
+    outputTokens: input.outputTokens,
+    baseURL: input.baseURL,
+    apiKey: input.apiKey,
+    request: input.request,
+  })
+  const desiredContext = budget?.hardContext ?? input.requestedContext
+  if (input.activeContext === desiredContext)
+    return {
+      status: "ready" as const,
+      instanceID: input.instanceID,
+      context: input.activeContext,
+      preserved: false,
+      reloaded: false,
+      rolledBack: false,
+      reason: ["switch.context.ready"],
+    }
+  if (
+    activeRequestsForModel({
+      providerID: "lmstudio",
+      apiURL: input.baseURL,
+      modelID: input.instanceID,
+    }) > 0
+  )
+    return {
+      status: "failed" as const,
+      instanceID: input.instanceID,
+      context: input.activeContext,
+      preserved: false,
+      reloaded: false,
+      rolledBack: true,
+      reason: ["switch.context.busy"],
+    }
+
+  const startedAt = Date.now()
+  await notifyCacheInitialization(input.onCacheInitialization, { type: "started", startedAt })
+  let unloaded = false
+  try {
+    await unloadLmStudioModel({
+      baseURL: input.baseURL,
+      apiKey: input.apiKey,
+      instanceID: input.instanceID,
+      request: input.request,
+      signal: input.signal,
+    })
+    unloaded = true
+    managedInstances(input.baseURL).delete(input.instanceID)
+    const loaded = await loadLmStudioModel({
+      baseURL: input.baseURL,
+      apiKey: input.apiKey,
+      modelID: input.modelID,
+      contextLength: desiredContext,
+      request: input.request,
+      signal: input.signal,
+    })
+    managedInstances(input.baseURL).add(loaded.instanceID)
+    const verified = findLmStudioModel(
+      await probeLmStudio({
+        baseURL: input.baseURL,
+        apiKey: input.apiKey,
+        request: input.request,
+        refresh: true,
+      }),
+      loaded.instanceID,
+    )
+    if (!verified?.loaded || !verified.instances.includes(loaded.instanceID))
+      throw new Error("LM Studio did not report the reloaded instance as ready")
+    const completedAt = Date.now()
+    await notifyCacheInitialization(input.onCacheInitialization, {
+      type: "finished",
+      startedAt,
+      completedAt,
+      status: "completed",
+    })
+    return {
+      status: "ready" as const,
+      instanceID: loaded.instanceID,
+      context: verified.context.active ?? loaded.contextLength ?? desiredContext,
+      preserved: false,
+      reloaded: true,
+      rolledBack: false,
+      reason: ["switch.context.reloaded"],
+      timing: { startedAt, completedAt, status: "completed" as const },
+    }
+  } catch (error) {
+    const rollback = unloaded && input.activeContext
+      ? await loadLmStudioModel({
+          baseURL: input.baseURL,
+          apiKey: input.apiKey,
+          modelID: input.modelID,
+          contextLength: input.activeContext,
+          request: input.request,
+        }).catch(() => undefined)
+      : undefined
+    if (rollback) managedInstances(input.baseURL).add(rollback.instanceID)
+    const completedAt = Date.now()
+    await notifyCacheInitialization(input.onCacheInitialization, {
+      type: "finished",
+      startedAt,
+      completedAt,
+      status: "failed",
+    })
+    return {
+      status: "failed" as const,
+      instanceID: rollback?.instanceID ?? input.instanceID,
+      context: rollback?.contextLength ?? input.activeContext,
+      preserved: false,
+      reloaded: false,
+      rolledBack: !unloaded || rollback !== undefined,
+      reason: ["switch.context.reload_failed", `switch.error:${errorMessage(error)}`],
+      timing: { startedAt, completedAt, status: "failed" as const },
+    }
+  }
+}
+
+async function notifyCacheInitialization(
+  callback: Parameters<typeof activate>[0]["onCacheInitialization"],
+  event: {
+    readonly type: "started" | "finished"
+    readonly startedAt: number
+    readonly completedAt?: number
+    readonly status?: "completed" | "failed"
+  },
+) {
+  await callback?.(event).catch(() => undefined)
+}
+
+function contextLocked(config: ConfigV1.Info, ...modelIDs: (string | ModelV2.ID | undefined)[]) {
+  return modelIDs.some(
+    (modelID) => modelID !== undefined && config.provider?.lmstudio?.models?.[String(modelID)]?.preserve_context === true,
+  )
 }
 
 async function unloadPrevious(input: {

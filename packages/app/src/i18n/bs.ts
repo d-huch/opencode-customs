@@ -783,7 +783,7 @@ export const dict = {
   "sidebar.empty.title": "Nema otvorenih projekata",
   "sidebar.empty.description": "Otvori projekat za početak",
 
-  "app.name.desktop": "OpenCode Desktop",
+  "app.name.desktop": "OpenCode Customs",
 
   "settings.section.desktop": "Desktop",
   "settings.section.server": "Server",

@@ -16,11 +16,16 @@ import { createUpdaterSubscriptions } from "./updater-subscriptions"
 import { createNativeVoiceController } from "./native-voice"
 import { synthesizeLocalSpeech, type LocalTTSInput } from "./local-tts"
 import {
+  activateFishAudioVoicePreset,
   clearFishAudioLocalReference,
+  deleteFishAudioVoicePreset,
   getFishAudioLocalReference,
   getFishAudioLocalStatus,
+  listFishAudioVoicePresets,
+  saveFishAudioVoicePreset,
   setFishAudioLocalReference,
   type FishAudioLocalReferenceInput,
+  type FishAudioVoicePresetInput,
 } from "./fish-audio"
 import {
   appendVoiceDiagnostic,
@@ -262,6 +267,16 @@ export function registerIpcHandlers(deps: Deps) {
     setFishAudioLocalReference(input),
   )
   ipcMain.handle("clear-fish-audio-local-reference", () => clearFishAudioLocalReference())
+  ipcMain.handle("list-fish-audio-voice-presets", () => listFishAudioVoicePresets())
+  ipcMain.handle("save-fish-audio-voice-preset", (_event: IpcMainInvokeEvent, input: FishAudioVoicePresetInput) =>
+    saveFishAudioVoicePreset(input),
+  )
+  ipcMain.handle("activate-fish-audio-voice-preset", (_event: IpcMainInvokeEvent, id: string) =>
+    activateFishAudioVoicePreset(id),
+  )
+  ipcMain.handle("delete-fish-audio-voice-preset", (_event: IpcMainInvokeEvent, id: string) =>
+    deleteFishAudioVoicePreset(id),
+  )
   ipcMain.handle("cancel-local-speech", (event: IpcMainInvokeEvent) => {
     localSpeech.get(event.sender.id)?.abort()
     localSpeech.delete(event.sender.id)

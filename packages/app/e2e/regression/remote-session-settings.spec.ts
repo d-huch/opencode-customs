@@ -42,6 +42,45 @@ test("session settings use the remote server context", async ({ page }) => {
   await expect(dialog.getByRole("switch", { name: "Server A Model" })).toHaveCount(0)
 })
 
+test("personalization is a separate draft-based settings tab", async ({ page }) => {
+  await mockServers(page, [])
+  await configureServers(page, [], { enabled: false, assistantName: "Saved assistant" })
+
+  await page.goto("/")
+  await page.getByRole("button", { name: "Settings" }).first().click()
+
+  const dialog = page.locator(".settings-v2-dialog")
+  await expect(dialog).toBeVisible()
+  await expect(dialog.locator('[data-action="settings-agent-personalization"]')).toHaveCount(0)
+  await dialog.getByRole("tab", { name: "Personalization" }).click()
+
+  const assistantName = dialog.locator('[data-action="settings-personalization-assistant-name"]')
+  const enabled = dialog.locator('[data-action="settings-personalization-enabled"]')
+  const cancel = dialog.locator('[data-action="settings-personalization-cancel"]')
+  const save = dialog.locator('[data-action="settings-personalization-save"]')
+  await expect(assistantName).toHaveValue("Saved assistant")
+  await expect(enabled.getByRole("switch")).not.toBeChecked()
+  await expect(cancel).toBeDisabled()
+  await expect(save).toBeDisabled()
+
+  await assistantName.fill("Draft assistant")
+  await expect(cancel).toBeEnabled()
+  await expect(save).toBeEnabled()
+  expect(await storedPersonalization(page)).toMatchObject({ enabled: false, assistantName: "Saved assistant" })
+
+  await cancel.click()
+  await expect(assistantName).toHaveValue("Saved assistant")
+  await expect(cancel).toBeDisabled()
+  await expect(save).toBeDisabled()
+
+  await assistantName.fill("Jarvis")
+  await enabled.locator('[data-slot="switch-control"]').click()
+  await expect(enabled.getByRole("switch")).toBeChecked()
+  await save.click()
+  await expect(save).toBeDisabled()
+  await expect.poll(() => storedPersonalization(page)).toMatchObject({ enabled: true, assistantName: "Jarvis" })
+})
+
 test("auto-accept responds for an unfocused server session", async ({ page }) => {
   const permissionRequests: string[] = []
   const permissionResponses: PermissionResponse[] = []
@@ -149,15 +188,35 @@ type PermissionResponse = {
   body: unknown
 }
 
-async function configureServers(page: Page, tabs: { type: "session"; server: string; sessionId: string }[] = []) {
+async function configureServers(
+  page: Page,
+  tabs: { type: "session"; server: string; sessionId: string }[] = [],
+  personalization?: { enabled: boolean; assistantName: string },
+) {
   await page.addInitScript(
-    ({ serverB, tabs }) => {
-      localStorage.setItem("settings.v3", JSON.stringify({ general: { newLayoutDesigns: true } }))
+    ({ serverB, tabs, personalization }) => {
+      localStorage.setItem(
+        "settings.v3",
+        JSON.stringify({ general: { newLayoutDesigns: true }, ...(personalization ? { personalization } : {}) }),
+      )
       localStorage.setItem("opencode.global.dat:server", JSON.stringify({ list: [serverB] }))
       localStorage.setItem("opencode.window.browser.dat:tabs", JSON.stringify(tabs))
     },
-    { serverB, tabs },
+    { serverB, tabs, personalization },
   )
+}
+
+async function storedPersonalization(page: Page) {
+  return page.evaluate(() => {
+    const value: unknown = JSON.parse(localStorage.getItem("settings.v3") ?? "{}")
+    if (!value || typeof value !== "object" || !("personalization" in value)) return {}
+    const personalization = value.personalization
+    if (!personalization || typeof personalization !== "object") return {}
+    return {
+      enabled: "enabled" in personalization ? personalization.enabled : undefined,
+      assistantName: "assistantName" in personalization ? personalization.assistantName : undefined,
+    }
+  })
 }
 
 async function mockServers(page: Page, permissionRequests: string[], permissionResponses: PermissionResponse[] = []) {

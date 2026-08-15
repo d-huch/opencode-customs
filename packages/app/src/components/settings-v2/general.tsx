@@ -55,6 +55,17 @@ type ShellSelectOption = {
   label: string
 }
 
+type FishVoicePreset = {
+  id: string
+  name: string
+  filename: string
+  contentType: string
+  transcript: string
+  bytes: number
+  createdAt: string
+  active: boolean
+}
+
 // To prevent audio from overlapping/playing very quickly when navigating the settings menus,
 // delay the playback by 100ms during quick selection changes and pause existing sounds.
 const stopDemoSound = () => {
@@ -84,6 +95,7 @@ const playDemoSound = (id: string | undefined) => {
 
 export const SettingsGeneralV2: Component<{
   sessionID?: string
+  section?: "general" | "voice"
 }> = (props) => {
   const theme = useTheme()
   const language = useLanguage()
@@ -100,6 +112,9 @@ export const SettingsGeneralV2: Component<{
   const [fishVoiceTranscript, setFishVoiceTranscript] = createSignal("")
   const [fishVoiceState, setFishVoiceState] = createSignal<"idle" | "saving" | string>("idle")
   const [fishReferenceFile, setFishReferenceFile] = createSignal<File>()
+  const [fishPresetName, setFishPresetName] = createSignal("")
+  const [fishVoicePresets, setFishVoicePresets] = createSignal<FishVoicePreset[]>([])
+  const [fishPresetState, setFishPresetState] = createSignal<"idle" | "saving" | "activating" | "deleting">("idle")
   const [fishSavedReference, setFishSavedReference] = createSignal<{
     filename: string
     contentType: string
@@ -159,18 +174,20 @@ export const SettingsGeneralV2: Component<{
     setFishServerState(result)
   }
 
+  const refreshFishVoicePresets = async () => {
+    if (!platform.listFishAudioVoicePresets) return
+    setFishVoicePresets(await platform.listFishAudioVoicePresets())
+  }
+
   onMount(() => {
+    if (props.section !== "voice") return
     void platform.getFishAudioLocalReference?.().then((reference) => {
       setFishSavedReference(reference)
       if (reference) setFishVoiceTranscript(reference.transcript)
     })
+    void refreshFishVoicePresets()
     if (settings.voice.ttsProvider() === "fish-local") void checkFishServer()
   })
-  const openAgentPersonalization = async () => {
-    const module = await import("@/components/dialog-agent-personalization")
-    void dialog.show(() => <module.DialogAgentPersonalization />)
-  }
-
   const testVoice = async () => {
     if (!platform.synthesizeLocalSpeech) {
       setVoiceTest(language.t("settings.general.voice.test.unavailable"))
@@ -311,6 +328,77 @@ export const SettingsGeneralV2: Component<{
           return undefined
         },
       )
+  }
+
+  const saveFishPreset = async () => {
+    const file = fishReferenceFile()
+    if (!platform.saveFishAudioVoicePreset) {
+      addFishDebug(language.t("settings.general.voice.fish.presets.unavailable"), "error")
+      return
+    }
+    if (!fishPresetName().trim()) {
+      addFishDebug(language.t("settings.general.voice.fish.presets.missingName"), "error")
+      return
+    }
+    if (!file || !fishVoiceTranscript().trim()) {
+      addFishDebug(language.t("settings.general.voice.fish.debug.missingReference"), "error")
+      return
+    }
+    setFishPresetState("saving")
+    const result = await platform
+      .saveFishAudioVoicePreset({
+        name: fishPresetName(),
+        filename: file.name,
+        contentType: fishContentType(file),
+        audio: await file.arrayBuffer(),
+        transcript: fishVoiceTranscript(),
+      })
+      .then(
+        (preset) => {
+          setFishSavedReference(preset)
+          setFishPresetName("")
+          setFishReferenceFile()
+          addFishDebug(language.t("settings.general.voice.fish.presets.saved"), "success")
+          return preset
+        },
+        (error: unknown) => {
+          addFishDebug(error instanceof Error ? error.message : String(error), "error")
+          return undefined
+        },
+      )
+    await refreshFishVoicePresets()
+    setFishPresetState("idle")
+    return result
+  }
+
+  const activateFishPreset = async (id: string) => {
+    if (!platform.activateFishAudioVoicePreset) return
+    setFishPresetState("activating")
+    await platform.activateFishAudioVoicePreset(id).then(
+      (preset) => {
+        setFishSavedReference(preset)
+        setFishVoiceTranscript(preset.transcript)
+        setFishReferenceFile()
+        addFishDebug(language.t("settings.general.voice.fish.presets.activated"), "success")
+      },
+      (error: unknown) => addFishDebug(error instanceof Error ? error.message : String(error), "error"),
+    )
+    await refreshFishVoicePresets()
+    setFishPresetState("idle")
+  }
+
+  const deleteFishPreset = async (preset: FishVoicePreset) => {
+    if (!platform.deleteFishAudioVoicePreset) return
+    setFishPresetState("deleting")
+    await platform.deleteFishAudioVoicePreset(preset.id).then(
+      () => {
+        if (preset.active) setFishSavedReference()
+        addFishDebug(language.t("settings.general.voice.fish.presets.deleted"), "success")
+      },
+      (error: unknown) => addFishDebug(error instanceof Error ? error.message : String(error), "error"),
+    )
+    await refreshFishVoicePresets()
+    setFishPresetState("idle")
   }
 
   const playFishReference = async () => {
@@ -587,22 +675,6 @@ export const SettingsGeneralV2: Component<{
             label={(o) => o.label}
             onSelect={(option) => option && language.setLocale(option.value)}
           />
-        </SettingsRowV2>
-
-        <SettingsRowV2
-          title={language.t("settings.general.row.personalization.title")}
-          description={language.t("settings.general.row.personalization.description")}
-        >
-          <div class="flex items-center gap-2">
-            <Switch checked={settings.personalization.enabled()} onChange={settings.personalization.setEnabled} />
-            <ButtonV2
-              data-action="settings-agent-personalization"
-              variant="neutral"
-              onClick={() => void openAgentPersonalization()}
-            >
-              {language.t("settings.general.row.personalization.configure")}
-            </ButtonV2>
-          </div>
         </SettingsRowV2>
 
         <SettingsRowV2
@@ -1388,6 +1460,14 @@ export const SettingsGeneralV2: Component<{
                       placeholder={language.t("settings.general.voice.fish.clone.transcript")}
                       aria-label={language.t("settings.general.voice.fish.clone.transcript")}
                     />
+                    <TextInputV2
+                      data-action="settings-voice-fish-preset-name"
+                      appearance="base"
+                      value={fishPresetName()}
+                      onInput={(event) => setFishPresetName(event.currentTarget.value)}
+                      placeholder={language.t("settings.general.voice.fish.presets.name")}
+                      aria-label={language.t("settings.general.voice.fish.presets.name")}
+                    />
                     <TextareaV2
                       data-action="settings-voice-fish-debug-text"
                       class="w-full"
@@ -1410,6 +1490,22 @@ export const SettingsGeneralV2: Component<{
                         onClick={() => void saveFishReference()}
                       >
                         {language.t("settings.general.voice.fish.debug.saveReference")}
+                      </ButtonV2>
+                      <ButtonV2
+                        data-action="settings-voice-fish-preset-save"
+                        variant="neutral"
+                        disabled={
+                          fishDebugState() === "running" ||
+                          fishPresetState() !== "idle" ||
+                          !fishPresetName().trim() ||
+                          !fishReferenceFile() ||
+                          !fishVoiceTranscript().trim()
+                        }
+                        onClick={() => void saveFishPreset()}
+                      >
+                        {fishPresetState() === "saving"
+                          ? language.t("settings.general.voice.fish.presets.saving")
+                          : language.t("settings.general.voice.fish.presets.save")}
                       </ButtonV2>
                       <ButtonV2
                         data-action="settings-voice-fish-debug-play"
@@ -1468,6 +1564,63 @@ export const SettingsGeneralV2: Component<{
                         </div>
                       </Show>
                     </div>
+                  </div>
+                </SettingsRowV2>
+
+                <SettingsRowV2
+                  title={language.t("settings.general.voice.fish.presets.title")}
+                  description={language.t("settings.general.voice.fish.presets.description")}
+                >
+                  <div class="grid w-full sm:w-[520px] gap-2">
+                    <Show
+                      when={fishVoicePresets().length > 0}
+                      fallback={
+                        <div class="text-13-regular text-text-weak">
+                          {language.t("settings.general.voice.fish.presets.empty")}
+                        </div>
+                      }
+                    >
+                      <For each={fishVoicePresets()}>
+                        {(preset) => (
+                          <div class="grid gap-2 rounded-md border border-border-weak-base bg-surface-base px-3 py-3">
+                            <div class="flex items-center justify-between gap-3">
+                              <div class="min-w-0">
+                                <div class="flex items-center gap-2">
+                                  <span class="truncate text-14-regular text-text-strong">{preset.name}</span>
+                                  <Show when={preset.active}>
+                                    <span class="text-11-medium text-icon-success-base">
+                                      {language.t("settings.general.voice.fish.presets.active")}
+                                    </span>
+                                  </Show>
+                                </div>
+                                <div class="truncate text-11-regular text-text-weaker">
+                                  {preset.filename} · {(preset.bytes / 1024 / 1024).toFixed(2)} MB
+                                </div>
+                              </div>
+                              <div class="flex shrink-0 items-center gap-1">
+                                <ButtonV2
+                                  data-action="settings-voice-fish-preset-activate"
+                                  variant="ghost"
+                                  disabled={preset.active || fishPresetState() !== "idle"}
+                                  onClick={() => void activateFishPreset(preset.id)}
+                                >
+                                  {language.t("settings.general.voice.fish.presets.activate")}
+                                </ButtonV2>
+                                <ButtonV2
+                                  data-action="settings-voice-fish-preset-delete"
+                                  variant="ghost"
+                                  disabled={fishPresetState() !== "idle"}
+                                  onClick={() => void deleteFishPreset(preset)}
+                                >
+                                  {language.t("settings.general.voice.fish.presets.delete")}
+                                </ButtonV2>
+                              </div>
+                            </div>
+                            <div class="line-clamp-2 text-12-regular text-text-weak">{preset.transcript}</div>
+                          </div>
+                        )}
+                      </For>
+                    </Show>
                   </div>
                 </SettingsRowV2>
               </>
@@ -1684,6 +1837,20 @@ export const SettingsGeneralV2: Component<{
     </Show>
   )
 
+  if (props.section === "voice") {
+    return (
+      <>
+        <div class="settings-v2-tab-header">
+          <h2 class="settings-v2-tab-title">{language.t("settings.tab.voice")}</h2>
+        </div>
+
+        <div class="settings-v2-tab-body">
+          <VoiceSection />
+        </div>
+      </>
+    )
+  }
+
   return (
     <>
       <div class="settings-v2-tab-header">
@@ -1707,8 +1874,6 @@ export const SettingsGeneralV2: Component<{
 
         <SoundsSection />
 
-        <VoiceSection />
-
         <Show when={desktop()}>
           <UpdatesSection />
         </Show>
@@ -1720,3 +1885,7 @@ export const SettingsGeneralV2: Component<{
     </>
   )
 }
+
+export const SettingsVoiceV2: Component<{
+  sessionID?: string
+}> = (props) => <SettingsGeneralV2 sessionID={props.sessionID} section="voice" />

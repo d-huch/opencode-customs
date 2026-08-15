@@ -53,7 +53,7 @@ describe("timeline rows", () => {
     expect(rows.map((row) => row._tag)).toContain("Thinking")
   })
 
-  test("keeps the inferred LM Studio cache restore status and its start time", () => {
+  test("keeps the LM Studio cache initialization status and its start time", () => {
     const user = { id: "msg_user", role: "user" } as UserMessage
     const startedAt = Date.now() - 97_000
 
@@ -63,13 +63,13 @@ describe("timeline rows", () => {
       [],
       0,
       true,
-      { type: "cache_restore", startedAt },
+      { type: "provider_wait", stage: "cache_initialization", startedAt },
       true,
       false,
     )
 
     expect(rows.find((row) => row._tag === "Thinking")).toMatchObject({
-      status: { type: "cache_restore", startedAt },
+      status: { type: "provider_wait", stage: "cache_initialization", startedAt },
     })
   })
 })

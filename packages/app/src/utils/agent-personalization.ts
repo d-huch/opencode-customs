@@ -17,6 +17,15 @@ export type AgentPersonalizationProfile = {
   customInstructions: string
 }
 
+export type AgentPersonalizationValues = Omit<AgentPersonalizationProfile, "enabled">
+
+export type AgentPersonalizationPreset = AgentPersonalizationValues & {
+  id: string
+  name: string
+  createdAt: number
+  updatedAt: number
+}
+
 const compact = (value: string, limit: number) => value.replace(/\s+/g, " ").trim().slice(0, limit)
 
 export function agentCatchphrases(value: string) {

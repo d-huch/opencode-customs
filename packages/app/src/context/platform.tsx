@@ -199,6 +199,53 @@ type PlatformBase = {
   /** Delete the locally persisted Fish Audio voice reference. */
   clearFishAudioLocalReference?(): Promise<void>
 
+  /** List voice presets stored locally on this computer. */
+  listFishAudioVoicePresets?(): Promise<
+    Array<{
+      id: string
+      name: string
+      filename: string
+      contentType: string
+      transcript: string
+      bytes: number
+      createdAt: string
+      active: boolean
+    }>
+  >
+
+  /** Save and activate a local Fish Audio voice preset. */
+  saveFishAudioVoicePreset?(input: {
+    name: string
+    filename: string
+    contentType: string
+    audio: ArrayBuffer
+    transcript: string
+  }): Promise<{
+    id: string
+    name: string
+    filename: string
+    contentType: string
+    transcript: string
+    bytes: number
+    createdAt: string
+    active: boolean
+  }>
+
+  /** Make a saved local Fish Audio voice preset active. */
+  activateFishAudioVoicePreset?(id: string): Promise<{
+    id: string
+    name: string
+    filename: string
+    contentType: string
+    transcript: string
+    bytes: number
+    createdAt: string
+    active: boolean
+  }>
+
+  /** Delete a saved local Fish Audio voice preset. */
+  deleteFishAudioVoicePreset?(id: string): Promise<void>
+
   /** Cancel an in-flight local TTS request. */
   cancelLocalSpeech?(): Promise<void>
 

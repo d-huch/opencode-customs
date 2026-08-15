@@ -1,4 +1,5 @@
 import { Agent } from "@/agent/agent"
+import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { Provider } from "@/provider/provider"
 import { ProviderTransform } from "@/provider/transform"
@@ -42,6 +43,21 @@ const SUPPORTED_MCP_RESOURCE_ATTACHMENT_MIMES = new Set([
   "image/png",
   "image/webp",
 ])
+
+export function forContext<T>(
+  tools: Record<string, T>,
+  agentPermission: PermissionV1.Ruleset,
+  sessionPermission: PermissionV1.Ruleset = [],
+) {
+  const ruleset = Permission.merge(agentPermission, sessionPermission)
+  const visible = Permission.visibleTools(tools, ruleset)
+  const fallback = ruleset.findLast((rule) => rule.permission === "*" && rule.pattern === "*")
+
+  return {
+    tools: visible,
+    requiredTools: fallback?.action === "deny" ? Object.keys(visible) : [],
+  }
+}
 
 export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
   agent: Agent.Info
@@ -577,12 +593,7 @@ function planTools(
   planner: ReturnType<typeof SessionToolPlanner.create>,
   sessionID: string,
   beginToolCall: (callID: string, tool: string, args: unknown) => Promise<void>,
-  authorizeRisk: (
-    callID: string,
-    tool: string,
-    args: unknown,
-    declared: boolean,
-  ) => Promise<ChangeRisk.Assessment>,
+  authorizeRisk: (callID: string, tool: string, args: unknown, declared: boolean) => Promise<ChangeRisk.Assessment>,
 ) {
   return Object.fromEntries(
     Object.entries(tools).map(([id, item]) => {

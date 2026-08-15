@@ -33,7 +33,7 @@ import { SessionExecutionBudget } from "./execution-budget"
 import { SessionMutation } from "./mutation"
 
 const DOOM_LOOP_THRESHOLD = 3
-const CACHE_RESTORE_DIAGNOSTIC_DELAY_MS = 1_500
+const PROVIDER_WAIT_DIAGNOSTIC_DELAY_MS = 1_500
 export type Result = "compact" | "stop" | "continue"
 
 export interface Handle {
@@ -89,7 +89,8 @@ interface ProcessorContext extends Input {
   mutatedFiles: Set<string>
   firstOutput: boolean
   modelRequestStartedAt: number | undefined
-  cacheRestoreActive: boolean
+  providerWaitActive: boolean
+  providerWaitStage: "cache_initialization" | "provider_processing" | undefined
   providerChainContext: number | undefined
 }
 
@@ -134,7 +135,8 @@ const layer = Layer.effect(
         mutatedFiles: new Set(),
         firstOutput: false,
         modelRequestStartedAt: undefined,
-        cacheRestoreActive: false,
+        providerWaitActive: false,
+        providerWaitStage: undefined,
         providerChainContext: undefined,
       }
       let aborted = false
@@ -399,14 +401,16 @@ const layer = Layer.effect(
           )
         ) {
           ctx.firstOutput = true
-          if (ctx.cacheRestoreActive && ctx.modelRequestStartedAt !== undefined) {
+          if (ctx.providerWaitActive && ctx.modelRequestStartedAt !== undefined) {
             const modelRequestStartedAt = ctx.modelRequestStartedAt
-            ctx.cacheRestoreActive = false
+            const providerWaitStage = ctx.providerWaitStage
+            ctx.providerWaitActive = false
+            ctx.providerWaitStage = undefined
             yield* status.set(ctx.sessionID, { type: "busy" })
             yield* Effect.promise(() =>
               SessionLog.write({
                 sessionID: input.sessionID,
-                type: "model.cache_restore.finished",
+                type: "model.provider_wait.finished",
                 messageID: input.assistantMessage.id,
                 executionID: input.checkpoint?.executionID,
                 data: {
@@ -414,7 +418,7 @@ const layer = Layer.effect(
                   startedAt: modelRequestStartedAt,
                   durationMs: Date.now() - modelRequestStartedAt,
                   outcome: "first_output",
-                  inferred: true,
+                  stage: providerWaitStage,
                 },
               }),
             )
@@ -884,7 +888,8 @@ const layer = Layer.effect(
       const process = Effect.fn("SessionProcessor.process")(function* (streamInput: LLM.StreamInput) {
         ctx.firstOutput = false
         ctx.modelRequestStartedAt = undefined
-        ctx.cacheRestoreActive = false
+        ctx.providerWaitActive = false
+        ctx.providerWaitStage = undefined
         yield* Effect.promise(() =>
           SessionLog.write({
             sessionID: input.sessionID,
@@ -914,28 +919,31 @@ const layer = Layer.effect(
             ctx.providerChainContext = streamInput.providerChainContext
             yield* status.set(ctx.sessionID, { type: "busy" })
             ctx.modelRequestStartedAt = Date.now()
-            const cacheRestoreWatch =
+            const providerWaitStage = "provider_processing" as const
+            const providerWaitWatch =
               input.model.providerID === "lmstudio"
-                ? yield* Effect.sleep(`${CACHE_RESTORE_DIAGNOSTIC_DELAY_MS} millis`).pipe(
+                ? yield* Effect.sleep(`${PROVIDER_WAIT_DIAGNOSTIC_DELAY_MS} millis`).pipe(
                     Effect.flatMap(() => {
                       if (ctx.firstOutput || ctx.modelRequestStartedAt === undefined) return Effect.void
-                      ctx.cacheRestoreActive = true
+                      ctx.providerWaitActive = true
+                      ctx.providerWaitStage = providerWaitStage
                       return Effect.all([
                         status.set(ctx.sessionID, {
-                          type: "cache_restore",
+                          type: "provider_wait",
                           startedAt: ctx.modelRequestStartedAt,
+                          stage: providerWaitStage,
                         }),
                         Effect.promise(() =>
                           SessionLog.write({
                             sessionID: input.sessionID,
-                            type: "model.cache_restore.started",
+                            type: "model.provider_wait.started",
                             messageID: input.assistantMessage.id,
                             executionID: input.checkpoint?.executionID,
                             data: {
                               step: input.step,
                               startedAt: ctx.modelRequestStartedAt,
-                              thresholdMs: CACHE_RESTORE_DIAGNOSTIC_DELAY_MS,
-                              inferred: true,
+                              thresholdMs: PROVIDER_WAIT_DIAGNOSTIC_DELAY_MS,
+                              stage: providerWaitStage,
                             },
                           }),
                         ),
@@ -944,7 +952,11 @@ const layer = Layer.effect(
                     Effect.forkChild,
                   )
                 : undefined
-            const stream = llm.stream(streamInput)
+            const request =
+              streamInput.agent.name === "chat"
+                ? { ...streamInput, tools: {}, toolChoice: "none" as const }
+                : streamInput
+            const stream = llm.stream(request)
 
             yield* stream.pipe(
               Stream.tap((event) => handleEvent(event)),
@@ -952,14 +964,16 @@ const layer = Layer.effect(
               Stream.runDrain,
               Effect.ensuring(
                 Effect.gen(function* () {
-                  if (cacheRestoreWatch) yield* Fiber.interrupt(cacheRestoreWatch)
-                  if (!ctx.cacheRestoreActive || ctx.modelRequestStartedAt === undefined) return
+                  if (providerWaitWatch) yield* Fiber.interrupt(providerWaitWatch)
+                  if (!ctx.providerWaitActive || ctx.modelRequestStartedAt === undefined) return
                   const modelRequestStartedAt = ctx.modelRequestStartedAt
-                  ctx.cacheRestoreActive = false
+                  const providerWaitStage = ctx.providerWaitStage
+                  ctx.providerWaitActive = false
+                  ctx.providerWaitStage = undefined
                   yield* Effect.promise(() =>
                     SessionLog.write({
                       sessionID: input.sessionID,
-                      type: "model.cache_restore.finished",
+                      type: "model.provider_wait.finished",
                       messageID: input.assistantMessage.id,
                       executionID: input.checkpoint?.executionID,
                       data: {
@@ -967,7 +981,7 @@ const layer = Layer.effect(
                         startedAt: modelRequestStartedAt,
                         durationMs: Date.now() - modelRequestStartedAt,
                         outcome: "stream_ended",
-                        inferred: true,
+                        stage: providerWaitStage,
                       },
                     }),
                   )

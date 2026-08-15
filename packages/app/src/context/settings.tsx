@@ -7,6 +7,7 @@ import { normalizeVoiceDictionary, type VoiceDictionaryEntry } from "@/utils/voi
 import type {
   AgentDetail,
   AgentHumor,
+  AgentPersonalizationPreset,
   AgentProactivity,
   AgentTone,
 } from "@/utils/agent-personalization"
@@ -66,6 +67,8 @@ export interface VoiceSettings {
 
 export interface AgentPersonalizationSettings {
   enabled: boolean
+  activePresetID: string
+  presets: AgentPersonalizationPreset[]
   assistantName: string
   userName: string
   addressAs: string
@@ -272,6 +275,8 @@ const defaultSettings: Settings = {
   },
   personalization: {
     enabled: true,
+    activePresetID: "",
+    presets: [],
     assistantName: "OpenCode Customs",
     userName: "",
     addressAs: "",
@@ -630,6 +635,17 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         enabled: withFallback(() => store.personalization?.enabled, defaultSettings.personalization.enabled),
         setEnabled(value: boolean) {
           setStore("personalization", "enabled", value)
+        },
+        activePresetID: withFallback(
+          () => store.personalization?.activePresetID,
+          defaultSettings.personalization.activePresetID,
+        ),
+        setActivePresetID(value: string) {
+          setStore("personalization", "activePresetID", value)
+        },
+        presets: withFallback(() => store.personalization?.presets, defaultSettings.personalization.presets),
+        setPresets(value: AgentPersonalizationPreset[]) {
+          setStore("personalization", "presets", reconcile(value.slice(0, 50)))
         },
         assistantName: withFallback(
           () => store.personalization?.assistantName,

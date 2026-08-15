@@ -1903,6 +1903,33 @@ const layer = Layer.effect(
                             tools: chatMode || isLastStep ? 0 : Math.max(1, Object.keys(lastUser.tools ?? {}).length),
                           },
                           vision,
+                          onCacheInitialization: (event) =>
+                            Effect.runPromise(
+                              Effect.all([
+                                status.set(
+                                  sessionID,
+                                  event.type === "started"
+                                    ? {
+                                        type: "provider_wait",
+                                        startedAt: event.startedAt,
+                                        stage: "cache_initialization",
+                                      }
+                                    : { type: "busy" },
+                                ),
+                                Effect.promise(() =>
+                                  SessionLog.write({
+                                    sessionID,
+                                    type: `model.cache_initialization.${event.type}`,
+                                    executionID: checkpoint.executionID,
+                                    data: {
+                                      startedAt: event.startedAt,
+                                      completedAt: event.completedAt,
+                                      status: event.status,
+                                    },
+                                  }),
+                                ),
+                              ]).pipe(Effect.asVoid),
+                            ),
                         }),
                       )
                     : undefined
@@ -2291,7 +2318,6 @@ const layer = Layer.effect(
             : []
           const freshnessEvidence = SessionFreshness.evidence(msgs, requestUserMsg?.info.id)
           const chatText = chatMode ? MessageV2.userRequestText(requestUserMsg) : ""
-          const chatWebEnabled = chatMode && SessionChatMode.webEnabled(chatText)
           const chatContextLimit = chatMode
             ? SessionChatMode.contextLimit({ model, models: cfg.provider?.lmstudio?.models })
             : undefined
@@ -2316,7 +2342,7 @@ const layer = Layer.effect(
               reason:
                 "previousResponseID" in chatChain
                   ? "provider_chain_continued"
-                  : chatChain.reason ?? "provider_chain_reset",
+                  : (chatChain.reason ?? "provider_chain_reset"),
             })
 
           yield* RequestPipelineScheduler.mark({
@@ -2333,7 +2359,7 @@ const layer = Layer.effect(
             bypassAgentCheck,
             messages: msgs,
             promptOps,
-            toolIDs: chatMode ? (chatWebEnabled ? SessionChatMode.toolIDs : []) : undefined,
+            toolIDs: chatMode ? [] : undefined,
           }).pipe(
             Effect.provideService(Plugin.Service, plugin),
             Effect.provideService(Permission.Service, permission),
@@ -2343,14 +2369,15 @@ const layer = Layer.effect(
             Effect.provideService(RuntimeFlags.Service, flags),
             Effect.provideService(Database.Service, database),
           )
-          const scopedTools = chatMode ? SessionChatMode.tools(resolvedTools, chatWebEnabled) : resolvedTools
+          const contextTools = SessionTools.forContext(resolvedTools, agent.permission, session.permission ?? [])
+          const scopedTools = chatMode ? SessionChatMode.tools(contextTools.tools) : contextTools.tools
           const tools =
-            criticMode && resolvedTools[SessionCritic.TOOL_ID]
-              ? { [SessionCritic.TOOL_ID]: resolvedTools[SessionCritic.TOOL_ID] }
+            criticMode && contextTools.tools[SessionCritic.TOOL_ID]
+              ? { [SessionCritic.TOOL_ID]: contextTools.tools[SessionCritic.TOOL_ID] }
               : scopedTools
           if (!evidenceRequired) delete tools[SessionEvidence.TOOL_ID]
 
-          if (lastUser.format?.type === "json_schema") {
+          if (!chatMode && lastUser.format?.type === "json_schema") {
             tools["StructuredOutput"] = createStructuredOutputTool({
               schema: lastUser.format.schema,
               onSuccess(output) {
@@ -2444,6 +2471,7 @@ const layer = Layer.effect(
                   mcpInstructions: sys.mcp(agent, session.permission),
                   modelMsgs: MessageV2.toModelMessagesEffect(msgs, model),
                 })
+          const requestTools = chatMode ? {} : freshnessRoute.tools
           const stableSystem = criticMode
             ? [SessionCritic.systemPrompt]
             : chatMode
@@ -2512,12 +2540,19 @@ const layer = Layer.effect(
               content,
             })),
           ]
-          const requiredTools = [
-            ...(format.type === "json_schema" && freshnessRoute.toolChoice !== "required" ? ["StructuredOutput"] : []),
-            ...freshnessRoute.requiredTools,
-            ...(repositoryContext ? ["read", "grep"] : []),
-            ...(evidenceRequired ? [SessionEvidence.TOOL_ID] : []),
-          ].filter((name, index, names) => freshnessRoute.tools[name] && names.indexOf(name) === index)
+          const requiredTools = (
+            chatMode
+              ? []
+              : [
+                  ...(format.type === "json_schema" && freshnessRoute.toolChoice !== "required"
+                    ? ["StructuredOutput"]
+                    : []),
+                  ...freshnessRoute.requiredTools,
+                  ...contextTools.requiredTools,
+                  ...(repositoryContext ? ["read", "grep"] : []),
+                  ...(evidenceRequired ? [SessionEvidence.TOOL_ID] : []),
+                ]
+          ).filter((name, index, names) => requestTools[name] && names.indexOf(name) === index)
           const requestMessages = [
             ...context.modelMsgs,
             ...(isLastStep ? [{ role: "assistant" as const, content: MAX_STEPS_PROMPT }] : []),
@@ -2533,7 +2568,7 @@ const layer = Layer.effect(
             system: [...stableSystem, ...dynamicSystem],
             systemFragments,
             messages: requestMessages,
-            tools: freshnessRoute.tools,
+            tools: requestTools,
             model,
             requiredTools,
             currentUserText: criticMode
@@ -2604,7 +2639,7 @@ const layer = Layer.effect(
           yield* sys.repositoryTrace({
             level: fitted.compressed ? "warning" : "info",
             stage: "model",
-            message: `Request started: ${model.providerID}/${model.id}; ${fitted.tokens}/${fitted.limit} safe context tokens (${fitted.usage}%); ${fitted.messages.length} history messages; ${Object.keys(fitted.tools).length}/${Object.keys(tools).length} tools${fitted.compressed ? "; context fitted" : ""}`,
+            message: `Request started: ${model.providerID}/${model.id}; ${fitted.tokens}/${fitted.limit} safe context tokens (${fitted.usage}%); ${fitted.messages.length} history messages; ${Object.keys(fitted.tools).length}/${Object.keys(requestTools).length} tools${fitted.compressed ? "; context fitted" : ""}`,
           })
           const result = yield* handle
             .process({
@@ -2620,9 +2655,11 @@ const layer = Layer.effect(
               statefulResponses: chatMode && model.providerID === "lmstudio",
               previousResponseID: chatPreviousResponseID,
               providerChainContext: chatContextLimit,
-              toolChoice: isLastStep
+              toolChoice: chatMode
                 ? "none"
-                : (freshnessRoute.toolChoice ?? (format.type === "json_schema" ? "required" : undefined)),
+                : isLastStep
+                  ? "none"
+                  : (freshnessRoute.toolChoice ?? (format.type === "json_schema" ? "required" : undefined)),
             })
             .pipe(
               Effect.catchCause((cause) =>

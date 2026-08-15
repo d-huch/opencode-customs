@@ -256,6 +256,10 @@ describe("session turn inspection", () => {
           activationStartedAt: Date.parse(at(350)),
           activationCompletedAt: Date.parse(at(500)),
           modelActivationMs: 150,
+          cacheInitializationStartedAt: Date.parse(at(350)),
+          cacheInitializationCompletedAt: Date.parse(at(450)),
+          cacheInitializationMs: 100,
+          cacheInitializationStatus: "completed",
           probeCache: "miss",
           activationStatus: "ready",
         },
@@ -342,6 +346,10 @@ describe("session turn inspection", () => {
       reasoningEffort: "medium",
     })
     expect(latency.phases.find((item) => item.phase === "prompt_processing")?.durationMs).toBe(300)
+    expect(latency.phases.find((item) => item.phase === "cache_initialization")).toMatchObject({
+      durationMs: 100,
+      status: "completed",
+    })
     expect(latency.phases.find((item) => item.phase === "tool_execution")?.durationMs).toBe(200)
     expect(latency.phases.find((item) => item.phase === "background_bookkeeping")?.durationMs).toBe(50)
     expect(latency.parallel.some((item) => item.phases.includes("rag") && item.phases.includes("memory"))).toBe(true)
@@ -407,7 +415,7 @@ describe("session turn inspection", () => {
     })
   })
 
-  test("separates inferred LM Studio cache restore from prompt processing", () => {
+  test("reports provider wait separately from prompt processing", () => {
     const at = (milliseconds: number) => new Date(Date.UTC(2026, 6, 24, 9, 0, 0, milliseconds)).toISOString()
     const startedAt = Date.parse(at(200))
     const content = [
@@ -424,17 +432,17 @@ describe("session turn inspection", () => {
       },
       {
         timestamp: at(1700),
-        type: "model.cache_restore.started",
+        type: "model.provider_wait.started",
         messageID: "message-assistant",
         executionID: "execution-1",
-        data: { startedAt, thresholdMs: 1500, inferred: true },
+        data: { startedAt, thresholdMs: 1500, stage: "provider_processing" },
       },
       {
         timestamp: at(97_200),
-        type: "model.cache_restore.finished",
+        type: "model.provider_wait.finished",
         messageID: "message-assistant",
         executionID: "execution-1",
-        data: { startedAt, durationMs: 97_000, outcome: "first_output", inferred: true },
+        data: { startedAt, durationMs: 97_000, outcome: "first_output", stage: "provider_processing" },
       },
       {
         timestamp: at(97_200),
@@ -454,15 +462,15 @@ describe("session turn inspection", () => {
 
     const result = SessionLog.summarize(content, "/tmp/session-1.jsonl")
 
-    expect(result.latency.phases.find((item) => item.phase === "cache_restore")).toMatchObject({
+    expect(result.latency.phases.find((item) => item.phase === "provider_wait")).toMatchObject({
       durationMs: 97_000,
       cache: "unknown",
     })
     expect(result.latency.phases.find((item) => item.phase === "prompt_processing")?.durationMs).toBe(0)
     expect(result.latency.phases.find((item) => item.phase === "generation")?.durationMs).toBe(2_000)
-    expect(result.latency.blocker).toMatchObject({ phase: "cache_restore", durationMs: 97_000 })
-    expect(result.events.find((event) => event.type === "model.cache_restore.finished")?.detail).toBe(
-      "97000 · first_output",
+    expect(result.latency.blocker).toMatchObject({ phase: "provider_wait", durationMs: 97_000 })
+    expect(result.events.find((event) => event.type === "model.provider_wait.finished")?.detail).toBe(
+      "provider_processing · 97000 · first_output",
     )
   })
 })

@@ -30,8 +30,9 @@ export const Info = Schema.Union([
     type: Schema.Literal("busy"),
   }),
   Schema.Struct({
-    type: Schema.Literal("cache_restore"),
+    type: Schema.Literal("provider_wait"),
     startedAt: NonNegativeInt,
+    stage: Schema.Union([Schema.Literal("cache_initialization"), Schema.Literal("provider_processing")]),
   }),
   Schema.Struct({
     type: Schema.Literal("verifying"),

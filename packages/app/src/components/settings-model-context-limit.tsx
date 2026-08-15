@@ -19,6 +19,7 @@ export function SettingsModelContextLimit(props: {
   const [saving, setSaving] = createSignal(false)
   const [dirty, setDirty] = createSignal(false)
   const value = createMemo(() => parseContextLimit(draft(), props.output))
+  const inputID = () => `context-${props.scope ?? "model"}-${props.providerID}-${props.modelID}`
 
   createEffect(() => {
     if (dirty()) return
@@ -79,7 +80,7 @@ export function SettingsModelContextLimit(props: {
       <div class="flex items-center justify-end gap-2">
         <Show when={props.variant !== "runtime"}>
           <label
-            for={`context-${props.providerID}-${props.modelID}`}
+            for={inputID()}
             class={
               props.variant === "v2" ? "text-12-regular text-v2-text-text-muted" : "text-12-regular text-text-weak"
             }
@@ -88,7 +89,7 @@ export function SettingsModelContextLimit(props: {
           </label>
         </Show>
         <input
-          id={`context-${props.providerID}-${props.modelID}`}
+          id={inputID()}
           type="number"
           min={minimumContextLimit(props.output)}
           max={MAX_CONTEXT_LIMIT}
