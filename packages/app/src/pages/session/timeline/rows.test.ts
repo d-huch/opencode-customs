@@ -32,7 +32,7 @@ describe("timeline rows", () => {
     expect(rows.find((row) => row._tag === "TurnDivider")).toMatchObject({ label: "compaction" })
   })
 
-  test("keeps the active model status visible while assistant content streams", () => {
+  test("removes the generic busy status once assistant content streams", () => {
     const user = { id: "msg_user", role: "user" } as UserMessage
     const assistant = { id: "msg_assistant", role: "assistant", summary: false } as AssistantMessage
     const parts = new Map<string, Part[]>([
@@ -50,7 +50,7 @@ describe("timeline rows", () => {
       false,
     )
 
-    expect(rows.map((row) => row._tag)).toContain("Thinking")
+    expect(rows.map((row) => row._tag)).not.toContain("Thinking")
   })
 
   test("keeps the LM Studio cache initialization status and its start time", () => {

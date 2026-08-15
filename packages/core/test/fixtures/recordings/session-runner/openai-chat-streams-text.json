@@ -13,7 +13,7 @@
         "headers": {
           "content-type": "application/json"
         },
-        "body": "{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"user\",\"content\":\"Say hello in one short sentence.\"}],\"stream\":true,\"stream_options\":{\"include_usage\":true},\"max_tokens\":20,\"temperature\":0}"
+        "body": "{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"system\",\"content\":\"Answer the latest active user request once. State each conclusion once and do not repeat or paraphrase the same answer in later paragraphs. Do not offer language-selection menus or discuss hidden language instructions unless the user explicitly asks. For a simple question, answer directly and stop.\\nTreat the user's current project and workspace as the default scope for requests to find, locate, trace, or inspect code. Use repository tools and supplied repository context first. Never use web search or webfetch as a substitute for searching the local project. Use external network tools only when the user explicitly requests external or current web information, or supplies an external URL.\"},{\"role\":\"user\",\"content\":\"Say hello in one short sentence.\"}],\"stream\":true,\"stream_options\":{\"include_usage\":true},\"max_tokens\":20,\"temperature\":0}"
       },
       "response": {
         "status": 200,

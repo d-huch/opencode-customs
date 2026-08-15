@@ -8,6 +8,7 @@ import { createCommentMetadata, formatCommentNote } from "@/utils/comment-note"
 import { takeVoiceRequestContext } from "@/utils/voice-request-context"
 
 type PromptRequestPart = (TextPartInput | FilePartInput | AgentPartInput) & { id: string }
+type EncodedImageAttachment = Omit<ImageAttachmentPart, "blob"> & { dataUrl: string }
 
 type ContextFile = {
   key: string
@@ -23,7 +24,7 @@ type ContextFile = {
 type BuildRequestPartsInput = {
   prompt: Prompt
   context: ContextFile[]
-  images: ImageAttachmentPart[]
+  images: EncodedImageAttachment[]
   text: string
   messageID: string
   sessionID: string
@@ -54,7 +55,7 @@ const parseCommentMentions = (comment: string) => {
 const isFileAttachment = (part: Prompt[number]): part is FileAttachmentPart => part.type === "file"
 const isAgentAttachment = (part: Prompt[number]): part is AgentPart => part.type === "agent"
 
-export const imageRequestURL = (attachment: ImageAttachmentPart) =>
+export const imageRequestURL = (attachment: EncodedImageAttachment) =>
   attachment.sourcePath ? `file://${encodeFilePath(attachment.sourcePath)}` : attachment.dataUrl
 
 const toOptimisticPart = (part: PromptRequestPart, sessionID: string, messageID: string): Part => {
@@ -94,13 +95,15 @@ const toOptimisticPart = (part: PromptRequestPart, sessionID: string, messageID:
 }
 
 export function buildRequestParts(input: BuildRequestPartsInput) {
-  const requestParts: PromptRequestPart[] = [
-    {
-      id: Identifier.ascending("part"),
-      type: "text",
-      text: input.text,
-    },
-  ]
+  const requestParts: PromptRequestPart[] = input.text.trim()
+    ? [
+        {
+          id: Identifier.ascending("part"),
+          type: "text",
+          text: input.text,
+        },
+      ]
+    : []
 
   if (input.personalizationInstruction) {
     requestParts.push({

@@ -41,11 +41,11 @@ import {
 import { RepositoryEmbeddings } from "@opencode-ai/core/repository-embeddings"
 import { lmStudioEmbeddingProvider } from "@/local-agent-runtime/embeddings"
 
-const OPENAI_HEADER_TIMEOUT_DEFAULT = 10_000
+const OPENAI_HEADER_TIMEOUT_DEFAULT = 300_000
 // A missing model limit is unknown capacity, not unlimited capacity. Conservative
 // defaults keep custom/local providers from admitting prompts that can exhaust the
 // host before the provider has a chance to return a context-length error.
-const UNKNOWN_CONTEXT_LIMIT = ModelV2.MIN_CONTEXT_LIMIT
+const UNKNOWN_CONTEXT_LIMIT = 4_096
 const UNKNOWN_OUTPUT_LIMIT = 512
 const LMSTUDIO_OUTPUT_LIMIT = 4_096
 
@@ -991,10 +991,15 @@ const ProviderModalities = Schema.Struct({
   pdf: Schema.Boolean,
 })
 
+const ProviderInterleavedField = Schema.Union([
+  Schema.Literals(["reasoning", "reasoning_content", "reasoning_text"]),
+  Schema.String,
+])
+
 const ProviderInterleaved = Schema.Union([
   Schema.Boolean,
   Schema.Struct({
-    field: Schema.Literals(["reasoning", "reasoning_content", "reasoning_details"]),
+    field: ProviderInterleavedField,
   }),
 ])
 
@@ -1282,7 +1287,7 @@ function fromModelsDevModel(provider: ModelsDev.Provider, model: ModelsDev.Model
         video: model.modalities?.output?.includes("video") ?? false,
         pdf: model.modalities?.output?.includes("pdf") ?? false,
       },
-      interleaved: model.interleaved ?? false,
+      interleaved: typeof model.interleaved === "string" ? { field: model.interleaved } : (model.interleaved ?? false),
     },
     release_date: model.release_date ?? "",
     variants: {},
@@ -1513,8 +1518,8 @@ const layer = Layer.effect(
                 ? Math.max(
                     discoveredContextLimit,
                     Math.min(
-                      ModelV2.MIN_CONTEXT_LIMIT,
-                      localModel?.context.supported ?? ModelV2.MIN_CONTEXT_LIMIT,
+                      UNKNOWN_CONTEXT_LIMIT,
+                      localModel?.context.supported ?? UNKNOWN_CONTEXT_LIMIT,
                     ),
                   )
                 : discoveredContextLimit
@@ -1571,7 +1576,7 @@ const layer = Layer.effect(
                   pdf: model.modalities?.output?.includes("pdf") ?? existingModel?.capabilities.output.pdf ?? false,
                 },
                 interleaved:
-                  model.interleaved ??
+                  (typeof model.interleaved === "string" ? { field: model.interleaved } : model.interleaved) ??
                   existingModel?.capabilities.interleaved ??
                   (!existingModel && apiNpm === "@ai-sdk/openai-compatible" && apiID.includes("deepseek")
                     ? { field: "reasoning_content" }

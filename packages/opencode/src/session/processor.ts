@@ -738,7 +738,9 @@ const layer = Layer.effect(
             return
 
           case "finish":
-            if (!ctx.lastText) return
+            // text-end has already persisted the completed part. Only publish another
+            // full update when finish metadata adds information to that same part.
+            if (!ctx.lastText || (value.providerMetadata === undefined && ctx.providerChainContext === undefined)) return
             ctx.lastText.metadata = Object.fromEntries(
               Object.entries({ ...ctx.lastText.metadata, ...value.providerMetadata }).map(([provider, metadata]) => {
                 const current = ctx.lastText?.metadata?.[provider]

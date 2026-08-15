@@ -41,7 +41,7 @@ const PRUNE_PROTECTED_TOOLS = ["skill"]
 const REQUEST_ESTIMATE_MULTIPLIER = 1.35
 const DEFAULT_TAIL_TURNS = 2
 const MIN_PRESERVE_RECENT_TOKENS = 2_000
-const MAX_PRESERVE_RECENT_TOKENS = 8_000
+const MAX_PRESERVE_RECENT_TOKENS = 15_000
 type Turn = {
   start: number
   end: number
@@ -61,6 +61,42 @@ type CompletedCompaction = {
 
 function safeEstimate(input: string) {
   return Math.ceil(Token.estimate(input) * REQUEST_ESTIMATE_MULTIPLIER)
+}
+
+const truncate = (value: string) =>
+  value.length <= TOOL_OUTPUT_MAX_CHARS ? value : `${value.slice(0, TOOL_OUTPUT_MAX_CHARS)}\n[truncated]`
+
+const serialize = (message: SessionV1.WithParts) => {
+  if (message.info.role === "user") {
+    const text = message.parts
+      .filter((part): part is SessionV1.TextPart => part.type === "text" && !part.ignored)
+      .map((part) => part.text)
+      .filter(Boolean)
+      .join("\n")
+    const files = message.parts.flatMap((part) =>
+      part.type === "file" ? [`[Attached ${part.mime}: ${part.filename ?? "file"}]`] : [],
+    )
+    return [...(text ? [`[User]: ${text}`] : []), ...files].join("\n")
+  }
+  return message.parts
+    .flatMap((part) => {
+      if (part.type === "text") return part.text ? [`[Assistant]: ${part.text}`] : []
+      if (part.type === "reasoning") return part.text ? [`[Assistant reasoning]: ${part.text}`] : []
+      if (part.type !== "tool") return []
+      const call = `[Assistant tool call]: ${part.tool}(${JSON.stringify(part.state.input)})`
+      if (part.state.status === "completed") {
+        const attachments = (part.state.attachments ?? []).map(
+          (item) => `[Attached ${item.mime}: ${item.filename ?? "file"}]`,
+        )
+        const output = part.state.time.compacted
+          ? "[Old tool result content cleared]"
+          : truncate([part.state.output, ...attachments].join("\n"))
+        return [call, `[Tool result]: ${output}`]
+      }
+      if (part.state.status === "error") return [call, `[Tool error]: ${part.state.error}`]
+      return [call]
+    })
+    .join("\n")
 }
 
 function summaryText(message: SessionV1.WithParts) {
@@ -323,7 +359,7 @@ const layer = Layer.effect(
           toolOutputMaxChars: TOOL_OUTPUT_MAX_CHARS,
         })
       const all = yield* convert(input.messages)
-      if (safeEstimate(JSON.stringify(all)) <= budget) return all
+      if (safeEstimate(JSON.stringify(all)) <= budget) return input.messages
 
       const candidates = turns(input.messages)
       for (const turn of candidates.slice(1)) {
@@ -333,13 +369,13 @@ const layer = Layer.effect(
           dropped: turn.start,
           budget,
         })
-        return messages
+        return input.messages.slice(turn.start)
       }
 
       const last = input.messages.findLast((message) => message.info.role === "user")
-      if (!last) return all
+      if (!last) return input.messages
       yield* Effect.logWarning("compaction history reduced to latest user turn", { budget })
-      return yield* convert([last])
+      return [last]
     })
 
     const select = Effect.fn("SessionCompaction.select")(function* (input: {
@@ -347,27 +383,22 @@ const layer = Layer.effect(
       cfg: ConfigV1.Info
       model: Provider.Model
     }) {
-      const limit = input.cfg.compaction?.tail_turns ?? DEFAULT_TAIL_TURNS
-      if (limit <= 0) return { head: input.messages, tail_start_id: undefined }
+      const limit = input.cfg.compaction?.tail_turns
+      if (limit !== undefined && limit <= 0) return { head: input.messages, tail_start_id: undefined }
       const budget = preserveRecentBudget({ cfg: input.cfg, model: input.model })
       const all = turns(input.messages)
       if (!all.length) return { head: input.messages, tail_start_id: undefined }
-      const recent = all.slice(-limit)
-      const sizes = yield* Effect.forEach(
-        recent,
-        (turn) =>
-          estimate({
-            messages: input.messages.slice(turn.start, turn.end),
-            model: input.model,
-          }),
-        { concurrency: 1 },
-      )
+      const recent = limit === undefined ? all : all.slice(-limit)
 
       let total = 0
       let keep: Tail | undefined
       for (let i = recent.length - 1; i >= 0; i--) {
         const turn = recent[i]!
-        const size = sizes[i]
+        // estimate lazily so cost stays proportional to the retained tail, not the whole session
+        const size = yield* estimate({
+          messages: input.messages.slice(turn.start, turn.end),
+          model: input.model,
+        })
         if (total + size <= budget) {
           total += size
           keep = { start: turn.start, id: turn.id }
@@ -531,10 +562,22 @@ const layer = Layer.effect(
           part.type === "text" && part.synthetic !== true && part.text.trim() ? [part.text.trim()] : [],
         )
         .join("\n")
-      const nextPrompt = compacting.prompt ?? buildPrompt({ previousSummary, context: compacting.context })
       const msgs = structuredClone(selected.head)
       yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
-      const modelMessages = yield* fitCompactionHead({ messages: msgs, model, cfg, prompt: nextPrompt })
+      const promptHead = compacting.prompt ?? buildPrompt({ previousSummary, context: compacting.context })
+      const fitted = yield* fitCompactionHead({ messages: msgs, model, cfg, prompt: promptHead })
+      const conversation = fitted.map(serialize).filter(Boolean).join("\n\n")
+      const nextPrompt =
+        compacting.prompt ??
+        [
+          buildPrompt({
+            previousSummary,
+            context: [conversation],
+          }),
+          ...compacting.context,
+        ]
+          .filter(Boolean)
+          .join("\n\n")
       const ctx = yield* InstanceState.context
       const msg: SessionV1.Assistant = {
         id: MessageID.ascending(),
@@ -577,10 +620,19 @@ const layer = Layer.effect(
           (part): part is string => part !== undefined,
         ),
         messages: [
-          ...modelMessages,
           {
             role: "user",
-            content: [{ type: "text", text: nextPrompt }],
+            content: [
+              {
+                type: "text",
+                text: [
+                  nextPrompt,
+                  ...(compacting.prompt ? ["The following is the conversation history:", conversation] : []),
+                ]
+                  .filter(Boolean)
+                  .join("\n\n"),
+              },
+            ],
           },
         ],
         model,

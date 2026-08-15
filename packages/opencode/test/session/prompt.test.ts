@@ -261,6 +261,7 @@ const unixNoLLMServer = process.platform !== "win32" ? noLLMServer.instance : no
 // Config that registers a custom "test" provider with a "test-model" model
 // so provider model lookup succeeds inside the loop.
 const cfg = {
+  verification: { auto: false, evidence: false, critic: false },
   provider: {
     test: {
       name: "Test",
@@ -520,6 +521,46 @@ noLLMServer.instance(
       expect(recovered.runtime).toBe("v1")
       expect(recovered.generation).toBe(2)
       expect(recovered.recoveries).toBe(1)
+    }),
+  { config: cfg },
+)
+
+noLLMServer.instance(
+  "loop exits for a completed parent turn with nonmonotonic message IDs",
+  () =>
+    Effect.gen(function* () {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({ title: "Pinned" })
+      const userID = MessageID.make("msg_z_user")
+      const assistantID = MessageID.make("msg_a_assistant")
+      yield* sessions.updateMessage({
+        id: userID,
+        role: "user",
+        sessionID: chat.id,
+        agent: "build",
+        model: ref,
+        time: { created: 100 },
+      })
+      yield* sessions.updateMessage({
+        id: assistantID,
+        role: "assistant",
+        parentID: userID,
+        sessionID: chat.id,
+        mode: "build",
+        agent: "build",
+        cost: 0,
+        path: { cwd: "/tmp", root: "/tmp" },
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        modelID: ref.modelID,
+        providerID: ref.providerID,
+        time: { created: 200, completed: 201 },
+        finish: "stop",
+      })
+
+      const result = yield* prompt.loop({ sessionID: chat.id })
+
+      expect(result.info.id).toBe(assistantID)
     }),
   { config: cfg },
 )
@@ -1674,7 +1715,7 @@ noLLMServer.instance(
       yield* prompt.cancel(chat.id)
 
       const exit = yield* Fiber.await(fiber)
-      expect(Exit.isSuccess(exit)).toBe(true)
+      expect(Exit.isSuccess(exit), Exit.isFailure(exit) ? Cause.pretty(exit.cause) : undefined).toBe(true)
       yield* awaitWithTimeout(Deferred.await(aborted), "timed out waiting for task tool abort", "10 seconds")
 
       const msgs = yield* MessageV2.filterCompactedEffect(chat.id)
@@ -2123,7 +2164,7 @@ it.instance(
       yield* Fiber.await(sh)
       const exit = yield* Fiber.await(loop)
 
-      expect(Exit.isSuccess(exit)).toBe(true)
+      expect(Exit.isSuccess(exit), Exit.isFailure(exit) ? Cause.pretty(exit.cause) : undefined).toBe(true)
       if (Exit.isSuccess(exit)) {
         expect(exit.value.info.role).toBe("assistant")
         expect(exit.value.parts.some((part) => part.type === "text" && part.text === "after-shell")).toBe(true)

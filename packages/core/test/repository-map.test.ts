@@ -462,6 +462,7 @@ describe("RepositoryMap", () => {
         "concept",
         "concept",
         "context",
+        "rag",
       ])
     }),
   )
@@ -511,6 +512,7 @@ describe("RepositoryMap", () => {
         "concept",
         "concept",
         "context",
+        "rag",
       ])
     }),
   )
@@ -717,6 +719,7 @@ describe("RepositoryMap", () => {
             "lsp",
             "lsp",
             "context",
+            "rag",
           ])
         }),
       (unregister) => Effect.sync(unregister),

@@ -273,6 +273,31 @@ const responseMetadataLLM = Layer.succeed(
 const responseMetadataEnv = LayerNode.compile(root, [...replacements, [LLM.node, responseMetadataLLM]])
 const itResponseMetadata = testEffect(responseMetadataEnv)
 
+const textStartTimeLLM = Layer.succeed(
+  LLM.Service,
+  LLM.Service.of({
+    stream: () =>
+      Stream.concat(
+        Stream.make(
+          LLMEvent.stepStart({ index: 0 }),
+          LLMEvent.textStart({ id: "text-1" }),
+          LLMEvent.textDelta({ id: "text-1", text: "hello" }),
+        ),
+        Stream.fromEffect(Effect.sleep("20 millis")).pipe(
+          Stream.flatMap(() =>
+            Stream.make(
+              LLMEvent.textEnd({ id: "text-1" }),
+              LLMEvent.stepFinish({ index: 0, reason: "stop" }),
+              LLMEvent.finish({ reason: "stop" }),
+            ),
+          ),
+        ),
+      ),
+  }),
+)
+const textStartTimeEnv = LayerNode.compile(root, [...replacements, [LLM.node, textStartTimeLLM]])
+const itTextStartTime = testEffect(textStartTimeEnv)
+
 const boot = Effect.fn("test.boot")(function* () {
   const processors = yield* SessionProcessor.Service
   const session = yield* Session.Service
@@ -406,38 +431,11 @@ it.live("session.processor ignores workspace changes made outside the current re
   ),
 )
 
-it.live("session.processor effect tests preserve text start time", () =>
-  provideTmpdirServer(
-    ({ dir, llm }) =>
+itTextStartTime.live("session.processor effect tests preserve text start time", () =>
+  provideTmpdirInstance(
+    (dir) =>
       Effect.gen(function* () {
-        const database = yield* Database.Service
-        const gate = defer<void>()
         const { processors, session, provider } = yield* boot()
-
-        yield* llm.push(
-          raw({
-            head: [
-              {
-                id: "chatcmpl-test",
-                object: "chat.completion.chunk",
-                choices: [{ delta: { role: "assistant" } }],
-              },
-              {
-                id: "chatcmpl-test",
-                object: "chat.completion.chunk",
-                choices: [{ delta: { content: "hello" } }],
-              },
-            ],
-            wait: gate.promise,
-            tail: [
-              {
-                id: "chatcmpl-test",
-                object: "chat.completion.chunk",
-                choices: [{ delta: {}, finish_reason: "stop" }],
-              },
-            ],
-          }),
-        )
 
         const chat = yield* session.create({})
         const parent = yield* user(chat.id, "hi")
@@ -449,8 +447,8 @@ it.live("session.processor effect tests preserve text start time", () =>
           model: mdl,
         })
 
-        const run = yield* handle
-          .process({
+        const exit = yield* Effect.exit(
+          handle.process({
             user: {
               id: parent.id,
               sessionID: chat.id,
@@ -465,20 +463,8 @@ it.live("session.processor effect tests preserve text start time", () =>
             system: [],
             messages: [{ role: "user", content: "hi" }],
             tools: {},
-          })
-          .pipe(Effect.forkChild)
-
-        yield* waitFor(
-          MessageV2.parts(msg.id).pipe(
-            Effect.map((parts) => parts.find((part): part is SessionV1.TextPart => part.type === "text")),
-            Effect.provideService(Database.Service, database),
-          ),
-          "timed out waiting for text part",
+          }),
         )
-        yield* Effect.sleep("20 millis")
-        gate.resolve()
-
-        const exit = yield* Fiber.await(run)
         const text = (yield* MessageV2.parts(msg.id)).find((part): part is SessionV1.TextPart => part.type === "text")
 
         expect(Exit.isSuccess(exit)).toBe(true)
@@ -488,7 +474,7 @@ it.live("session.processor effect tests preserve text start time", () =>
         if (!text?.time?.start || !text.time.end) return
         expect(text.time.start).toBeLessThan(text.time.end)
       }),
-    { config: (url) => providerCfg(url) },
+    { config: cfg },
   ),
 )
 
@@ -774,6 +760,53 @@ it.live("session.processor effect tests retry recognized structured json errors"
           agent: agent(),
           system: [],
           messages: [{ role: "user", content: "retry json" }],
+          tools: {},
+        })
+
+        const parts = yield* MessageV2.parts(msg.id)
+
+        expect(value).toBe("continue")
+        expect(yield* llm.calls).toBe(2)
+        expect(parts.some((part) => part.type === "text" && part.text === "after")).toBe(true)
+        expect(handle.message.error).toBeUndefined()
+      }),
+    { config: (url) => providerCfg(url) },
+  ),
+)
+
+it.live("session.processor effect tests retry OpenAI-compatible midstream server errors", () =>
+  provideTmpdirServer(
+    ({ dir, llm }) =>
+      Effect.gen(function* () {
+        const { processors, session, provider } = yield* boot()
+
+        yield* llm.push(raw({ chunks: [{ error: { type: "server_error", code: "server_error", message: "xxx" } }] }))
+        yield* llm.text("after")
+
+        const chat = yield* session.create({})
+        const parent = yield* user(chat.id, "retry midstream server error")
+        const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
+        const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
+        const handle = yield* processors.create({
+          assistantMessage: msg,
+          sessionID: chat.id,
+          model: mdl,
+        })
+
+        const value = yield* handle.process({
+          user: {
+            id: parent.id,
+            sessionID: chat.id,
+            role: "user",
+            time: parent.time,
+            agent: parent.agent,
+            model: { providerID: ref.providerID, modelID: ref.modelID },
+          } satisfies SessionV1.User,
+          sessionID: chat.id,
+          model: mdl,
+          agent: agent(),
+          system: [],
+          messages: [{ role: "user", content: "retry midstream server error" }],
           tools: {},
         })
 

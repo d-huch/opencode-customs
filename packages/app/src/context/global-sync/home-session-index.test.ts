@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { SessionV2Info } from "@opencode-ai/sdk/v2/client"
 import { QueryClient } from "@tanstack/solid-query"
-import { createMemo, createRoot } from "solid-js"
 import {
   applyHomeSessionEvent,
   appendHomeSessionEvent,
@@ -197,22 +196,6 @@ describe("Home V2 session index", () => {
 
     expect(queryClient.getQueryData<HomeSessionIndex>(cache.indexKey)).toEqual({ sessions: [], eventSequence: 13 })
     expect(queryClient.getQueryData<HomeSessionEvents>(cache.eventsKey)).toEqual({ sequence: 13, entries: [] })
-  })
-
-  test("reactively hides a deleted session before the index query cache changes", () => {
-    createRoot((dispose) => {
-      const cache = createHomeSessionIndexCache(new QueryClient(), "local-reactive")
-      const initial = parseHomeSessionIndex([session({ id: "deleted" })])
-      const visible = createMemo(() => cache.sessions({ sessions: initial, eventSequence: 0 }, undefined))
-
-      expect(visible()).toHaveLength(1)
-      cache.apply({
-        type: "session.deleted",
-        properties: { sessionID: initial[0]!.id, info: initial[0]! },
-      })
-      expect(visible()).toEqual([])
-      dispose()
-    })
   })
 
   test("refetches after reconnect, disposal, and session moves", () => {

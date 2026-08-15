@@ -5,7 +5,17 @@ import { Switch } from "@opencode-ai/ui/switch"
 import { Tabs } from "@opencode-ai/ui/tabs"
 import { showToast } from "@/utils/toast"
 import { useNavigate } from "@solidjs/router"
-import { type Accessor, createEffect, createMemo, createResource, For, Index, onCleanup, Show } from "solid-js"
+import {
+  type Accessor,
+  createEffect,
+  createMemo,
+  createResource,
+  For,
+  Index,
+  type JSXElement,
+  onCleanup,
+  Show,
+} from "solid-js"
 import { createStore } from "solid-js/store"
 import { ServerHealthIndicator, ServerRow } from "@/components/server/server-row"
 import { useLanguage } from "@/context/language"
@@ -20,6 +30,19 @@ import { useSDK } from "@/context/sdk"
 import { useRepositoryDiagnostics } from "@/context/repository-diagnostics"
 import { useServerSync } from "@/context/server-sync"
 import { SettingsModelContextLimit } from "./settings-model-context-limit"
+import { useServerProtocol } from "@/context/server-sdk"
+
+const pluginEmptyMessage = (value: string, file: string): JSXElement => {
+  const parts = value.split(file)
+  if (parts.length === 1) return value
+  return (
+    <>
+      {parts[0]}
+      <code class="bg-surface-raised-base px-1.5 py-0.5 rounded-sm text-text-base">{file}</code>
+      {parts.slice(1).join(file)}
+    </>
+  )
+}
 
 const listServersByHealth = (
   list: ServerConnection.Any[],
@@ -396,6 +419,12 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
     if (phase === "complete") return language.t("status.popover.runtime.turn.phase.complete")
     return language.t("status.popover.runtime.turn.phase.failed")
   }
+  const protocol = useServerProtocol()
+  const plugins = createMemo(() =>
+    (sync().data.config.plugin ?? []).map((item) => (typeof item === "string" ? item : item[0])),
+  )
+  const pluginCount = createMemo(() => plugins().length)
+  const pluginEmpty = createMemo(() => pluginEmptyMessage(language.t("dialog.plugins.empty"), "opencode.json"))
 
   const fail = (err: unknown) => {
     showToast({
@@ -457,7 +486,12 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
     dialogDead = true
     dialogRun += 1
   })
-  const sortedServers = createMemo(() => listServersByHealth(global.servers.list(), server.key, global.servers.health))
+  const sortedServers = createMemo(() => {
+    const list = settings.general.newLayoutDesigns()
+      ? global.servers.list()
+      : global.servers.list().filter((x) => global.ensureServerCtx(x).sdk.protocolKind() !== "v2")
+    return listServersByHealth(list, server.key, global.servers.health)
+  })
   const toggleMcp = useMcpToggle()
   const defaultServer = useDefaultServerKey(platform.getDefaultServer ? () => platform.getDefaultServer?.() : undefined)
   const mcpNames = createMemo(() => Object.keys(sync().data.mcp ?? {}).sort((a, b) => a.localeCompare(b)))
@@ -578,7 +612,7 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
         <Tabs.List data-slot="tablist" class="bg-transparent border-b-0 px-4 pt-2 pb-0 gap-4 h-10">
           {!settings.general.newLayoutDesigns() && (
             <Tabs.Trigger value="servers" data-slot="tab" class="text-12-regular">
-              {global.servers.list().length > 0 ? `${global.servers.list().length} ` : ""}
+              {sortedServers().length > 0 ? `${sortedServers().length} ` : ""}
               {language.t("status.popover.tab.servers")}
             </Tabs.Trigger>
           )}
@@ -598,6 +632,12 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
           <Show when={desktop()}>
             <Tabs.Trigger value="repository-map" data-slot="tab" class="text-12-regular">
               {language.t("status.popover.tab.repositoryMap")}
+            </Tabs.Trigger>
+          </Show>
+          <Show when={protocol() === "v1"}>
+            <Tabs.Trigger value="plugins" data-slot="tab" class="text-12-regular">
+              {pluginCount() > 0 ? `${pluginCount()} ` : ""}
+              {language.t("status.popover.tab.plugins")}
             </Tabs.Trigger>
           </Show>
         </Tabs.List>
@@ -1309,6 +1349,28 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
                     </Show>
                   </div>
                 </div>
+              </div>
+            </div>
+          </Tabs.Content>
+        </Show>
+
+        <Show when={protocol() === "v1"}>
+          <Tabs.Content value="plugins">
+            <div class="flex flex-col px-2 pb-2">
+              <div class="flex flex-col p-3 bg-background-base rounded-sm min-h-14">
+                <Show
+                  when={plugins().length > 0}
+                  fallback={<div class="text-14-regular text-text-base text-center my-auto">{pluginEmpty()}</div>}
+                >
+                  <For each={plugins()}>
+                    {(plugin) => (
+                      <div class="flex items-center gap-2 w-full px-2 py-1">
+                        <div class="size-1.5 rounded-full shrink-0 bg-icon-success-base" />
+                        <span class="text-14-regular text-text-base truncate">{plugin}</span>
+                      </div>
+                    )}
+                  </For>
+                </Show>
               </div>
             </div>
           </Tabs.Content>

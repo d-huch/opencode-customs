@@ -8,8 +8,10 @@ import { TextReveal } from "@opencode-ai/ui/text-reveal"
 import { TextStrikethrough } from "@opencode-ai/ui/text-strikethrough"
 import { createResizeObserver } from "@solid-primitives/resize-observer"
 import { Index, createEffect, createMemo, onCleanup } from "solid-js"
+import { Dynamic } from "solid-js/web"
 import { createStore } from "solid-js/store"
 import { useLanguage } from "@/context/language"
+import { useSettings } from "@/context/settings"
 
 const doneToken = "\u0000done\u0000"
 const totalToken = "\u0000total\u0000"
@@ -48,6 +50,7 @@ export function SessionTodoDock(props: {
   dockProgress: number
 }) {
   const language = useLanguage()
+  const settings = useSettings()
   const [store, setStore] = createStore({
     height: 78,
   })
@@ -99,8 +102,13 @@ export function SessionTodoDock(props: {
   })
 
   return (
-    <DockTray
+    <Dynamic
+      component={settings.general.newLayoutDesigns() ? "div" : DockTray}
       data-component="session-todo-dock"
+      classList={{
+        "w-full overflow-hidden rounded-xl border-[0.5px] border-v2-border-border-base bg-v2-background-bg-layer-01":
+          settings.general.newLayoutDesigns(),
+      }}
       style={{
         "overflow-x": "visible",
         "overflow-y": "hidden",
@@ -110,7 +118,11 @@ export function SessionTodoDock(props: {
       <div ref={contentRef}>
         <div
           data-action="session-todo-toggle"
-          class="pl-3 pr-2 py-2 flex items-center gap-2 overflow-visible"
+          classList={{
+            "flex items-center gap-2 overflow-visible": true,
+            "h-[42px] pl-4 pr-2": settings.general.newLayoutDesigns(),
+            "pl-3 pr-2 py-2": !settings.general.newLayoutDesigns(),
+          }}
           role="button"
           tabIndex={0}
           onClick={props.onToggle}
@@ -121,7 +133,12 @@ export function SessionTodoDock(props: {
           }}
         >
           <span
-            class="text-14-regular text-text-strong cursor-default inline-flex items-baseline shrink-0 overflow-visible"
+            classList={{
+              "cursor-default inline-flex items-baseline shrink-0 overflow-visible": true,
+              "font-[440] text-[13px] leading-5 tracking-[-0.04px] text-v2-text-text-muted":
+                settings.general.newLayoutDesigns(),
+              "text-14-regular text-text-strong": !settings.general.newLayoutDesigns(),
+            }}
             aria-label={label()}
             style={{
               "--tool-motion-odometer-ms": "600ms",
@@ -153,7 +170,11 @@ export function SessionTodoDock(props: {
             }}
           >
             <TextReveal
-              class="text-14-regular text-text-base cursor-default"
+              class={
+                settings.general.newLayoutDesigns()
+                  ? "cursor-default text-[13px] font-[440] leading-5 tracking-[-0.04px] text-v2-text-text-faint"
+                  : "text-14-regular text-text-base cursor-default"
+              }
               text={props.collapsed ? preview() : undefined}
               duration={600}
               travel={25}
@@ -199,7 +220,7 @@ export function SessionTodoDock(props: {
           <TodoList todos={props.todos} />
         </div>
       </div>
-    </DockTray>
+    </Dynamic>
   )
 }
 

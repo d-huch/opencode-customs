@@ -120,7 +120,6 @@ export function compile(input: Input): Output {
   const checkpoint = fitText(groups.checkpoint_summary, sourceBudget(budget, "checkpoint_summary"), true)
   const memory = fitText(groups.memory, sourceBudget(budget, "memory"), true)
   const repository = fitText(groups.repository_evidence, sourceBudget(budget, "repository_evidence"), true)
-  const selectedTools = fitTools(input.tools, required, sourceBudget(budget, "tool_schemas"))
   const current = { items: [...split.current], omitted: 0 }
   const recent = fitMessages(split.recent, sourceBudget(budget, "recent_dialogue"))
   const results = { items: [...split.toolResults], omitted: 0 }
@@ -129,6 +128,17 @@ export function compile(input: Input): Output {
       (item) => item.content,
     )
   const messages = () => [...recent.items, ...current.items, ...results.items]
+  // Tool schemas receive the real space left after the selected instructions and
+  // dialogue, while retaining the ratio as a minimum. This keeps the full coding
+  // toolset available in large contexts without letting schemas starve the prompt.
+  const selectedTools = fitTools(
+    input.tools,
+    required,
+    Math.max(
+      sourceBudget(budget, "tool_schemas"),
+      budget - estimate({ system: selectedSystem(), messages: messages(), tools: {} }),
+    ),
+  )
   const size = () => estimate({ system: selectedSystem(), messages: messages(), tools: selectedTools.tools })
   while (input.limit > 0 && size() >= input.limit) {
     if (recent.items.length > 0) {
@@ -374,12 +384,26 @@ function fitTools(input: Readonly<Record<string, Tool>>, required: ReadonlySet<s
   const selectedTools: Record<string, Tool> = {}
   let used = 0
   for (const name of ordered) {
-    const full = estimateValue({ [name]: input[name] })
-    const selected = used + full <= budget ? input[name]! : compact[name]!
+    const selected = compact[name]!
     const tokens = estimateValue({ [name]: selected })
     if (!required.has(name) && used + tokens > budget) continue
     selectedTools[name] = selected
     used += tokens
+  }
+  for (const name of Object.keys(selectedTools).toSorted((left, right) => {
+    const requiredOrder = Number(required.has(right)) - Number(required.has(left))
+    if (requiredOrder) return requiredOrder
+    return (
+      estimateValue({ [left]: input[left] }) -
+      estimateValue({ [left]: compact[left] }) -
+      (estimateValue({ [right]: input[right] }) - estimateValue({ [right]: compact[right] }))
+    )
+  })) {
+    const compactTokens = estimateValue({ [name]: compact[name] })
+    const fullTokens = estimateValue({ [name]: input[name] })
+    if (used + fullTokens - compactTokens > budget) continue
+    selectedTools[name] = input[name]!
+    used += fullTokens - compactTokens
   }
   const tools = Object.fromEntries(
     Object.entries(selectedTools).toSorted(([left], [right]) => left.localeCompare(right)),

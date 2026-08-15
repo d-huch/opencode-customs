@@ -132,8 +132,10 @@ const layer = Layer.effect(
     ) {
       for (const message of yield* getContext(sessionID)) {
         if (message.type !== "assistant") continue
-        for (const tool of message.content) {
-          if (tool.type !== "tool" || (tool.state.status !== "pending" && tool.state.status !== "running")) continue
+        const interruptedTools = message.content.flatMap((part) =>
+          part.type === "tool" && (part.state.status === "pending" || part.state.status === "running") ? [part] : [],
+        )
+        for (const tool of interruptedTools) {
           yield* events.publish(SessionEvent.Tool.Failed, {
             sessionID,
             timestamp: yield* DateTime.now,
@@ -146,6 +148,7 @@ const layer = Layer.effect(
             },
           })
         }
+        if (interruptedTools.length > 0) continue
         if (message.finish !== undefined || message.time.completed !== undefined) continue
         yield* events.publish(SessionEvent.Step.Failed, {
           sessionID,

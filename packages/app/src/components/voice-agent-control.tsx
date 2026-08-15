@@ -1161,7 +1161,7 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
                 {
                   label: language.t("voice.error.permission.settings"),
                   onClick: () =>
-                    platform.openLink("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"),
+                    platform.openExternal("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"),
                 },
               ]
             : undefined,

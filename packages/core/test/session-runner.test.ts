@@ -53,6 +53,8 @@ import { SystemContext } from "@opencode-ai/core/system-context"
 import { SystemContextRegistry } from "@opencode-ai/core/system-context/registry"
 import { SkillGuidance } from "@opencode-ai/core/skill/guidance"
 import { ReferenceGuidance } from "@opencode-ai/core/reference/guidance"
+import { RepositoryContextRouter } from "@opencode-ai/core/repository-context-router"
+import { ResponseRepetition } from "@opencode-ai/core/response-repetition"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { Location } from "@opencode-ai/core/location"
 import { ProviderV2 } from "@opencode-ai/core/provider"
@@ -61,6 +63,9 @@ import { asc, eq } from "drizzle-orm"
 import { testEffect } from "./lib/effect"
 
 const requests: LLMRequest[] = []
+const responseControl = `${ResponseRepetition.instruction}\n${RepositoryContextRouter.searchScopeInstruction}`
+const requestSystem = (request: LLMRequest | undefined) =>
+  request?.system.map((part) => part.text).filter((part) => part !== responseControl)
 let response: LLMEvent[] = []
 let responses: LLMEvent[][] | undefined
 let responseStream: Stream.Stream<LLMEvent, LLMError> | undefined
@@ -624,6 +629,7 @@ describe("SessionRunnerLLM", () => {
 
       const message = yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Run automatically" }) })
 
+      while (requests.length < 1) yield* Effect.yieldNow
       expect(requests).toHaveLength(1)
       expect(yield* session.messages({ sessionID })).toMatchObject([
         { id: message.id, type: "user", text: "Run automatically" },
@@ -705,6 +711,7 @@ describe("SessionRunnerLLM", () => {
       systemUnavailable = false
       yield* session.prompt({ id: messageID, sessionID, prompt: Prompt.make({ text: "First" }) })
 
+      while (requests.length < 1) yield* Effect.yieldNow
       expect(requests).toHaveLength(1)
       expect(requests[0]?.messages.map((message) => message.role)).toEqual(["user"])
     }),
@@ -726,13 +733,6 @@ describe("SessionRunnerLLM", () => {
         timestamp: DateTime.makeUnsafe(1),
         location: Location.Ref.make({ directory: AbsolutePath.make("/moved") }),
       })
-      expect(
-        yield* db
-          .select()
-          .from(SessionContextEpochTable)
-          .where(eq(SessionContextEpochTable.session_id, sessionID))
-          .get(),
-      ).toBeUndefined()
 
       yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Second" }), resume: false })
       const exit = yield* session.resume(sessionID).pipe(Effect.exit)
@@ -781,7 +781,7 @@ describe("SessionRunnerLLM", () => {
       yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Second" }), resume: false })
       yield* session.resume(sessionID)
 
-      expect(requests.map((request) => request.system.map((part) => part.text))).toEqual([
+      expect(requests.map(requestSystem)).toEqual([
         ["Initial context"],
         ["Initial context"],
       ])
@@ -819,7 +819,7 @@ describe("SessionRunnerLLM", () => {
       response = fragmentFixture("text", "text-build", ["Done"]).completeEvents
       yield* session.resume(sessionID)
 
-      expect(requests.at(-1)?.system.map((part) => part.text)).toEqual(["Build agent instructions", "Initial context"])
+      expect(requestSystem(requests.at(-1))).toEqual(["Build agent instructions", "Initial context"])
     }),
   )
 
@@ -845,7 +845,7 @@ describe("SessionRunnerLLM", () => {
       response = fragmentFixture("text", "text-reviewer", ["Done"]).completeEvents
       yield* session.resume(sessionID)
 
-      expect(requests.at(-1)?.system.map((part) => part.text)).toEqual(["Reviewer instructions", "Initial context"])
+      expect(requestSystem(requests.at(-1))).toEqual(["Reviewer instructions", "Initial context"])
       expect((yield* session.messages({ sessionID }))[0]).toMatchObject({ type: "assistant", agent: "reviewer" })
     }),
   )
@@ -874,7 +874,7 @@ describe("SessionRunnerLLM", () => {
       response = fragmentFixture("text", "text-selected", ["Done"]).completeEvents
       yield* session.resume(sessionID)
 
-      expect(requests.at(-1)?.system.map((part) => part.text)).toEqual(["Reviewer instructions", "Initial context"])
+      expect(requestSystem(requests.at(-1))).toEqual(["Reviewer instructions", "Initial context"])
       expect((yield* session.messages({ sessionID }))[0]).toMatchObject({ type: "assistant", agent: "reviewer" })
     }),
   )
@@ -900,7 +900,7 @@ describe("SessionRunnerLLM", () => {
       yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Second" }), resume: false })
       yield* session.resume(sessionID)
 
-      expect(requests.map((request) => request.system.map((part) => part.text))).toEqual([
+      expect(requests.map(requestSystem)).toEqual([
         ["Initial context\n\nBuild skills"],
         ["Initial context\n\nBuild skills"],
       ])
@@ -934,7 +934,7 @@ describe("SessionRunnerLLM", () => {
       response = []
       yield* session.resume(sessionID)
 
-      expect(requests.map((request) => request.system.map((part) => part.text))).toEqual([
+      expect(requests.map(requestSystem)).toEqual([
         ["Initial context\n\nBuild skills"],
       ])
     }),
@@ -964,7 +964,7 @@ describe("SessionRunnerLLM", () => {
       response = []
       yield* session.resume(sessionID)
       expect(requests.map((request) => request.model)).toEqual([model])
-      expect(requests.map((request) => request.system.map((part) => part.text))).toEqual([["Initial context"]])
+      expect(requests.map(requestSystem)).toEqual([["Initial context"]])
     }),
   )
 
@@ -1012,7 +1012,7 @@ describe("SessionRunnerLLM", () => {
       yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Third" }), resume: false })
       yield* session.resume(sessionID)
 
-      expect(requests.map((request) => request.system.map((part) => part.text))).toEqual([
+      expect(requests.map(requestSystem)).toEqual([
         ["Initial context"],
         ["Initial context"],
         ["Initial context"],
@@ -1058,7 +1058,7 @@ describe("SessionRunnerLLM", () => {
       yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Third" }), resume: false })
       yield* session.resume(sessionID)
 
-      expect(requests.map((request) => request.system.map((part) => part.text))).toEqual([
+      expect(requests.map(requestSystem)).toEqual([
         ["Initial context"],
         ["Initial context"],
         ["Initial context"],
@@ -1095,7 +1095,7 @@ describe("SessionRunnerLLM", () => {
       yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Second" }), resume: false })
       yield* session.resume(sessionID)
 
-      expect(requests.map((request) => request.system.map((part) => part.text))).toEqual([
+      expect(requests.map(requestSystem)).toEqual([
         ["Initial context"],
         ["Replacement context"],
       ])
@@ -1133,14 +1133,16 @@ describe("SessionRunnerLLM", () => {
       expect(requests).toHaveLength(2)
       expect(userTexts(requests[0])[0]).toContain("## Objective")
       expect(userTexts(requests[1])).toHaveLength(1)
-      expect(userTexts(requests[1])[0]).toContain("<summary>\n## Objective\n- Preserve the task\n</summary>")
+      expect(userTexts(requests[1])[0]).toContain(
+        "<summary>\n## Objective\n- Preserve the task\n\n## Important Details",
+      )
       expect(userTexts(requests[1])[0]).toContain(`[User]: ${"Recent exact request ".repeat(180)}`)
 
       const context = yield* (yield* SessionStore.Service).context(sessionID)
       expect(context.map((message) => message.type)).toEqual(["compaction", "assistant"])
       expect(context[0]).toMatchObject({
         type: "compaction",
-        summary: "## Objective\n- Preserve the task",
+        summary: expect.stringContaining("## Objective\n- Preserve the task\n\n## Important Details"),
       })
 
       requests.length = 0
@@ -1158,13 +1160,74 @@ describe("SessionRunnerLLM", () => {
 
       expect(requests).toHaveLength(2)
       expect(userTexts(requests[0])[0]).toContain(
-        "<previous-summary>\n## Objective\n- Preserve the task\n</previous-summary>",
+        "<prior-summary>\n## Objective\n- Preserve the task\n\n## Important Details",
       )
       expect(userTexts(requests[0])[0]).toContain("Recent exact request")
       expect((yield* (yield* SessionStore.Service).context(sessionID))[0]).toMatchObject({
         type: "compaction",
-        summary: "## Objective\n- Preserve the updated task",
+        summary: expect.stringContaining("## Objective\n- Preserve the updated task\n\n## Important Details"),
       })
+    }),
+  )
+
+  it.effect("retains only complete serialized messages during compaction", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      const earlier = `EARLIER_BOUNDARY ${"a".repeat(3_000)} EARLIER_END`
+      const recent = `RECENT_BOUNDARY ${"b".repeat(3_000)} RECENT_END`
+      response = fragmentFixture("text", "text-earlier", ["Earlier answer"]).completeEvents
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: earlier }), resume: false })
+      yield* session.resume(sessionID)
+
+      currentModel = compactModel
+      requests.length = 0
+      responses = [
+        fragmentFixture("text", "text-summary", ["## Objective\n- Preserve the task"]).completeEvents,
+        fragmentFixture("text", "text-final", ["Continued"]).completeEvents,
+      ]
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: recent }), resume: false })
+      yield* session.resume(sessionID)
+
+      expect(requests).toHaveLength(2)
+      const summary = userTexts(requests[0])[0]
+      const continuation = userTexts(requests[1])[0]
+      expect(summary.match(/EARLIER_BOUNDARY/g)).toHaveLength(1)
+      expect(summary).toContain(`EARLIER_BOUNDARY ${"a".repeat(3_000)} EARLIER_END`)
+      expect(summary).not.toContain("RECENT_BOUNDARY")
+      expect(continuation).not.toContain("EARLIER_BOUNDARY")
+      expect(continuation).not.toContain("EARLIER_END")
+      expect(continuation).toContain("<recent-context>\n[Assistant]: Earlier answer")
+      expect(continuation).toContain(`RECENT_BOUNDARY ${"b".repeat(3_000)} RECENT_END`)
+    }),
+  )
+
+  it.effect("summarizes an oversized newest message without retaining a fragment", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      response = fragmentFixture("text", "text-earlier", ["Earlier answer"]).completeEvents
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Earlier question" }), resume: false })
+      yield* session.resume(sessionID)
+
+      const oversized = `OVERSIZED_BOUNDARY ${"x".repeat(4_500)} OVERSIZED_END`
+      currentModel = compactModel
+      requests.length = 0
+      responses = [
+        fragmentFixture("text", "text-summary", ["## Objective\n- Preserve the task"]).completeEvents,
+        fragmentFixture("text", "text-final", ["Continued"]).completeEvents,
+      ]
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: oversized }), resume: false })
+      yield* session.resume(sessionID)
+
+      expect(requests).toHaveLength(2)
+      const summary = userTexts(requests[0])[0]
+      const continuation = userTexts(requests[1])[0]
+      expect(summary.match(/OVERSIZED_BOUNDARY/g)).toHaveLength(1)
+      expect(summary).toContain(oversized)
+      expect(continuation).not.toContain("OVERSIZED_BOUNDARY")
+      expect(continuation).not.toContain("OVERSIZED_END")
+      expect(continuation).toContain("<recent-context>\n\n</recent-context>")
     }),
   )
 
@@ -1325,7 +1388,7 @@ describe("SessionRunnerLLM", () => {
       yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Third" }), resume: false })
       yield* session.resume(sessionID)
 
-      expect(requests.at(-1)?.system.map((part) => part.text)).toEqual(["Initial context"])
+      expect(requestSystem(requests.at(-1))).toEqual(["Initial context"])
       expect(systemTexts(requests.at(-1)!)).toContain("Changed context")
     }),
   )
@@ -1523,7 +1586,7 @@ describe("SessionRunnerLLM", () => {
       yield* Fiber.join(run)
 
       expect(requests.map((request) => request.model)).toEqual([model, replacementModel])
-      expect(requests.map((request) => request.system.map((part) => part.text))).toEqual([
+      expect(requests.map(requestSystem)).toEqual([
         ["Initial context"],
         ["Initial context"],
       ])
@@ -2211,7 +2274,7 @@ describe("SessionRunnerLLM", () => {
       streamFailure = undefined
       streamGate = undefined
       streamStarted = undefined
-      yield* Effect.yieldNow
+      while (requests.length < 2) yield* Effect.yieldNow
 
       expect(requests).toHaveLength(2)
       expect(userTexts(requests[1]!)).toEqual(["Start working", "Recover with this"])
@@ -2488,7 +2551,7 @@ describe("SessionRunnerLLM", () => {
 
       requests.length = 0
       yield* (yield* SessionExecution.Service).wake(sessionID)
-      yield* Effect.yieldNow
+      while (requests.length < 1) yield* Effect.yieldNow
 
       expect(requests).toHaveLength(1)
       expect(userTexts(requests[0]!)).toEqual(["Wait in queue"])

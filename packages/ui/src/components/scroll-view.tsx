@@ -206,24 +206,12 @@ export function ScrollView(props: ScrollViewProps) {
       local.viewportRef(viewportRef)
     }
 
-    let resizeFrame: number | undefined
-    const scheduleThumbUpdate = () => {
-      if (resizeFrame !== undefined) return
-      resizeFrame = requestAnimationFrame(() => {
-        resizeFrame = undefined
-        updateThumb()
-      })
-    }
-
     createResizeObserver(
       () => [viewportRef, viewportRef.firstElementChild, thumbMount()].filter(Boolean) as HTMLElement[],
-      scheduleThumbUpdate,
+      updateThumb,
     )
 
     updateThumb()
-    onCleanup(() => {
-      if (resizeFrame !== undefined) cancelAnimationFrame(resizeFrame)
-    })
   })
 
   createEffect(() => {

@@ -8,7 +8,7 @@ import { SessionMutation } from "./mutation"
 
 export const TOOL_ID = "evidence"
 
-const researchTools = new Set(["read", "grep", "glob", "lsp", "bash"])
+const researchTools = new Set(["read", "grep", "glob", "lsp"])
 
 export const systemPrompt = (finalAttempt = false) =>
   [

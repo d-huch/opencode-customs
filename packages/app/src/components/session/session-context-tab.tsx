@@ -13,13 +13,14 @@ import { Markdown } from "@opencode-ai/session-ui/markdown"
 import { ScrollView } from "@opencode-ai/ui/scroll-view"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import type { Message, Part, UserMessage } from "@opencode-ai/sdk/v2/client"
+import { showToast } from "@/utils/toast"
+import { downloadSessionExport, fetchSessionExport, sessionExportFilename } from "@/utils/session-export"
 import { useLanguage } from "@/context/language"
 import { useProviders } from "@/hooks/use-providers"
 import { useSDK } from "@/context/sdk"
 import { usePlatform } from "@/context/platform"
 import { useServer } from "@/context/server"
 import { useSessionLayout } from "@/pages/session/session-layout"
-import { showToast } from "@/utils/toast"
 import { getSessionContext } from "./session-context-metrics"
 import { estimateSessionContextBreakdown, type SessionContextBreakdownKey } from "./session-context-breakdown"
 import { createSessionContextFormatter } from "./session-context-format"
@@ -176,7 +177,8 @@ export function SessionContextTab() {
     () => {
       const revert = info()?.revert?.messageID
       if (!revert) return userMessages()
-      return userMessages().filter((m) => m.id < revert)
+      const boundary = userMessages().findIndex((message) => message.id === revert)
+      return boundary < 0 ? userMessages() : userMessages().slice(0, boundary)
     },
     emptyUserMessages,
     { equals: same },
@@ -275,6 +277,31 @@ export function SessionContextTab() {
     { label: "context.stats.sessionCreated", value: () => formatter().time(info()?.time.created) },
     { label: "context.stats.lastActivity", value: () => formatter().time(ctx()?.message.time.created) },
   ] satisfies { label: string; value: () => JSX.Element }[]
+
+  const exportSession = async () => {
+    const sessionID = params.id
+    if (!sessionID) return
+    try {
+      const data = await fetchSessionExport({
+        sessionID,
+        client: sdk().client,
+      })
+      const filename = sessionExportFilename(data.info)
+      downloadSessionExport(filename, data)
+      showToast({
+        variant: "success",
+        icon: "circle-check",
+        title: language.t("toast.session.export.success.title"),
+        description: language.t("toast.session.export.success.description", { filename }),
+      })
+    } catch (err) {
+      showToast({
+        variant: "error",
+        title: language.t("toast.session.export.failed.title"),
+        description: err instanceof Error ? err.message : language.t("toast.session.export.failed.description"),
+      })
+    }
+  }
 
   let scroll: HTMLDivElement | undefined
   let frame: number | undefined
@@ -413,7 +440,18 @@ export function SessionContextTab() {
         </Show>
 
         <div class="flex flex-col gap-2">
-          <div class="text-12-regular text-text-weak">{language.t("context.rawMessages.title")}</div>
+          <div class="flex items-center justify-between">
+            <div class="text-12-regular text-text-weak">{language.t("context.rawMessages.title")}</div>
+            <Button
+              size="small"
+              variant="ghost"
+              class="gap-1.5 px-2 text-text-weak hover:text-text-base"
+              onClick={exportSession}
+            >
+              <Icon name="download" size="small" />
+              <span>{language.t("context.export.session")}</span>
+            </Button>
+          </div>
           <Accordion multiple>
             <For each={messages()}>
               {(message) => (

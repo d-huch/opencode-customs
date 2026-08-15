@@ -1278,45 +1278,6 @@ const layer = Layer.effect(
         const { user: lastUser, assistant: lastAssistant, finished: lastFinished, tasks } = MessageV2.latest(msgs)
 
         if (!lastUser) throw new Error("No user message found in stream. This should never happen.")
-        const lastUserMsg = msgs.findLast((message) => message.info.role === "user")
-        const criticMode = SessionCritic.continuation(lastUserMsg)
-        const activeRequest = MessageV2.activeUserRequest(msgs)
-        if (!activeRequest) throw new Error("No active user request found in stream.")
-        if (requestMessageID !== activeRequest.info.id) {
-          const bound = requestMessageID
-            ? yield* SessionExecutionCheckpoint.advanceRequest(db, checkpoint, {
-                previousMessageID: requestMessageID,
-                messageID: activeRequest.info.id,
-                step,
-              })
-            : yield* SessionExecutionCheckpoint.bindRequest(db, checkpoint, activeRequest.info.id)
-          if (!bound) throw new Error("The active user request could not claim the durable execution checkpoint.")
-          requestMessageID = activeRequest.info.id
-          evidenceAttempts = 0
-          providerTurns = 0
-          criticAttempts = 0
-          selectedModel = undefined
-          repositoryContextText = undefined
-          durableMemoryCache = undefined
-          selectedProviderID = undefined
-          selectedModelID = undefined
-          selectedInstanceID = undefined
-        }
-        pipelineHandle = RequestPipelineScheduler.claim({
-          sessionID,
-          requestMessageID: activeRequest.info.id,
-          executionID: checkpoint.executionID,
-          generation: checkpoint.generation,
-        })
-        if (!pipelineHandle.deduplicated)
-          yield* RequestPipelineScheduler.mark({
-            db,
-            checkpoint,
-            phase: "prompt_admission",
-            status: "completed",
-            detail: `Admitted ${activeRequest.info.id}`,
-          })
-        const requestPipeline = pipelineHandle
 
         const lastAssistantMsg = msgs.findLast(
           (msg) => msg.info.role === "assistant" && msg.info.id === lastAssistant?.id,
@@ -1333,7 +1294,7 @@ const layer = Layer.effect(
           lastAssistant?.finish &&
           !["tool-calls"].includes(lastAssistant.finish) &&
           !hasToolCalls &&
-          lastUser.id < lastAssistant.id
+          lastAssistant.parentID === lastUser.id
         ) {
           yield* RequestPipelineScheduler.mark({
             db,
@@ -1736,6 +1697,49 @@ const layer = Layer.effect(
           yield* Effect.logInfo("exiting loop", { "session.id": sessionID })
           break
         }
+
+        const lastUserMsg = msgs.findLast((message) => message.info.role === "user")
+        const criticMode = SessionCritic.continuation(lastUserMsg)
+        // Standalone shell commands create a synthetic user turn rather than a regular
+        // admitted prompt. Keep that turn as the durable request boundary when a queued
+        // loop resumes after the shell exits.
+        const activeRequest = MessageV2.activeUserRequest(msgs) ?? lastUserMsg
+        if (!activeRequest) throw new Error("No active user request found in stream.")
+        if (requestMessageID !== activeRequest.info.id) {
+          const bound = requestMessageID
+            ? yield* SessionExecutionCheckpoint.advanceRequest(db, checkpoint, {
+                previousMessageID: requestMessageID,
+                messageID: activeRequest.info.id,
+                step,
+              })
+            : yield* SessionExecutionCheckpoint.bindRequest(db, checkpoint, activeRequest.info.id)
+          if (!bound) throw new Error("The active user request could not claim the durable execution checkpoint.")
+          requestMessageID = activeRequest.info.id
+          evidenceAttempts = 0
+          providerTurns = 0
+          criticAttempts = 0
+          selectedModel = undefined
+          repositoryContextText = undefined
+          durableMemoryCache = undefined
+          selectedProviderID = undefined
+          selectedModelID = undefined
+          selectedInstanceID = undefined
+        }
+        pipelineHandle = RequestPipelineScheduler.claim({
+          sessionID,
+          requestMessageID: activeRequest.info.id,
+          executionID: checkpoint.executionID,
+          generation: checkpoint.generation,
+        })
+        if (!pipelineHandle.deduplicated)
+          yield* RequestPipelineScheduler.mark({
+            db,
+            checkpoint,
+            phase: "prompt_admission",
+            status: "completed",
+            detail: `Admitted ${activeRequest.info.id}`,
+          })
+        const requestPipeline = pipelineHandle
 
         step++
         yield* SessionExecutionCheckpoint.advance(db, checkpoint, { state: "preparing", step })
