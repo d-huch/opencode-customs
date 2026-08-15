@@ -13,6 +13,7 @@ import { useSDK } from "./sdk"
 import { useSync } from "./sync"
 import { useServerSDK } from "./server-sdk"
 import { ScopedKey, type ServerScope } from "@/utils/server-scope"
+import { resolveAgentPersonality } from "@/utils/agent-personalization"
 
 export type ModelKey = { providerID: string; modelID: string; variant?: string }
 
@@ -20,6 +21,7 @@ type State = {
   agent?: string
   model?: ModelKey
   variant?: string | null
+  personalityPresetID?: string | null
 }
 
 type Saved = {
@@ -210,6 +212,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
             agent: item.name,
             model: item.model ?? prev?.model,
             variant: item.variant ?? prev?.variant,
+            personalityPresetID: prev?.personalityPresetID,
           } satisfies State
           const session = id()
           if (session) {
@@ -258,12 +261,41 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
 
     const selected = () => scope()?.variant
 
+    const personalityPresetID = () => {
+      const state = scope()
+      const selected =
+        state && Object.prototype.hasOwnProperty.call(state, "personalityPresetID")
+          ? state.personalityPresetID
+          : undefined
+      return (
+        resolveAgentPersonality(
+          settings.personalization.presets(),
+          selected,
+          settings.personalization.defaultPresetID(),
+        )?.id ?? null
+      )
+    }
+
+    const personality = {
+      list: settings.personalization.presets,
+      currentID: personalityPresetID,
+      current: createMemo(() => {
+        const selected = personalityPresetID()
+        if (!selected) return
+        return settings.personalization.presets().find((preset) => preset.id === selected)
+      }),
+      set(id: string | null) {
+        write({ personalityPresetID: id })
+      },
+    }
+
     const snapshot = () => {
       const model = current()
       return {
         agent: agent.current()?.name,
         model: model ? { providerID: model.provider.id, modelID: model.id } : undefined,
         variant: selected(),
+        personalityPresetID: personalityPresetID(),
       } satisfies State
     }
 
@@ -383,6 +415,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       slug: createMemo(() => base64Encode(sdk().directory)),
       model,
       agent,
+      personality,
       session: {
         ready: savedReady,
         reset() {

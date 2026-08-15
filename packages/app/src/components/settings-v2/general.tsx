@@ -26,6 +26,7 @@ import {
   useSettings,
 } from "@/context/settings"
 import { playSoundById, SOUND_OPTIONS } from "@/utils/sound"
+import { detachFishVoicePreset } from "@/utils/agent-personalization"
 import { Link } from "../link"
 import { SettingsListV2 } from "./parts/list"
 import { SettingsRowV2 } from "./parts/row"
@@ -199,9 +200,7 @@ export const SettingsGeneralV2: Component<{
       .synthesizeLocalSpeech({
         provider: settings.voice.ttsProvider(),
         endpoint:
-          settings.voice.ttsProvider() === "fish-local"
-            ? settings.voice.fishEndpoint()
-            : settings.voice.ttsEndpoint(),
+          settings.voice.ttsProvider() === "fish-local" ? settings.voice.fishEndpoint() : settings.voice.ttsEndpoint(),
         model: settings.voice.ttsModel(),
         voice: settings.voice.ttsVoice(),
         mode: settings.voice.ttsMode(),
@@ -393,6 +392,7 @@ export const SettingsGeneralV2: Component<{
     await platform.deleteFishAudioVoicePreset(preset.id).then(
       () => {
         if (preset.active) setFishSavedReference()
+        settings.personalization.setPresets(detachFishVoicePreset(settings.personalization.presets(), preset.id))
         addFishDebug(language.t("settings.general.voice.fish.presets.deleted"), "success")
       },
       (error: unknown) => addFishDebug(error instanceof Error ? error.message : String(error), "error"),

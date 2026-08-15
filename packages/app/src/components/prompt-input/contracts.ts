@@ -19,6 +19,11 @@ export type PromptInputControls = {
     visible: boolean
     select: (name: string | undefined) => void
   }
+  personalities: {
+    options: { id: string; label: string; voice: boolean }[]
+    current: string | null
+    select: (id: string | null) => void
+  }
   model: {
     selection: ReturnType<typeof useLocal>["model"]
     paid: boolean

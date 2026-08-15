@@ -2,7 +2,11 @@ import { describe, expect, test } from "bun:test"
 import {
   agentCatchphrases,
   agentPersonalizationInstruction,
+  detachFishVoicePreset,
+  migrateAgentPersonalization,
+  resolveAgentPersonality,
   type AgentPersonalizationProfile,
+  type AgentPersonalizationValues,
 } from "./agent-personalization"
 
 const profile: AgentPersonalizationProfile = {
@@ -17,6 +21,18 @@ const profile: AgentPersonalizationProfile = {
   humor: "subtle",
   catchphrases: "До роботи, Буде зроблено",
   customInstructions: "Lead with the result.",
+}
+const profileValues: AgentPersonalizationValues = {
+  assistantName: profile.assistantName,
+  userName: profile.userName,
+  addressAs: profile.addressAs,
+  language: profile.language,
+  tone: profile.tone,
+  detail: profile.detail,
+  proactivity: profile.proactivity,
+  humor: profile.humor,
+  catchphrases: profile.catchphrases,
+  customInstructions: profile.customInstructions,
 }
 
 describe("agentPersonalizationInstruction", () => {
@@ -60,4 +76,155 @@ describe("agentPersonalizationInstruction", () => {
     ])
     expect(agentCatchphrases(Array.from({ length: 25 }, (_, index) => `phrase ${index}`).join(","))).toHaveLength(20)
   })
+})
+
+describe("migrateAgentPersonalization", () => {
+  test("creates one silent starter preset and keeps a disabled legacy profile without a default", () => {
+    const result = migrateAgentPersonalization({
+      enabled: false,
+      values: profileValues,
+      createID: () => "starter",
+      now: 123,
+    })
+
+    expect(result.version).toBe(1)
+    expect(result.defaultPresetID).toBe("")
+    expect(result.presets).toHaveLength(1)
+    expect(result.presets[0]).toMatchObject({ id: "starter", name: "OpenCode Customs", voice: null })
+  })
+
+  test("keeps existing presets, migrates missing voices to silent, and preserves the active default", () => {
+    const preset = {
+      id: "work",
+      name: "Work",
+      ...profileValues,
+      createdAt: 1,
+      updatedAt: 2,
+    }
+    const result = migrateAgentPersonalization({
+      enabled: true,
+      activePresetID: "work",
+      presets: [preset],
+      values: profileValues,
+      createID: () => "unused",
+      now: 123,
+    })
+
+    expect(result.defaultPresetID).toBe("work")
+    expect(result.presets[0]?.voice).toBeNull()
+  })
+
+  test("preserves a complete voice snapshot during migration", () => {
+    const voice = {
+      provider: "fish-local" as const,
+      voicePresetID: "fish-1",
+      endpoint: "http://127.0.0.1:8080",
+      latency: "balanced" as const,
+      language: "uk" as const,
+      playbackRate: 1.1,
+      volume: 0.8,
+      temperature: 0.7,
+      topP: 0.9,
+      repetitionPenalty: 1.2,
+      seed: 42,
+      chunkLength: 200,
+      normalize: true,
+      streaming: true,
+      useMemoryCache: false,
+      maxNewTokens: 1_024,
+    }
+    const result = migrateAgentPersonalization({
+      enabled: true,
+      activePresetID: "voiced",
+      presets: [
+        {
+          id: "voiced",
+          name: "Voiced",
+          ...profileValues,
+          voice,
+          createdAt: 1,
+          updatedAt: 2,
+        },
+      ],
+      values: profileValues,
+      createID: () => "unused",
+      now: 123,
+    })
+
+    expect(result.presets[0]?.voice).toEqual(voice)
+  })
+})
+
+describe("resolveAgentPersonality", () => {
+  const presets = [
+    {
+      id: "default",
+      name: "Default",
+      ...profileValues,
+      voice: null,
+      createdAt: 1,
+      updatedAt: 1,
+    },
+    {
+      id: "chat",
+      name: "Chat",
+      ...profileValues,
+      voice: null,
+      createdAt: 1,
+      updatedAt: 1,
+    },
+  ]
+
+  test("uses the default only when the chat has no explicit selection", () => {
+    expect(resolveAgentPersonality(presets, undefined, "default")?.id).toBe("default")
+    expect(resolveAgentPersonality(presets, "chat", "default")?.id).toBe("chat")
+    expect(resolveAgentPersonality(presets, null, "default")).toBeUndefined()
+  })
+
+  test("does not fall back when a selected preset was deleted", () => {
+    expect(resolveAgentPersonality(presets, "missing", "default")).toBeUndefined()
+  })
+})
+
+test("deleting a Fish voice makes every linked personality silent", () => {
+  const presets = [
+    {
+      id: "fish-personality",
+      name: "Fish",
+      ...profileValues,
+      voice: {
+        provider: "fish-local" as const,
+        voicePresetID: "fish-1",
+        endpoint: "http://127.0.0.1:8080",
+        latency: "balanced" as const,
+        language: "auto" as const,
+        playbackRate: 1,
+        volume: 1,
+        temperature: 0.8,
+        topP: 0.8,
+        repetitionPenalty: 1.1,
+        seed: null,
+        chunkLength: 300,
+        normalize: true,
+        streaming: false,
+        useMemoryCache: true,
+        maxNewTokens: 1_024,
+      },
+      createdAt: 1,
+      updatedAt: 1,
+    },
+    {
+      id: "silent-personality",
+      name: "Silent",
+      ...profileValues,
+      voice: null,
+      createdAt: 1,
+      updatedAt: 1,
+    },
+  ]
+
+  const result = detachFishVoicePreset(presets, "fish-1", 99)
+
+  expect(result[0]).toMatchObject({ voice: null, updatedAt: 99 })
+  expect(result[1]).toBe(presets[1])
 })

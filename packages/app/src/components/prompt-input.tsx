@@ -84,11 +84,7 @@ import { showToast } from "@/utils/toast"
 import { ImagePreview } from "@opencode-ai/ui/image-preview"
 import type { ReferenceInfo } from "@opencode-ai/sdk/v2/client"
 import { SessionContextUsage } from "@/components/session-context-usage"
-import {
-  VoiceAgentChatStatus,
-  VoiceAgentControl,
-  type VoiceAgentStatus,
-} from "@/components/voice-agent-control"
+import { VoiceAgentChatStatus, VoiceAgentControl, type VoiceAgentStatus } from "@/components/voice-agent-control"
 
 export { createPromptInputHistory }
 export type { PromptInputControls, PromptInputHistory, PromptInputProps, PromptInputState, PromptInputSubmission }
@@ -279,6 +275,16 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const buttons = createMemo(() => motion(buttonsSpring()))
   const shell = createMemo(() => motion(1 - buttonsSpring()))
   const control = createMemo(() => ({ height: "28px", ...buttons() }))
+  const personalityOptions = createMemo(() => [
+    { id: "__none__", label: language.t("personalization.chat.none") },
+    ...props.controls.personalities.options.map((preset) => ({
+      id: preset.id,
+      label: `${preset.label} · ${language.t(
+        preset.voice ? "personalization.chat.voice" : "personalization.chat.silent",
+      )}`,
+    })),
+    { id: "__manage__", label: language.t("personalization.chat.manage") },
+  ])
 
   const commentCount = createMemo(() => {
     if (store.mode === "shell") return 0
@@ -1691,6 +1697,36 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                     </TooltipKeybind>
                   </div>
                 </Show>
+                <div class="flex min-w-0 items-center gap-1" data-component="prompt-personality-control">
+                  <Icon name="brain" class="shrink-0" />
+                  <Select
+                    size="normal"
+                    options={personalityOptions()}
+                    current={
+                      personalityOptions().find(
+                        (option) => option.id === (props.controls.personalities.current ?? "__none__"),
+                      ) ?? personalityOptions()[0]
+                    }
+                    value={(option) => option.id}
+                    label={(option) => option.label}
+                    onSelect={(option) => {
+                      if (!option) return
+                      if (option.id === "__manage__") {
+                        void import("./settings-v2/dialog-settings-v2").then((module) =>
+                          dialog.show(() => <module.DialogSettings defaultValue="personalization" />),
+                        )
+                        return
+                      }
+                      props.controls.personalities.select(option.id === "__none__" ? null : option.id)
+                      restoreFocus()
+                    }}
+                    class="max-w-[220px] text-text-base"
+                    valueClass="truncate text-13-regular text-text-base"
+                    triggerStyle={control()}
+                    triggerProps={{ "data-action": "prompt-personality" }}
+                    variant="ghost"
+                  />
+                </div>
                 <Show when={!providersLoading()}>
                   <Show when={store.mode !== "shell"}>
                     <div

@@ -28,11 +28,7 @@ import { useSync } from "@/context/sync"
 import { createSessionTabs } from "@/pages/session/helpers"
 import { showToast } from "@/utils/toast"
 import { SessionContextUsage } from "@/components/session-context-usage"
-import {
-  VoiceAgentChatStatus,
-  VoiceAgentControl,
-  type VoiceAgentStatus,
-} from "@/components/voice-agent-control"
+import { VoiceAgentChatStatus, VoiceAgentControl, type VoiceAgentStatus } from "@/components/voice-agent-control"
 import { PromptInputV2, type PromptInputV2Suggestion } from "@opencode-ai/session-ui/v2/prompt-input"
 import {
   createPromptInputV2Controller,
@@ -476,6 +472,28 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
               onSelect: props.controls.agents.select,
             }
           : undefined,
+      personality: {
+        options: () => [
+          { id: "__none__", label: language.t("personalization.chat.none") },
+          ...props.controls.personalities.options.map((preset) => ({
+            id: preset.id,
+            label: `${preset.label} · ${language.t(
+              preset.voice ? "personalization.chat.voice" : "personalization.chat.silent",
+            )}`,
+          })),
+          { id: "__manage__", label: language.t("personalization.chat.manage") },
+        ],
+        current: () => props.controls.personalities.current ?? "__none__",
+        onSelect: (id) => {
+          if (id === "__manage__") {
+            void import("./settings-v2/dialog-settings-v2").then((module) =>
+              dialog.show(() => <module.DialogSettings defaultValue="personalization" />),
+            )
+            return
+          }
+          props.controls.personalities.select(id === "__none__" ? null : id)
+        },
+      },
       variant: {
         options: () => variants().map((value) => ({ id: value, label: value })),
         current: () => props.controls.model.selection.variant.current() ?? "default",

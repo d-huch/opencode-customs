@@ -42,6 +42,15 @@ export function createPromptInputController(input: {
       visible: local.agent.visible(),
       select: local.agent.set,
     },
+    personalities: {
+      options: local.personality.list().map((preset) => ({
+        id: preset.id,
+        label: preset.name,
+        voice: !!preset.voice,
+      })),
+      current: local.personality.currentID(),
+      select: local.personality.set,
+    },
     model: {
       selection: input.model ?? local.model,
       paid: providers.paid().length > 0,

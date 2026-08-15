@@ -210,6 +210,11 @@ export function PromptInputV2(props: PromptInputV2Props) {
                 <PromptInputV2ConfiguredSelect title="Choose agent" keybind={["Mod", "."]} control={control()} />
               )}
             </Show>
+            <Show when={view.personality}>
+              {(control) => (
+                <PromptInputV2ConfiguredSelect title="Choose personality" control={control()} personality />
+              )}
+            </Show>
             <Show
               when={props.modelControl}
               fallback={
@@ -505,6 +510,7 @@ function PromptInputV2ConfiguredSelect(props: {
   keybind?: string[]
   control: PromptInputV2SelectControl
   model?: boolean
+  personality?: boolean
 }) {
   const current = () => props.control.current()
   const providerID = () => props.control.options().find((option) => option.id === current())?.providerID
@@ -515,9 +521,14 @@ function PromptInputV2ConfiguredSelect(props: {
       options={props.control.options()}
       current={current()}
       currentIcon={
-        <Show when={props.model && providerID()}>
-          <ProviderIcon id={providerID()!} class="size-4 shrink-0 opacity-60" />
-        </Show>
+        <>
+          <Show when={props.model && providerID()}>
+            <ProviderIcon id={providerID()!} class="size-4 shrink-0 opacity-60" />
+          </Show>
+          <Show when={props.personality}>
+            <IconV2 name="brain" />
+          </Show>
+        </>
       }
       onSelect={props.control.onSelect}
     />

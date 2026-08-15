@@ -7,6 +7,8 @@ const serverB = "http://127.0.0.1:4097"
 const directoryA = "C:/server-a"
 const directoryB = "/home/server-b"
 const sessionA = session("ses_server_a", directoryA, "Server A session")
+const createdSessionA = session("ses_server_a_created", directoryA, "Created Server A session")
+const personalityDraftID = "draft_personality_selection"
 const childSessionA = { ...session("ses_server_a_child", directoryA, "Server A child session"), parentID: sessionA.id }
 const sessionB = session("ses_server_b", directoryB, "Server B session")
 
@@ -44,41 +46,77 @@ test("session settings use the remote server context", async ({ page }) => {
 
 test("personalization is a separate draft-based settings tab", async ({ page }) => {
   await mockServers(page, [])
-  await configureServers(page, [], { enabled: false, assistantName: "Saved assistant" })
+  await configureServers(
+    page,
+    [{ type: "draft", draftID: personalityDraftID, server: serverA, directory: directoryA }],
+    {
+      version: 1,
+      defaultPresetID: "saved",
+      presets: [personalityPreset("saved", "Saved preset", "Saved assistant")],
+    },
+  )
 
   await page.goto("/")
   await page.getByRole("button", { name: "Settings" }).first().click()
 
   const dialog = page.locator(".settings-v2-dialog")
   await expect(dialog).toBeVisible()
+  await expect.poll(async () => (await dialog.boundingBox())?.width ?? 0).toBeGreaterThan(1_100)
   await expect(dialog.locator('[data-action="settings-agent-personalization"]')).toHaveCount(0)
   await dialog.getByRole("tab", { name: "Personalization" }).click()
 
   const assistantName = dialog.locator('[data-action="settings-personalization-assistant-name"]')
-  const enabled = dialog.locator('[data-action="settings-personalization-enabled"]')
   const cancel = dialog.locator('[data-action="settings-personalization-cancel"]')
   const save = dialog.locator('[data-action="settings-personalization-save"]')
   await expect(assistantName).toHaveValue("Saved assistant")
-  await expect(enabled.getByRole("switch")).not.toBeChecked()
   await expect(cancel).toBeDisabled()
   await expect(save).toBeDisabled()
 
   await assistantName.fill("Draft assistant")
   await expect(cancel).toBeEnabled()
   await expect(save).toBeEnabled()
-  expect(await storedPersonalization(page)).toMatchObject({ enabled: false, assistantName: "Saved assistant" })
+  expect(await storedPersonalization(page)).toMatchObject({
+    defaultPresetID: "saved",
+    presets: [{ assistantName: "Saved assistant" }],
+  })
 
   await cancel.click()
   await expect(assistantName).toHaveValue("Saved assistant")
   await expect(cancel).toBeDisabled()
   await expect(save).toBeDisabled()
 
+  await assistantName.fill("Closing draft")
+  await page.keyboard.press("Escape")
+  await expect(dialog).toHaveCount(0)
+  await page.getByRole("button", { name: "Settings" }).first().click()
+  await dialog.getByRole("tab", { name: "Personalization" }).click()
+  await expect(assistantName).toHaveValue("Saved assistant")
+
   await assistantName.fill("Jarvis")
-  await enabled.locator('[data-slot="switch-control"]').click()
-  await expect(enabled.getByRole("switch")).toBeChecked()
   await save.click()
   await expect(save).toBeDisabled()
-  await expect.poll(() => storedPersonalization(page)).toMatchObject({ enabled: true, assistantName: "Jarvis" })
+  await expect
+    .poll(() => storedPersonalization(page))
+    .toMatchObject({
+      defaultPresetID: "saved",
+      presets: [{ assistantName: "Jarvis" }],
+    })
+  await page.keyboard.press("Escape")
+
+  await page.goto(`/new-session?draftId=${personalityDraftID}`)
+  const draftPersonality = page.getByTitle("Choose personality")
+  await expect(draftPersonality).toContainText("Saved preset")
+  await draftPersonality.click()
+  await page.getByRole("menuitemradio", { name: "No personality" }).click()
+  await expect(draftPersonality).toContainText("No personality")
+  await page.locator('[data-component="prompt-input"][contenteditable="true"]').fill("Create a session")
+  await page.keyboard.press("Enter")
+  await expect(page).toHaveURL(new RegExp(`/session/${createdSessionA.id}$`))
+  await expect(page.getByTitle("Choose personality")).toContainText("No personality")
+
+  await page.goto(`/server/${base64Encode(serverA)}/session/${sessionA.id}`)
+  await expect(page.getByText(sessionA.title).first()).toBeVisible()
+  await expect(page.getByTitle("Choose personality")).toBeVisible()
 })
 
 test("auto-accept responds for an unfocused server session", async ({ page }) => {
@@ -190,8 +228,11 @@ type PermissionResponse = {
 
 async function configureServers(
   page: Page,
-  tabs: { type: "session"; server: string; sessionId: string }[] = [],
-  personalization?: { enabled: boolean; assistantName: string },
+  tabs: Array<
+    | { type: "session"; server: string; sessionId: string }
+    | { type: "draft"; draftID: string; server: string; directory: string }
+  > = [],
+  personalization?: Record<string, unknown>,
 ) {
   await page.addInitScript(
     ({ serverB, tabs, personalization }) => {
@@ -213,10 +254,30 @@ async function storedPersonalization(page: Page) {
     const personalization = value.personalization
     if (!personalization || typeof personalization !== "object") return {}
     return {
-      enabled: "enabled" in personalization ? personalization.enabled : undefined,
-      assistantName: "assistantName" in personalization ? personalization.assistantName : undefined,
+      defaultPresetID: "defaultPresetID" in personalization ? personalization.defaultPresetID : undefined,
+      presets: "presets" in personalization ? personalization.presets : undefined,
     }
   })
+}
+
+function personalityPreset(id: string, name: string, assistantName: string) {
+  return {
+    id,
+    name,
+    assistantName,
+    userName: "",
+    addressAs: "",
+    language: "auto",
+    tone: "natural",
+    detail: "balanced",
+    proactivity: "balanced",
+    humor: "subtle",
+    catchphrases: "",
+    customInstructions: "",
+    voice: null,
+    createdAt: 1,
+    updatedAt: 1,
+  }
 }
 
 async function mockServers(page: Page, permissionRequests: string[], permissionResponses: PermissionResponse[] = []) {
@@ -225,7 +286,7 @@ async function mockServers(page: Page, permissionRequests: string[], permissionR
     if (url.origin !== serverA && url.origin !== serverB) return route.fallback()
     const remote = url.origin === serverB
     const directory = remote ? directoryB : directoryA
-    const sessions = remote ? [sessionB] : [sessionA, childSessionA]
+    const sessions = remote ? [sessionB] : [sessionA, childSessionA, createdSessionA]
     const requestDirectory = url.searchParams.get("directory")
     const response = url.pathname.match(/^\/session\/([^/]+)\/permissions\/([^/]+)$/)
     if (route.request().method() === "POST" && response) {
@@ -242,11 +303,13 @@ async function mockServers(page: Page, permissionRequests: string[], permissionR
     if (url.pathname === "/global/event" || url.pathname === "/event") return sse(route)
     if (url.pathname === "/global/health") return json(route, { healthy: true })
     if (url.pathname === "/session/status") return json(route, {})
+    if (url.pathname === "/session" && route.request().method() === "POST") return json(route, createdSessionA)
     if (url.pathname === "/session") return json(route, sessions)
     const current = sessions.find((session) => url.pathname === `/session/${session.id}`)
     if (current) return json(route, current)
     if (/^\/session\/[^/]+$/.test(url.pathname)) return json(route, { name: "NotFoundError" }, 404)
     if (/^\/session\/[^/]+\/message$/.test(url.pathname)) return json(route, [])
+    if (/^\/session\/[^/]+\/prompt_async$/.test(url.pathname)) return json(route, true)
     if (/^\/session\/[^/]+\/(children|todo|diff)$/.test(url.pathname)) return json(route, [])
     if (url.pathname === "/permission") {
       permissionRequests.push(url.toString())

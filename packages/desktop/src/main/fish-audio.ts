@@ -36,6 +36,7 @@ export type FishAudioVoicePreset = FishAudioLocalReference & {
 
 export type FishAudioVoicePresetInput = FishAudioLocalReferenceInput & {
   name: string
+  activate?: boolean
 }
 
 type FishAudioVoicePresetIndex = {
@@ -45,6 +46,7 @@ type FishAudioVoicePresetIndex = {
 
 export type FishAudioLocalSpeechInput = {
   endpoint: string
+  presetID?: string
   text: string
   latency?: "normal" | "balanced"
   language?: "auto" | "uk" | "en" | "mixed"
@@ -109,10 +111,13 @@ export async function saveFishAudioVoicePreset(input: FishAudioVoicePresetInput)
   await writeFile(`${join(presetDirectory(), `${id}.audio`)}.tmp`, new Uint8Array(input.audio))
   await rename(`${join(presetDirectory(), `${id}.audio`)}.tmp`, join(presetDirectory(), `${id}.audio`))
   const index = await readPresetIndex()
-  await writePresetIndex({ activeID: id, presets: [...index.presets, preset] })
-  await writeActiveReference(metadata, new Uint8Array(input.audio))
+  await writePresetIndex({
+    activeID: input.activate === false ? index.activeID : id,
+    presets: [...index.presets, preset],
+  })
+  if (input.activate !== false) await writeActiveReference(metadata, new Uint8Array(input.audio))
   writeLog("voice", "Fish Audio voice preset saved", { id, name, filename: metadata.filename })
-  return { ...preset, active: true }
+  return { ...preset, active: input.activate !== false }
 }
 
 export async function activateFishAudioVoicePreset(id: string) {
@@ -180,17 +185,28 @@ export async function getFishAudioLocalStatus(value: string): Promise<FishAudioL
 export async function synthesizeFishAudioLocal(input: FishAudioLocalSpeechInput, signal?: AbortSignal) {
   if (!input.text.trim()) throw new Error("Fish Audio Local received empty text.")
   const endpoint = requireLocalEndpoint(input.endpoint)
-  const reference = await getFishAudioLocalReference()
-  if (!reference) throw new Error("Fish Audio Local reference is not configured. Save a reference recording first.")
-  const audio = await readFile(referenceAudioPath()).catch(() => undefined)
-  if (!audio?.byteLength) throw new Error("Fish Audio Local reference audio is missing. Save it again.")
+  const reference = input.presetID
+    ? await readPresetReference(input.presetID)
+    : await getFishAudioLocalReference().then(async (metadata) => {
+        if (!metadata) return
+        const audio = await readFile(referenceAudioPath()).catch(() => undefined)
+        if (!audio?.byteLength) return
+        return { metadata, audio }
+      })
+  if (!reference) {
+    throw new Error(
+      input.presetID
+        ? "Fish Audio voice preset is unavailable. Select or create the voice again."
+        : "Fish Audio Local reference is not configured. Save a reference recording first.",
+    )
+  }
   const started = performance.now()
   const { pack } = await import("msgpackr")
   const timeout = AbortSignal.timeout(requestTimeout)
   const requestSignal = signal ? AbortSignal.any([signal, timeout]) : timeout
   writeLog("voice", "Fish Audio local request started", {
     endpoint: endpoint.toString(),
-    reference: reference.filename,
+    reference: reference.metadata.filename,
     latency: input.latency ?? "balanced",
     language: input.language ?? "auto",
     temperature: clamp(input.temperature, 0.1, 1, 0.8),
@@ -213,7 +229,7 @@ export async function synthesizeFishAudioLocal(input: FishAudioLocalSpeechInput,
     body: Uint8Array.from(
       pack({
         text: input.text.trim().slice(0, 6_000),
-        references: [{ audio, text: reference.transcript }],
+        references: [{ audio: reference.audio, text: reference.metadata.transcript }],
         format: "wav",
         latency: input.latency ?? "balanced",
         seed: input.seed === null || input.seed === undefined ? null : Math.round(input.seed),
@@ -253,6 +269,15 @@ export async function synthesizeFishAudioLocal(input: FishAudioLocalSpeechInput,
     contentType: response.headers.get("content-type")?.split(";", 1)[0] || "audio/wav",
     metrics: { cache: "local", prepareMs: 0, synthesisMs: totalMs, totalMs },
   }
+}
+
+async function readPresetReference(id: string) {
+  const index = await readPresetIndex()
+  const metadata = index.presets.find((preset) => preset.id === id)
+  if (!metadata) return
+  const audio = await readFile(join(presetDirectory(), `${id}.audio`)).catch(() => undefined)
+  if (!audio?.byteLength) return
+  return { metadata, audio }
 }
 
 function requireLocalEndpoint(value: string) {

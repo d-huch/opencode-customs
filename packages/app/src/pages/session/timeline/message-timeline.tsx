@@ -66,6 +66,7 @@ import { useSessionKey } from "@/pages/session/session-layout"
 import { useServerSDK } from "@/context/server-sdk"
 import { usePlatform } from "@/context/platform"
 import { useSettings } from "@/context/settings"
+import { useLocal } from "@/context/local"
 import { useTabs } from "@/context/tabs"
 import { legacySessionHref, requireServerKey, sessionHref } from "@/utils/session-route"
 import { useSDK } from "@/context/sdk"
@@ -151,7 +152,7 @@ function TimelineThinkingRow(props: {
           ? "ui.sessionTurn.status.cacheInitialization"
           : "ui.sessionTurn.status.providerWait",
         {
-        seconds: Math.max(0, Math.floor((now() - props.status.startedAt) / 1_000)),
+          seconds: Math.max(0, Math.floor((now() - props.status.startedAt) / 1_000)),
         },
       )
     if (props.status.type === "verifying") return language.t("ui.sessionTurn.status.verifying")
@@ -304,6 +305,7 @@ export function MessageTimeline(props: {
   const providers = useProviders(() => sdk().directory)
   const sync = useSync()
   const settings = useSettings()
+  const local = useLocal()
   const tabs = useTabs()
   const dialog = useDialog()
   const language = useLanguage()
@@ -342,6 +344,8 @@ export function MessageTimeline(props: {
   }
 
   const speakResponse = async (input: { partID: string; text: string }) => {
+    const voice = local.personality.current()?.voice
+    if (!settings.voice.enabled() || !settings.voice.speakResponses() || !voice) return
     if (responseSpeech.partID === input.partID) {
       if (responseSpeech.state === "loading") void platform.cancelLocalSpeech?.()
       stopResponseSpeech()
@@ -357,25 +361,23 @@ export function MessageTimeline(props: {
     setResponseSpeech({ partID: input.partID, state: "loading" })
     const result = await platform
       .synthesizeLocalSpeech({
-        provider: settings.voice.ttsProvider(),
-        endpoint:
-          settings.voice.ttsProvider() === "fish-local"
-            ? settings.voice.fishEndpoint()
-            : settings.voice.ttsEndpoint(),
-        model: settings.voice.ttsModel(),
-        voice: settings.voice.ttsVoice(),
-        mode: settings.voice.ttsMode(),
-        latency: settings.voice.fishLatency(),
-        language: settings.voice.fishLanguage(),
-        temperature: settings.voice.fishTemperature(),
-        topP: settings.voice.fishTopP(),
-        repetitionPenalty: settings.voice.fishRepetitionPenalty(),
-        seed: settings.voice.fishSeed(),
-        chunkLength: settings.voice.fishChunkLength(),
-        normalize: settings.voice.fishNormalize(),
-        streaming: settings.voice.fishStreaming(),
-        useMemoryCache: settings.voice.fishMemoryCache(),
-        maxNewTokens: settings.voice.fishMaxNewTokens(),
+        provider: voice.provider,
+        fishPresetID: voice.provider === "fish-local" ? voice.voicePresetID : undefined,
+        endpoint: voice.endpoint,
+        model: voice.provider === "local" ? voice.model : "",
+        voice: voice.provider === "local" ? voice.voice : "",
+        mode: voice.provider === "local" ? voice.mode : "quality",
+        latency: voice.provider === "fish-local" ? voice.latency : undefined,
+        language: voice.provider === "fish-local" ? voice.language : undefined,
+        temperature: voice.provider === "fish-local" ? voice.temperature : undefined,
+        topP: voice.provider === "fish-local" ? voice.topP : undefined,
+        repetitionPenalty: voice.provider === "fish-local" ? voice.repetitionPenalty : undefined,
+        seed: voice.provider === "fish-local" ? voice.seed : undefined,
+        chunkLength: voice.provider === "fish-local" ? voice.chunkLength : undefined,
+        normalize: voice.provider === "fish-local" ? voice.normalize : undefined,
+        streaming: voice.provider === "fish-local" ? voice.streaming : undefined,
+        useMemoryCache: voice.provider === "fish-local" ? voice.useMemoryCache : undefined,
+        maxNewTokens: voice.provider === "fish-local" ? voice.maxNewTokens : undefined,
         text: input.text,
       })
       .then(
@@ -388,10 +390,8 @@ export function MessageTimeline(props: {
     if (!result || generation !== responseSpeechGeneration) return
     responseSpeechURL = URL.createObjectURL(result.audio)
     responseSpeechAudio = new Audio(responseSpeechURL)
-    if (settings.voice.ttsProvider() === "fish-local") {
-      responseSpeechAudio.playbackRate = settings.voice.fishPlaybackRate()
-      responseSpeechAudio.volume = settings.voice.fishVolume()
-    }
+    responseSpeechAudio.playbackRate = voice.playbackRate
+    responseSpeechAudio.volume = voice.volume
     responseSpeechAudio.onended = () => {
       if (generation !== responseSpeechGeneration) return
       stopResponseSpeech()
@@ -1178,7 +1178,11 @@ export function MessageTimeline(props: {
                 message={message()}
                 showAssistantCopyPartID={assistantCopyPartID(row().userMessageID)}
                 speakingResponsePartID={responseSpeech.partID}
-                onSpeakResponse={speakResponse}
+                onSpeakResponse={
+                  settings.voice.enabled() && settings.voice.speakResponses() && local.personality.current()?.voice
+                    ? speakResponse
+                    : undefined
+                }
                 turnDurationMs={turnDurationMs(row().userMessageID)}
                 useV2Actions={settings.general.newLayoutDesigns()}
                 defaultOpen={defaultOpen()}

@@ -11,6 +11,7 @@ import type {
   AgentProactivity,
   AgentTone,
 } from "@/utils/agent-personalization"
+import { migrateAgentPersonalization } from "@/utils/agent-personalization"
 
 export interface NotificationSettings {
   agent: boolean
@@ -66,6 +67,8 @@ export interface VoiceSettings {
 }
 
 export interface AgentPersonalizationSettings {
+  version: number
+  defaultPresetID: string
   enabled: boolean
   activePresetID: string
   presets: AgentPersonalizationPreset[]
@@ -274,6 +277,8 @@ const defaultSettings: Settings = {
     errors: "nope-03",
   },
   personalization: {
+    version: 0,
+    defaultPresetID: "",
     enabled: true,
     activePresetID: "",
     presets: [],
@@ -382,6 +387,33 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
       )
     })
     const visible = (preference: () => boolean) => createMemo(() => !newLayoutDesigns() || preference())
+
+    createEffect(() => {
+      if (!ready() || (store.personalization?.version ?? 0) >= 1) return
+      const migration = migrateAgentPersonalization({
+        enabled: store.personalization?.enabled,
+        activePresetID: store.personalization?.activePresetID,
+        presets: store.personalization?.presets,
+        values: {
+          assistantName: store.personalization?.assistantName ?? defaultSettings.personalization.assistantName,
+          userName: store.personalization?.userName ?? defaultSettings.personalization.userName,
+          addressAs: store.personalization?.addressAs ?? defaultSettings.personalization.addressAs,
+          language: store.personalization?.language ?? defaultSettings.personalization.language,
+          tone: store.personalization?.tone ?? defaultSettings.personalization.tone,
+          detail: store.personalization?.detail ?? defaultSettings.personalization.detail,
+          proactivity: store.personalization?.proactivity ?? defaultSettings.personalization.proactivity,
+          humor: store.personalization?.humor ?? defaultSettings.personalization.humor,
+          catchphrases: store.personalization?.catchphrases ?? defaultSettings.personalization.catchphrases,
+          customInstructions:
+            store.personalization?.customInstructions ?? defaultSettings.personalization.customInstructions,
+        },
+        createID: () => crypto.randomUUID(),
+        now: Date.now(),
+      })
+      setStore("personalization", "presets", reconcile(migration.presets))
+      setStore("personalization", "defaultPresetID", migration.defaultPresetID)
+      setStore("personalization", "version", migration.version)
+    })
 
     if (sunset && !oldInterfaceRetired()) {
       const timeout = { current: undefined as ReturnType<typeof setTimeout> | undefined }
@@ -632,6 +664,14 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         },
       },
       personalization: {
+        version: withFallback(() => store.personalization?.version, defaultSettings.personalization.version),
+        defaultPresetID: withFallback(
+          () => store.personalization?.defaultPresetID,
+          defaultSettings.personalization.defaultPresetID,
+        ),
+        setDefaultPresetID(value: string) {
+          setStore("personalization", "defaultPresetID", value)
+        },
         enabled: withFallback(() => store.personalization?.enabled, defaultSettings.personalization.enabled),
         setEnabled(value: boolean) {
           setStore("personalization", "enabled", value)
@@ -730,7 +770,10 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         setConfirmRiskyCommands(value: boolean) {
           setStore("voice", "confirmRiskyCommands", value)
         },
-        personalDictionary: withFallback(() => store.voice?.personalDictionary, defaultSettings.voice.personalDictionary),
+        personalDictionary: withFallback(
+          () => store.voice?.personalDictionary,
+          defaultSettings.voice.personalDictionary,
+        ),
         setPersonalDictionary(value: string) {
           setStore("voice", "personalDictionary", value.slice(0, 10_000))
         },
@@ -752,10 +795,7 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         setHandsFree(value: boolean) {
           setStore("voice", "handsFree", value)
         },
-        wakePhraseEnabled: withFallback(
-          () => store.voice?.wakePhraseEnabled,
-          defaultSettings.voice.wakePhraseEnabled,
-        ),
+        wakePhraseEnabled: withFallback(() => store.voice?.wakePhraseEnabled, defaultSettings.voice.wakePhraseEnabled),
         setWakePhraseEnabled(value: boolean) {
           setStore("voice", "wakePhraseEnabled", value)
         },
@@ -828,10 +868,7 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         setFishLanguage(value: FishSpeechLanguage) {
           setStore("voice", "fishLanguage", value)
         },
-        fishPlaybackRate: withFallback(
-          () => store.voice?.fishPlaybackRate,
-          defaultSettings.voice.fishPlaybackRate,
-        ),
+        fishPlaybackRate: withFallback(() => store.voice?.fishPlaybackRate, defaultSettings.voice.fishPlaybackRate),
         setFishPlaybackRate(value: number) {
           setStore("voice", "fishPlaybackRate", Math.min(2, Math.max(0.5, value || 1)))
         },
@@ -874,10 +911,7 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         setFishMemoryCache(value: boolean) {
           setStore("voice", "fishMemoryCache", value)
         },
-        fishMaxNewTokens: withFallback(
-          () => store.voice?.fishMaxNewTokens,
-          defaultSettings.voice.fishMaxNewTokens,
-        ),
+        fishMaxNewTokens: withFallback(() => store.voice?.fishMaxNewTokens, defaultSettings.voice.fishMaxNewTokens),
         setFishMaxNewTokens(value: number) {
           setStore("voice", "fishMaxNewTokens", Math.min(4_096, Math.max(128, Math.round(value || 1_024))))
         },

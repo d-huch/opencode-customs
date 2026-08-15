@@ -37,6 +37,7 @@ export type SpeechRecognitionEvent = {
 }
 export type LocalTTSInput = {
   provider?: "local" | "fish-local"
+  fishPresetID?: string
   endpoint: string
   model: string
   voice: string
@@ -75,6 +76,7 @@ export type FishAudioVoicePreset = FishAudioLocalReference & {
 }
 export type FishAudioVoicePresetInput = FishAudioLocalReferenceInput & {
   name: string
+  activate?: boolean
 }
 export type VoiceDiagnosticInput = {
   sessionID: string

@@ -3,6 +3,37 @@ export type AgentDetail = "brief" | "balanced" | "detailed"
 export type AgentProactivity = "reactive" | "balanced" | "proactive"
 export type AgentHumor = "off" | "subtle" | "playful"
 
+export type AgentLocalVoice = {
+  provider: "local"
+  endpoint: string
+  model: string
+  mode: "quality" | "fast"
+  voice: string
+  playbackRate: number
+  volume: number
+}
+
+export type AgentFishVoice = {
+  provider: "fish-local"
+  voicePresetID: string
+  endpoint: string
+  latency: "normal" | "balanced"
+  language: "auto" | "uk" | "en" | "mixed"
+  playbackRate: number
+  volume: number
+  temperature: number
+  topP: number
+  repetitionPenalty: number
+  seed: number | null
+  chunkLength: number
+  normalize: boolean
+  streaming: boolean
+  useMemoryCache: boolean
+  maxNewTokens: number
+}
+
+export type AgentVoice = AgentLocalVoice | AgentFishVoice
+
 export type AgentPersonalizationProfile = {
   enabled: boolean
   assistantName: string
@@ -22,8 +53,61 @@ export type AgentPersonalizationValues = Omit<AgentPersonalizationProfile, "enab
 export type AgentPersonalizationPreset = AgentPersonalizationValues & {
   id: string
   name: string
+  voice?: AgentVoice | null
   createdAt: number
   updatedAt: number
+}
+
+export function migrateAgentPersonalization(input: {
+  enabled?: boolean
+  activePresetID?: string
+  presets?: AgentPersonalizationPreset[]
+  values: AgentPersonalizationValues
+  createID: () => string
+  now: number
+}) {
+  const existing = (input.presets ?? []).map((preset) => ({ ...preset, voice: preset.voice ?? null }))
+  const active = input.activePresetID
+  const id = (active && existing.some((preset) => preset.id === active) ? active : existing[0]?.id) ?? input.createID()
+  const presets = existing.length
+    ? existing
+    : [
+        {
+          id,
+          name: input.values.assistantName,
+          ...input.values,
+          voice: null,
+          createdAt: input.now,
+          updatedAt: input.now,
+        },
+      ]
+  return {
+    version: 1,
+    defaultPresetID: input.enabled === false ? "" : id,
+    presets,
+  }
+}
+
+export function resolveAgentPersonality(
+  presets: AgentPersonalizationPreset[],
+  selection: string | null | undefined,
+  defaultPresetID: string,
+) {
+  const id = selection === undefined ? defaultPresetID : selection
+  if (!id) return
+  return presets.find((preset) => preset.id === id)
+}
+
+export function detachFishVoicePreset(
+  presets: AgentPersonalizationPreset[],
+  voicePresetID: string,
+  updatedAt = Date.now(),
+) {
+  return presets.map((preset) =>
+    preset.voice?.provider === "fish-local" && preset.voice.voicePresetID === voicePresetID
+      ? { ...preset, voice: null, updatedAt }
+      : preset,
+  )
 }
 
 const compact = (value: string, limit: number) => value.replace(/\s+/g, " ").trim().slice(0, limit)

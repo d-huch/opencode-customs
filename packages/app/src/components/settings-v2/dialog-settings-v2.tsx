@@ -27,7 +27,7 @@ export const DialogSettings: Component<{
   }
 
   return (
-    <Dialog size="x-large" variant="settings" class="settings-v2-dialog">
+    <Dialog size="x-large" variant="settings" class="settings-v2-dialog" containerClass="settings-v2-dialog-container">
       <TabsV2
         orientation="vertical"
         variant="settings"

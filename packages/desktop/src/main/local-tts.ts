@@ -3,6 +3,7 @@ import { synthesizeFishAudioLocal } from "./fish-audio"
 
 export type LocalTTSInput = {
   provider?: "local" | "fish-local"
+  fishPresetID?: string
   endpoint: string
   model: string
   voice: string
@@ -31,6 +32,7 @@ export async function synthesizeLocalSpeech(input: LocalTTSInput, signal?: Abort
     return synthesizeFishAudioLocal(
       {
         endpoint: input.endpoint,
+        presetID: input.fishPresetID,
         text: input.text,
         latency: input.latency,
         language: input.language,
@@ -56,7 +58,8 @@ export async function synthesizeLocalSpeech(input: LocalTTSInput, signal?: Abort
   if (!input.voice.trim()) throw new Error("Custom TTS voice is not configured.")
   if (!input.text.trim()) throw new Error("Custom TTS received empty text.")
 
-  const voice = input.mode === "quality" ? (qualityVoices.includes(input.voice) ? input.voice : "kateryna") : "ukrainian_tts"
+  const voice =
+    input.mode === "quality" ? (qualityVoices.includes(input.voice) ? input.voice : "kateryna") : "ukrainian_tts"
 
   writeLog("voice", "local TTS request started", {
     endpoint: endpoint.toString(),

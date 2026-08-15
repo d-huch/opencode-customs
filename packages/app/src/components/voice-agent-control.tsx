@@ -5,6 +5,7 @@ import { createEffect, createMemo, createSignal, onCleanup, Show, type Accessor 
 import { useLanguage } from "@/context/language"
 import { usePlatform, type MicrophoneAccess } from "@/context/platform"
 import { useSettings } from "@/context/settings"
+import { useLocal } from "@/context/local"
 import { useSDK } from "@/context/sdk"
 import { useSync } from "@/context/sync"
 import { createLocalDuplexSpeech, type DuplexSpeechEvent } from "@/utils/duplex-speech"
@@ -117,6 +118,7 @@ const Microphone = (props: { active: boolean; level: number }) => (
 export function VoiceAgentControl(props: VoiceAgentControlProps) {
   const language = useLanguage()
   const settings = useSettings()
+  const local = useLocal()
   const platform = usePlatform()
   const sdk = useSDK()
   const sync = useSync()
@@ -132,6 +134,8 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
     phase: "ready",
   })
   const microphonePercent = createMemo(() => Math.round(microphoneLevel() * 10) * 10)
+  const personalityVoice = createMemo(() => local.personality.current()?.voice)
+  const canSpeak = createMemo(() => settings.voice.enabled() && settings.voice.speakResponses() && !!personalityVoice())
   let handsFree = false
   let responseParentID: string | undefined
   let submittedAt: number | undefined
@@ -277,9 +281,7 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
   })
 
   const usesWakePhrase = () =>
-    handsFree &&
-    settings.voice.wakePhraseEnabled() &&
-    configuredWakePhrases(settings.voice.wakePhrases()).length > 0
+    handsFree && settings.voice.wakePhraseEnabled() && configuredWakePhrases(settings.voice.wakePhrases()).length > 0
 
   const updateDuplexWake = (enabled: boolean, armed: boolean) => {
     duplex?.setWake({
@@ -439,8 +441,8 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
     try {
       speechPlayer = createGaplessAudioPlayer({
         context: duplex?.audioContext(),
-        playbackRate: settings.voice.ttsProvider() === "fish-local" ? settings.voice.fishPlaybackRate() : 1,
-        volume: settings.voice.ttsProvider() === "fish-local" ? settings.voice.fishVolume() : 1,
+        playbackRate: personalityVoice()?.playbackRate ?? 1,
+        volume: personalityVoice()?.volume ?? 1,
         onReferenceNode: (node) => duplex?.setPlaybackReference(node),
         onStart: () => {
           if (generation !== speechGeneration) return
@@ -498,7 +500,13 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
     speechBusy = true
     if (!speechPlaybackStarted) move("synthesizing", "tts_synthesis_started")
     recordVoice("tts", "synthesis_started", { text })
-    if (settings.voice.ttsProvider() === "fish-local") {
+    const voice = personalityVoice()
+    if (!voice) {
+      speechBusy = false
+      restart()
+      return
+    }
+    if (voice.provider === "fish-local") {
       if (!platform.synthesizeLocalSpeech) {
         failSpeech(generation, new Error(language.t("voice.error.unsupported.description")))
         return
@@ -507,21 +515,22 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
       const result = await platform
         .synthesizeLocalSpeech({
           provider: "fish-local",
-          endpoint: settings.voice.fishEndpoint(),
-          model: settings.voice.ttsModel(),
-          voice: settings.voice.ttsVoice(),
-          mode: settings.voice.ttsMode(),
-          latency: settings.voice.fishLatency(),
-          language: settings.voice.fishLanguage(),
-          temperature: settings.voice.fishTemperature(),
-          topP: settings.voice.fishTopP(),
-          repetitionPenalty: settings.voice.fishRepetitionPenalty(),
-          seed: settings.voice.fishSeed(),
-          chunkLength: settings.voice.fishChunkLength(),
-          normalize: settings.voice.fishNormalize(),
-          streaming: settings.voice.fishStreaming(),
-          useMemoryCache: settings.voice.fishMemoryCache(),
-          maxNewTokens: settings.voice.fishMaxNewTokens(),
+          fishPresetID: voice.voicePresetID,
+          endpoint: voice.endpoint,
+          model: "",
+          voice: "",
+          mode: "quality",
+          latency: voice.latency,
+          language: voice.language,
+          temperature: voice.temperature,
+          topP: voice.topP,
+          repetitionPenalty: voice.repetitionPenalty,
+          seed: voice.seed,
+          chunkLength: voice.chunkLength,
+          normalize: voice.normalize,
+          streaming: voice.streaming,
+          useMemoryCache: voice.useMemoryCache,
+          maxNewTokens: voice.maxNewTokens,
           text,
         })
         .catch((error: unknown) => {
@@ -585,10 +594,10 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
     const stream = (() => {
       try {
         return createLocalSpeechStream({
-          endpoint: settings.voice.ttsEndpoint(),
-          model: settings.voice.ttsModel(),
-          voice: settings.voice.ttsVoice(),
-          mode: settings.voice.ttsMode(),
+          endpoint: voice.endpoint,
+          model: voice.model,
+          voice: voice.voice,
+          mode: voice.mode,
           text,
           onChunk: (chunk) => {
             if (generation !== speechGeneration) return
@@ -630,11 +639,10 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
     })()
     if (!stream) return
     speechStreamCancel = stream.cancel
-    const completed = await stream.done
-      .catch((error: unknown) => {
-        failSpeech(generation, error)
-        return undefined
-      })
+    const completed = await stream.done.catch((error: unknown) => {
+      failSpeech(generation, error)
+      return undefined
+    })
     if (!completed || generation !== speechGeneration) return
     speechStreamCancel = undefined
     speechBusy = false
@@ -646,11 +654,7 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
     void drainSpeech()
   }
 
-  const submitTranscript = (
-    raw: string,
-    turn = activeTurn(),
-    diagnostics?: DuplexSpeechEvent["diagnostics"],
-  ) => {
+  const submitTranscript = (raw: string, turn = activeTurn(), diagnostics?: DuplexSpeechEvent["diagnostics"]) => {
     if (!turn || !orchestrator.isCurrent(turn)) return
     const assessment = assessVoiceTranscript({
       text: raw,
@@ -767,11 +771,7 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
     queueMicrotask(props.onSubmit)
   }
 
-  const acceptTranscript = (
-    text: string,
-    turn = activeTurn(),
-    diagnostics?: DuplexSpeechEvent["diagnostics"],
-  ) => {
+  const acceptTranscript = (text: string, turn = activeTurn(), diagnostics?: DuplexSpeechEvent["diagnostics"]) => {
     if (!turn || !orchestrator.isCurrent(turn)) return
     if (!usesWakePhrase()) {
       submitTranscript(text, turn, diagnostics)
@@ -851,27 +851,20 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
         durationMs: voiceTurnSubmittedAt === undefined ? undefined : performance.now() - voiceTurnSubmittedAt,
       })
     }
-    if (belongsToTurn && settings.voice.speakResponses()) {
+    if (belongsToTurn && canSpeak()) {
       queueSpeech(current.id, current.text, !props.working())
       if (props.working()) return
       setWaiting(false)
       clearTimeout(responseTimer)
       return
     }
-    if (belongsToTurn && !settings.voice.speakResponses() && !props.working()) {
+    if (belongsToTurn && !canSpeak() && !props.working()) {
       setWaiting(false)
       clearTimeout(responseTimer)
       restart()
       return
     }
-    if (
-      waiting() ||
-      !settings.voice.speakResponses() ||
-      props.working() ||
-      passiveSpeechMessageID !== current.id ||
-      !current.text
-    )
-      return
+    if (waiting() || !canSpeak() || props.working() || passiveSpeechMessageID !== current.id || !current.text) return
     passiveSpeechMessageID = undefined
     queueSpeech(current.id, current.text, true)
   })
@@ -914,38 +907,39 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
       state: event.mode,
       text: event.text,
       error: event.error,
-      diagnostics: event.diagnostics || levelTrace
-        ? {
-            vad: event.diagnostics?.vad,
-            audio_ms: event.diagnostics?.audio_ms,
-            speech_ms: event.diagnostics?.speech_ms,
-            silence_ms: event.diagnostics?.silence_ms,
-            pre_roll_ms: event.diagnostics?.pre_roll_ms,
-            transcription_ms: event.diagnostics?.transcription_ms,
-            transcription_cache: event.diagnostics?.transcription_cache,
-            incremental_decode: event.diagnostics?.incremental_decode,
-            decode_count: event.diagnostics?.decode_count,
-            decoded_audio_ms: event.diagnostics?.decoded_audio_ms,
-            committed_audio_ms: event.diagnostics?.committed_audio_ms,
-            partial_count: event.diagnostics?.partial_count,
-            frame_rms: event.diagnostics?.frame_rms,
-            peak_rms: event.diagnostics?.peak_rms,
-            min_rms: event.diagnostics?.min_rms,
-            recognition_model: event.diagnostics?.recognition_model,
-            transcript_stability: event.diagnostics?.transcript_stability,
-            endpoint_reason: event.diagnostics?.endpoint_reason,
-            wake_recognition_ms: event.diagnostics?.wake_recognition_ms,
-            wake_model: event.diagnostics?.wake_model,
-            wake_armed: event.diagnostics?.wake_armed,
-            final_confidence: event.diagnostics?.final_confidence,
-            average_log_probability: event.diagnostics?.average_log_probability,
-            no_speech_probability: event.diagnostics?.no_speech_probability,
-            language_probability: event.diagnostics?.language_probability,
-            wake_confidence: event.confidence,
-            level_trace: levelTrace,
-            microphone_peak: peak,
-          }
-        : undefined,
+      diagnostics:
+        event.diagnostics || levelTrace
+          ? {
+              vad: event.diagnostics?.vad,
+              audio_ms: event.diagnostics?.audio_ms,
+              speech_ms: event.diagnostics?.speech_ms,
+              silence_ms: event.diagnostics?.silence_ms,
+              pre_roll_ms: event.diagnostics?.pre_roll_ms,
+              transcription_ms: event.diagnostics?.transcription_ms,
+              transcription_cache: event.diagnostics?.transcription_cache,
+              incremental_decode: event.diagnostics?.incremental_decode,
+              decode_count: event.diagnostics?.decode_count,
+              decoded_audio_ms: event.diagnostics?.decoded_audio_ms,
+              committed_audio_ms: event.diagnostics?.committed_audio_ms,
+              partial_count: event.diagnostics?.partial_count,
+              frame_rms: event.diagnostics?.frame_rms,
+              peak_rms: event.diagnostics?.peak_rms,
+              min_rms: event.diagnostics?.min_rms,
+              recognition_model: event.diagnostics?.recognition_model,
+              transcript_stability: event.diagnostics?.transcript_stability,
+              endpoint_reason: event.diagnostics?.endpoint_reason,
+              wake_recognition_ms: event.diagnostics?.wake_recognition_ms,
+              wake_model: event.diagnostics?.wake_model,
+              wake_armed: event.diagnostics?.wake_armed,
+              final_confidence: event.diagnostics?.final_confidence,
+              average_log_probability: event.diagnostics?.average_log_probability,
+              no_speech_probability: event.diagnostics?.no_speech_probability,
+              language_probability: event.diagnostics?.language_probability,
+              wake_confidence: event.confidence,
+              level_trace: levelTrace,
+              microphone_peak: peak,
+            }
+          : undefined,
     })
     if (closesUtterance) microphoneTrace = []
     if (event.type === "error") {
@@ -965,7 +959,7 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
           ? "speech"
           : event.type === "discard" || event.type === "final" || event.type === "wake_ignored"
             ? "silence"
-            : diagnostics?.vad ?? current.vad,
+            : (diagnostics?.vad ?? current.vad),
       phase:
         event.type === "wake_detected" ||
         event.type === "wake_ignored" ||
@@ -985,7 +979,7 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
       wakeModel: diagnostics?.wake_model ?? current.wakeModel,
       wakeConfidence: event.confidence ?? current.wakeConfidence,
       endpointReason:
-        event.type === "speech_start" ? undefined : diagnostics?.endpoint_reason ?? current.endpointReason,
+        event.type === "speech_start" ? undefined : (diagnostics?.endpoint_reason ?? current.endpointReason),
       finalConfidence: diagnostics?.final_confidence ?? current.finalConfidence,
       languageProbability: diagnostics?.language_probability ?? current.languageProbability,
     }))
@@ -1189,7 +1183,10 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
     setLiveTranscript("")
     setVoiceDiagnostics({ microphone: 0, vad: "silence", phase: "ready" })
     recordVoice("agent", "listening_started", {
-      diagnostics: { hands_free: handsFree, language: voiceLanguage(document.documentElement.lang, navigator.language) },
+      diagnostics: {
+        hands_free: handsFree,
+        language: voiceLanguage(document.documentElement.lang, navigator.language),
+      },
     })
     await ensureDuplex().catch(failRecognition)
     if (!orchestrator.isCurrent(turn)) return
@@ -1352,17 +1349,29 @@ export function VoiceAgentChatStatus(props: { status: VoiceAgentStatus | undefin
           <Show when={status().diagnostics}>
             {(diagnostics) => (
               <div class="flex flex-wrap gap-x-3 gap-y-0.5 pl-4 text-11-regular text-text-weaker">
-                <span>{language.t("voice.diagnostics.microphone")} {diagnostics().microphone}%</span>
+                <span>
+                  {language.t("voice.diagnostics.microphone")} {diagnostics().microphone}%
+                </span>
                 <span>VAD {vadLabel(diagnostics().vad)}</span>
                 <span>STT {phaseLabel(diagnostics().phase)}</span>
                 <Show when={diagnostics().preRollMs}>
-                  {(value) => <span>{language.t("voice.diagnostics.preRoll")} {value()} ms</span>}
+                  {(value) => (
+                    <span>
+                      {language.t("voice.diagnostics.preRoll")} {value()} ms
+                    </span>
+                  )}
                 </Show>
                 <Show when={diagnostics().transcriptionMs !== undefined}>
-                  <span>{language.t("voice.diagnostics.latency")} {diagnostics().transcriptionMs} ms</span>
+                  <span>
+                    {language.t("voice.diagnostics.latency")} {diagnostics().transcriptionMs} ms
+                  </span>
                 </Show>
                 <Show when={diagnostics().transcriptionCache}>
-                  {(value) => <span>{language.t("voice.diagnostics.cache")} {value()}</span>}
+                  {(value) => (
+                    <span>
+                      {language.t("voice.diagnostics.cache")} {value()}
+                    </span>
+                  )}
                 </Show>
                 <Show when={diagnostics().decodeCount !== undefined}>
                   <span>
@@ -1378,17 +1387,24 @@ export function VoiceAgentChatStatus(props: { status: VoiceAgentStatus | undefin
                   </span>
                 </Show>
                 <Show when={diagnostics().firstSoundMs !== undefined}>
-                  <span>{language.t("voice.diagnostics.firstSound")} {Math.round(diagnostics().firstSoundMs!)} ms</span>
+                  <span>
+                    {language.t("voice.diagnostics.firstSound")} {Math.round(diagnostics().firstSoundMs!)} ms
+                  </span>
                 </Show>
                 <Show when={diagnostics().ttsBufferedMs !== undefined}>
-                  <span>{language.t("voice.diagnostics.buffered")} {Math.round(diagnostics().ttsBufferedMs!)} ms</span>
+                  <span>
+                    {language.t("voice.diagnostics.buffered")} {Math.round(diagnostics().ttsBufferedMs!)} ms
+                  </span>
                 </Show>
                 <Show when={diagnostics().ttsUnderruns !== undefined}>
-                  <span>{language.t("voice.diagnostics.underruns")} {diagnostics().ttsUnderruns}</span>
+                  <span>
+                    {language.t("voice.diagnostics.underruns")} {diagnostics().ttsUnderruns}
+                  </span>
                 </Show>
                 <Show when={diagnostics().echoReferencePercent !== undefined}>
                   <span>
-                    {language.t("voice.diagnostics.echo")} {diagnostics().echoReferencePercent}% → {diagnostics().echoResidualPercent}%
+                    {language.t("voice.diagnostics.echo")} {diagnostics().echoReferencePercent}% →{" "}
+                    {diagnostics().echoResidualPercent}%
                     {diagnostics().echoCoherence !== undefined ? ` · ${diagnostics().echoCoherence}%` : ""}
                     {diagnostics().echoSuppressionDb !== undefined ? ` · ${diagnostics().echoSuppressionDb} dB` : ""}
                     {diagnostics().echoDelayMs !== undefined ? ` · ${diagnostics().echoDelayMs} ms` : ""}
@@ -1404,16 +1420,30 @@ export function VoiceAgentChatStatus(props: { status: VoiceAgentStatus | undefin
                   </span>
                 </Show>
                 <Show when={diagnostics().endpointReason}>
-                  {(value) => <span>{language.t("voice.diagnostics.endpoint")} {endpointLabel(value())}</span>}
+                  {(value) => (
+                    <span>
+                      {language.t("voice.diagnostics.endpoint")} {endpointLabel(value())}
+                    </span>
+                  )}
                 </Show>
                 <Show when={diagnostics().finalConfidence !== undefined}>
-                  <span>{language.t("voice.diagnostics.confidence")} {Math.round(diagnostics().finalConfidence! * 100)}%</span>
+                  <span>
+                    {language.t("voice.diagnostics.confidence")} {Math.round(diagnostics().finalConfidence! * 100)}%
+                  </span>
                 </Show>
                 <Show when={diagnostics().intent}>
-                  {(value) => <span>{language.t("voice.diagnostics.intent")} {value()}</span>}
+                  {(value) => (
+                    <span>
+                      {language.t("voice.diagnostics.intent")} {value()}
+                    </span>
+                  )}
                 </Show>
                 <Show when={diagnostics().understandingDecision}>
-                  {(value) => <span>{language.t("voice.diagnostics.admission")} {value()}</span>}
+                  {(value) => (
+                    <span>
+                      {language.t("voice.diagnostics.admission")} {value()}
+                    </span>
+                  )}
                 </Show>
               </div>
             )}

@@ -20,7 +20,6 @@ import { setCursorPosition } from "./editor-dom"
 import { formatServerError } from "@/utils/server-errors"
 import { ScopedKey } from "@/utils/server-scope"
 import { createPromptSubmissionState } from "./submission-state"
-import { useSettings } from "@/context/settings"
 import { agentPersonalizationInstruction } from "@/utils/agent-personalization"
 
 type PendingPrompt = {
@@ -208,7 +207,6 @@ export function createPromptSubmit(input: PromptSubmitInput) {
   const prompt = input.prompt
   const layout = useLayout()
   const language = useLanguage()
-  const settings = useSettings()
   const params = useParams()
   const [search] = useSearchParams<{ draftId?: string }>()
   const tabs = useTabs()
@@ -389,6 +387,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
             agent: currentAgent.name,
             model: { providerID: currentModel.provider.id, modelID: currentModel.id },
             variant: variant ?? null,
+            personalityPresetID: local.personality.currentID(),
           })
           layout.handoff.setTabs(base64Encode(sessionDirectory), session.id)
           const draftID = search.draftId
@@ -411,6 +410,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       providerID: currentModel.provider.id,
     }
     const agent = currentAgent.name
+    const personality = local.personality.current()
     const draft: FollowupDraft = {
       sessionID: session.id,
       sessionDirectory,
@@ -419,19 +419,9 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       agent,
       model,
       variant,
-      personalizationInstruction: agentPersonalizationInstruction({
-        enabled: settings.personalization.enabled(),
-        assistantName: settings.personalization.assistantName(),
-        userName: settings.personalization.userName(),
-        addressAs: settings.personalization.addressAs(),
-        language: settings.personalization.language(),
-        tone: settings.personalization.tone(),
-        detail: settings.personalization.detail(),
-        proactivity: settings.personalization.proactivity(),
-        humor: settings.personalization.humor(),
-        catchphrases: settings.personalization.catchphrases(),
-        customInstructions: settings.personalization.customInstructions(),
-      }),
+      personalizationInstruction: personality
+        ? agentPersonalizationInstruction({ enabled: true, ...personality })
+        : undefined,
     }
 
     const clearInput = () => {

@@ -153,6 +153,7 @@ type PlatformBase = {
   /** Synthesize speech through a user-managed local OpenAI-compatible TTS endpoint. */
   synthesizeLocalSpeech?(input: {
     provider?: "local" | "fish-local"
+    fishPresetID?: string
     endpoint: string
     model: string
     voice: string
@@ -213,9 +214,10 @@ type PlatformBase = {
     }>
   >
 
-  /** Save and activate a local Fish Audio voice preset. */
+  /** Save a local Fish Audio voice preset and optionally activate it globally. */
   saveFishAudioVoicePreset?(input: {
     name: string
+    activate?: boolean
     filename: string
     contentType: string
     audio: ArrayBuffer
