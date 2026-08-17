@@ -115,6 +115,7 @@ import { corsVaryFix } from "./middleware/cors-vary"
 import { errorLayer } from "./middleware/error"
 import { fenceLayer } from "./middleware/fence"
 import { schemaErrorLayer } from "./middleware/schema-error"
+import { JarvisWakeScheduler } from "@/jarvis/wake-scheduler"
 
 export const context = Context.makeUnsafe<unknown>(new Map())
 
@@ -281,6 +282,7 @@ export function createRoutes(
     serverRoutes,
     docRoute,
     uiRoute,
+    JarvisWakeScheduler.layer,
   ).pipe(
     Layer.provide([
       errorLayer,

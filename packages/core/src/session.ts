@@ -38,6 +38,7 @@ import { SessionRevert } from "./session/revert"
 import { Revert } from "@opencode-ai/schema/revert"
 import { FSUtil } from "./fs-util"
 import { SessionDurable } from "@opencode-ai/schema/durable-event-manifest"
+import { Jarvis } from "@opencode-ai/schema/jarvis"
 
 export const RevertState = Revert.State
 export type RevertState = Revert.State
@@ -83,6 +84,7 @@ type CreateInput = {
   model?: ModelV2.Ref
   location: Location.Ref
   mode?: "project" | "chat"
+  jarvis?: Jarvis.SessionMetadata
 }
 
 type CompactInput = {
@@ -116,6 +118,10 @@ export interface Interface {
   readonly list: (input?: ListInput) => Effect.Effect<SessionSchema.Info[]>
   readonly create: (input: CreateInput) => Effect.Effect<SessionSchema.Info>
   readonly get: (sessionID: SessionSchema.ID) => Effect.Effect<SessionSchema.Info, NotFoundError>
+  readonly updateJarvis: (input: {
+    sessionID: SessionSchema.ID
+    jarvis: Jarvis.SessionMetadata
+  }) => Effect.Effect<SessionSchema.Info, NotFoundError>
   readonly remove: (sessionID: SessionSchema.ID) => Effect.Effect<void, NotFoundError>
   readonly messages: (input: {
     sessionID: SessionSchema.ID
@@ -237,7 +243,10 @@ const layer = Layer.effect(
                 variant: input.model.variant,
               }
             : undefined,
-          metadata: input.mode === "chat" ? { mode: "chat" } : undefined,
+          metadata:
+            input.mode === "chat" || input.jarvis
+              ? { ...(input.mode === "chat" ? { mode: "chat" } : {}), ...(input.jarvis ? { jarvis: input.jarvis } : {}) }
+              : undefined,
           cost: 0,
           tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
           time: { created: now, updated: now },
@@ -268,6 +277,20 @@ const layer = Layer.effect(
         const session = yield* store.get(sessionID)
         if (!session) return yield* new NotFoundError({ sessionID })
         return session
+      }),
+      updateJarvis: Effect.fn("V2Session.updateJarvis")(function* (input) {
+        const row = yield* db.select().from(SessionTable).where(eq(SessionTable.id, input.sessionID)).get().pipe(Effect.orDie)
+        if (!row) return yield* new NotFoundError({ sessionID: input.sessionID })
+        yield* db
+          .update(SessionTable)
+          .set({
+            metadata: { ...(row.metadata ?? {}), jarvis: input.jarvis },
+            time_updated: Date.now(),
+          })
+          .where(eq(SessionTable.id, input.sessionID))
+          .run()
+          .pipe(Effect.orDie)
+        return yield* result.get(input.sessionID).pipe(Effect.orDie)
       }),
       remove: Effect.fn("V2Session.remove")((sessionID) =>
         Effect.uninterruptible(

@@ -49,5 +49,6 @@ export const migrations = (
     import("./migration/20260726074759_change_risk_assessment"),
     import("./migration/20260726082237_verification_matrix"),
     import("./migration/20260726085033_critic_pass"),
+    import("./migration/20260817110142_jarvis_runtime"),
   ])
 ).map((module) => module.default) satisfies DatabaseMigration.Migration[]

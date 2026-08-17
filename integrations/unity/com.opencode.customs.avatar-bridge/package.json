@@ -1,6 +1,6 @@
 {
   "name": "com.opencode.customs.avatar-bridge",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "displayName": "OpenCode Customs Avatar Bridge",
   "description": "Protocol v2 SDK for autonomous Unity 6 and VR companions.",
   "unity": "6000.0",

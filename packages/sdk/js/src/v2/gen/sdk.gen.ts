@@ -92,6 +92,16 @@ import type {
   GlobalUpgradeResponses,
   InstanceDisposeErrors,
   InstanceDisposeResponses,
+  JarvisConfig,
+  JarvisGoalCreate,
+  JarvisGoalOutcomeCreate,
+  JarvisGoalResume,
+  JarvisGoalStepResult,
+  JarvisMemoryRecord,
+  JarvisMemorySearch,
+  JarvisProfileSync,
+  JarvisSessionMetadata,
+  JarvisWakeCreate,
   LocationRef,
   LspStatusErrors,
   LspStatusResponses,
@@ -316,6 +326,38 @@ import type {
   V2IntegrationGetResponses,
   V2IntegrationListErrors,
   V2IntegrationListResponses,
+  V2JarvisCompleteGoalErrors,
+  V2JarvisCompleteGoalResponses,
+  V2JarvisConfigErrors,
+  V2JarvisConfigResponses,
+  V2JarvisCreateGoalErrors,
+  V2JarvisCreateGoalResponses,
+  V2JarvisGoalsErrors,
+  V2JarvisGoalsResponses,
+  V2JarvisInboxErrors,
+  V2JarvisInboxResponses,
+  V2JarvisOutcomesErrors,
+  V2JarvisOutcomesResponses,
+  V2JarvisProfilesErrors,
+  V2JarvisProfilesResponses,
+  V2JarvisRecordGoalStepErrors,
+  V2JarvisRecordGoalStepResponses,
+  V2JarvisRememberErrors,
+  V2JarvisRememberResponses,
+  V2JarvisRemoveMemoryErrors,
+  V2JarvisRemoveMemoryResponses,
+  V2JarvisResumeGoalErrors,
+  V2JarvisResumeGoalResponses,
+  V2JarvisSearchMemoryErrors,
+  V2JarvisSearchMemoryResponses,
+  V2JarvisStatusErrors,
+  V2JarvisStatusResponses,
+  V2JarvisSyncProfilesErrors,
+  V2JarvisSyncProfilesResponses,
+  V2JarvisUpdateConfigErrors,
+  V2JarvisUpdateConfigResponses,
+  V2JarvisWakeErrors,
+  V2JarvisWakeResponses,
   V2LocationGetErrors,
   V2LocationGetResponses,
   V2ModelListErrors,
@@ -426,6 +468,8 @@ import type {
   V2SessionSwitchAgentResponses,
   V2SessionSwitchModelErrors,
   V2SessionSwitchModelResponses,
+  V2SessionUpdateJarvisErrors,
+  V2SessionUpdateJarvisResponses,
   V2SessionWaitErrors,
   V2SessionWaitResponses,
   V2SkillListErrors,
@@ -5806,6 +5850,7 @@ export class Session3 extends HeyApiClient {
       model?: ModelRef
       location?: LocationRef
       mode?: "project" | "chat"
+      jarvis?: JarvisSessionMetadata
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -5819,6 +5864,7 @@ export class Session3 extends HeyApiClient {
             { in: "body", key: "model" },
             { in: "body", key: "location" },
             { in: "body", key: "mode" },
+            { in: "body", key: "jarvis" },
           ],
         },
       ],
@@ -5882,6 +5928,45 @@ export class Session3 extends HeyApiClient {
       url: "/api/session/{sessionID}",
       ...options,
       ...params,
+    })
+  }
+
+  /**
+   * Update session Jarvis profile
+   *
+   * Select the sanitized Jarvis profile snapshot revision used by a Chat or Unity session.
+   */
+  public updateJarvis<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      jarvisSessionMetadata: JarvisSessionMetadata
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { key: "jarvisSessionMetadata", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).patch<
+      V2SessionUpdateJarvisResponses,
+      V2SessionUpdateJarvisErrors,
+      ThrowOnError
+    >({
+      url: "/api/session/{sessionID}/jarvis",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
     })
   }
 
@@ -7725,6 +7810,356 @@ export class RepositoryMap extends HeyApiClient {
   }
 }
 
+export class Jarvis extends HeyApiClient {
+  /**
+   * Get Jarvis runtime status
+   *
+   * Inspect the Primary Jarvis profile, local model roles, goals, Inbox, and memory diagnostics.
+   */
+  public status<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<V2JarvisStatusResponses, V2JarvisStatusErrors, ThrowOnError>({
+      url: "/api/jarvis/status",
+      ...options,
+    })
+  }
+
+  /**
+   * Get Jarvis configuration
+   */
+  public config<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<V2JarvisConfigResponses, V2JarvisConfigErrors, ThrowOnError>({
+      url: "/api/jarvis/config",
+      ...options,
+    })
+  }
+
+  /**
+   * Update Jarvis configuration
+   */
+  public updateConfig<ThrowOnError extends boolean = false>(
+    parameters: {
+      jarvisConfig: JarvisConfig
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ key: "jarvisConfig", map: "body" }] }])
+    return (options?.client ?? this.client).put<
+      V2JarvisUpdateConfigResponses,
+      V2JarvisUpdateConfigErrors,
+      ThrowOnError
+    >({
+      url: "/api/jarvis/config",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * List synchronized Jarvis profiles
+   */
+  public profiles<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<V2JarvisProfilesResponses, V2JarvisProfilesErrors, ThrowOnError>({
+      url: "/api/jarvis/profiles",
+      ...options,
+    })
+  }
+
+  /**
+   * Synchronize sanitized Jarvis profiles
+   */
+  public syncProfiles<ThrowOnError extends boolean = false>(
+    parameters: {
+      jarvisProfileSync: JarvisProfileSync
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ key: "jarvisProfileSync", map: "body" }] }])
+    return (options?.client ?? this.client).put<
+      V2JarvisSyncProfilesResponses,
+      V2JarvisSyncProfilesErrors,
+      ThrowOnError
+    >({
+      url: "/api/jarvis/profiles",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * List durable Jarvis goals
+   */
+  public goals<ThrowOnError extends boolean = false>(
+    parameters?: {
+      status?: "pending" | "planning" | "active" | "suspended" | "completed" | "failed" | "cancelled"
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "query", key: "status" }] }])
+    return (options?.client ?? this.client).get<V2JarvisGoalsResponses, V2JarvisGoalsErrors, ThrowOnError>({
+      url: "/api/jarvis/goals",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Create a durable Jarvis goal
+   */
+  public createGoal<ThrowOnError extends boolean = false>(
+    parameters: {
+      jarvisGoalCreate: JarvisGoalCreate
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ key: "jarvisGoalCreate", map: "body" }] }])
+    return (options?.client ?? this.client).post<V2JarvisCreateGoalResponses, V2JarvisCreateGoalErrors, ThrowOnError>({
+      url: "/api/jarvis/goals",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Resume a revalidated Jarvis goal
+   */
+  public resumeGoal<ThrowOnError extends boolean = false>(
+    parameters: {
+      goalID: string
+      jarvisGoalResume: JarvisGoalResume
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "goalID" },
+            { key: "jarvisGoalResume", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<V2JarvisResumeGoalResponses, V2JarvisResumeGoalErrors, ThrowOnError>({
+      url: "/api/jarvis/goals/{goalID}/resume",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Record a Jarvis plan step result
+   */
+  public recordGoalStep<ThrowOnError extends boolean = false>(
+    parameters: {
+      goalID: string
+      jarvisGoalStepResult: JarvisGoalStepResult
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "goalID" },
+            { key: "jarvisGoalStepResult", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      V2JarvisRecordGoalStepResponses,
+      V2JarvisRecordGoalStepErrors,
+      ThrowOnError
+    >({
+      url: "/api/jarvis/goals/{goalID}/steps/result",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * List durable Jarvis goal outcomes
+   */
+  public outcomes<ThrowOnError extends boolean = false>(
+    parameters?: {
+      goalID?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "query", key: "goalID" }] }])
+    return (options?.client ?? this.client).get<V2JarvisOutcomesResponses, V2JarvisOutcomesErrors, ThrowOnError>({
+      url: "/api/jarvis/outcomes",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Complete a durable Jarvis goal
+   */
+  public completeGoal<ThrowOnError extends boolean = false>(
+    parameters: {
+      goalID: string
+      jarvisGoalOutcomeCreate: JarvisGoalOutcomeCreate
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "goalID" },
+            { key: "jarvisGoalOutcomeCreate", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      V2JarvisCompleteGoalResponses,
+      V2JarvisCompleteGoalErrors,
+      ThrowOnError
+    >({
+      url: "/api/jarvis/goals/{goalID}/outcome",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Search hybrid Jarvis memory
+   */
+  public searchMemory<ThrowOnError extends boolean = false>(
+    parameters: {
+      jarvisMemorySearch: JarvisMemorySearch
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ key: "jarvisMemorySearch", map: "body" }] }])
+    return (options?.client ?? this.client).post<
+      V2JarvisSearchMemoryResponses,
+      V2JarvisSearchMemoryErrors,
+      ThrowOnError
+    >({
+      url: "/api/jarvis/memory/search",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Store a Jarvis memory record
+   */
+  public remember<ThrowOnError extends boolean = false>(
+    parameters: {
+      jarvisMemoryRecord: JarvisMemoryRecord
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ key: "jarvisMemoryRecord", map: "body" }] }])
+    return (options?.client ?? this.client).post<V2JarvisRememberResponses, V2JarvisRememberErrors, ThrowOnError>({
+      url: "/api/jarvis/memory",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Delete a Jarvis memory record
+   */
+  public removeMemory<ThrowOnError extends boolean = false>(
+    parameters: {
+      memoryID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "memoryID" }] }])
+    return (options?.client ?? this.client).delete<
+      V2JarvisRemoveMemoryResponses,
+      V2JarvisRemoveMemoryErrors,
+      ThrowOnError
+    >({
+      url: "/api/jarvis/memory/{memoryID}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * List Primary Jarvis Inbox candidates
+   */
+  public inbox<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<V2JarvisInboxResponses, V2JarvisInboxErrors, ThrowOnError>({
+      url: "/api/jarvis/inbox",
+      ...options,
+    })
+  }
+
+  /**
+   * Queue a bounded Jarvis wake candidate
+   */
+  public wake<ThrowOnError extends boolean = false>(
+    parameters: {
+      jarvisWakeCreate: JarvisWakeCreate
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ key: "jarvisWakeCreate", map: "body" }] }])
+    return (options?.client ?? this.client).post<V2JarvisWakeResponses, V2JarvisWakeErrors, ThrowOnError>({
+      url: "/api/jarvis/wake",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
 export class V2 extends HeyApiClient {
   private _health?: Health
   get health(): Health {
@@ -7814,6 +8249,11 @@ export class V2 extends HeyApiClient {
   private _repositoryMap?: RepositoryMap
   get repositoryMap(): RepositoryMap {
     return (this._repositoryMap ??= new RepositoryMap({ client: this.client }))
+  }
+
+  private _jarvis?: Jarvis
+  get jarvis(): Jarvis {
+    return (this._jarvis ??= new Jarvis({ client: this.client }))
   }
 }
 

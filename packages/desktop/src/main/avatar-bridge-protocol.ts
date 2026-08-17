@@ -1,6 +1,6 @@
 export const AVATAR_BRIDGE_PROTOCOL = 2
-export const AVATAR_BRIDGE_PROTOCOL_MINOR = 1
-export const AVATAR_BRIDGE_VERSION = "2.1"
+export const AVATAR_BRIDGE_PROTOCOL_MINOR = 2
+export const AVATAR_BRIDGE_VERSION = "2.2"
 export const AVATAR_BRIDGE_PROTOCOLS = [1, 2] as const
 export const AVATAR_ACTIONS = [
   "animation.trigger",
@@ -120,6 +120,8 @@ export type AvatarHello = {
   gameID?: string
   saveSlotID?: string
   resumeSequence?: number
+  profileID?: string
+  profileRevision?: number
 }
 
 export type AvatarTranscript = {
@@ -292,9 +294,12 @@ function parseHello(value: Record<string, unknown>): AvatarHello | undefined {
   const saveSlotID = optionalString(value.saveSlotID, 128)
   const resumeSequence = value.resumeSequence === undefined ? undefined : value.resumeSequence
   const protocolMinor = value.protocolMinor === undefined ? undefined : value.protocolMinor
-  if ([sessionID, gameID, saveSlotID].includes(invalid)) return
+  const profileID = optionalString(value.profileID, 128)
+  const profileRevision = value.profileRevision === undefined ? undefined : value.profileRevision
+  if ([sessionID, gameID, saveSlotID, profileID].includes(invalid)) return
   if (resumeSequence !== undefined && !integer(resumeSequence, 0, Number.MAX_SAFE_INTEGER)) return
   if (protocolMinor !== undefined && !integer(protocolMinor, 0, 99)) return
+  if (profileRevision !== undefined && !integer(profileRevision, 0, Number.MAX_SAFE_INTEGER)) return
   const model = parseModel(value.model)
   const voice = parseVoice(value.voice)
   if (model === invalid || voice === invalid) return
@@ -312,6 +317,8 @@ function parseHello(value: Record<string, unknown>): AvatarHello | undefined {
     ...(typeof gameID === "string" ? { gameID } : {}),
     ...(typeof saveSlotID === "string" ? { saveSlotID } : {}),
     ...(typeof resumeSequence === "number" ? { resumeSequence } : {}),
+    ...(typeof profileID === "string" ? { profileID } : {}),
+    ...(typeof profileRevision === "number" ? { profileRevision } : {}),
   }
 }
 

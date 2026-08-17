@@ -104,6 +104,24 @@ describe("SessionV2.create", () => {
     }),
   )
 
+  it.effect("updates the Jarvis profile revision without changing the session identity", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionV2.Service
+      const created = yield* session.create({ location, mode: "chat" })
+
+      const updated = yield* session.updateJarvis({
+        sessionID: created.id,
+        jarvis: { profileID: "profile-primary", profileRevision: 2, mode: "chat", inbox: true },
+      })
+
+      expect(updated).toMatchObject({
+        id: created.id,
+        jarvis: { profileID: "profile-primary", profileRevision: 2, mode: "chat", inbox: true },
+      })
+      expect((yield* session.get(created.id)).jarvis?.profileRevision).toBe(2)
+    }),
+  )
+
   it.effect("returns the existing Session when one ID is reused with different create arguments", () =>
     Effect.gen(function* () {
       const session = yield* SessionV2.Service

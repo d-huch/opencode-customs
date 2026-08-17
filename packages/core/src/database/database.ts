@@ -31,6 +31,20 @@ const layer = Layer.effect(
     yield* db.run("PRAGMA foreign_keys = ON")
     yield* db.run("PRAGMA wal_checkpoint(PASSIVE)")
     yield* DatabaseMigration.apply(db)
+    // Virtual FTS tables are not represented by Drizzle's schema snapshot, so
+    // fresh databases create this companion index after the canonical schema.
+    yield* db.run(
+      "CREATE VIRTUAL TABLE IF NOT EXISTS jarvis_memory_fts USING fts5(body, content='jarvis_memory', content_rowid='rowid', tokenize='unicode61')",
+    )
+    yield* db.run(
+      "CREATE TRIGGER IF NOT EXISTS jarvis_memory_fts_insert AFTER INSERT ON jarvis_memory BEGIN INSERT INTO jarvis_memory_fts(rowid, body) VALUES (new.rowid, new.body); END",
+    )
+    yield* db.run(
+      "CREATE TRIGGER IF NOT EXISTS jarvis_memory_fts_delete AFTER DELETE ON jarvis_memory BEGIN INSERT INTO jarvis_memory_fts(jarvis_memory_fts, rowid, body) VALUES ('delete', old.rowid, old.body); END",
+    )
+    yield* db.run(
+      "CREATE TRIGGER IF NOT EXISTS jarvis_memory_fts_update AFTER UPDATE OF body ON jarvis_memory BEGIN INSERT INTO jarvis_memory_fts(jarvis_memory_fts, rowid, body) VALUES ('delete', old.rowid, old.body); INSERT INTO jarvis_memory_fts(rowid, body) VALUES (new.rowid, new.body); END",
+    )
 
     return { db }
   }).pipe(Effect.orDie),

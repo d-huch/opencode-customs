@@ -20,7 +20,7 @@ import { setCursorPosition } from "./editor-dom"
 import { formatServerError } from "@/utils/server-errors"
 import { ScopedKey } from "@/utils/server-scope"
 import { createPromptSubmissionState } from "./submission-state"
-import { agentPersonalizationInstruction } from "@/utils/agent-personalization"
+import { agentCatchphrases, agentPersonalizationInstruction } from "@/utils/agent-personalization"
 import { normalizeSessionInfo } from "@/utils/session"
 import { Event } from "@opencode-ai/schema/event"
 import { blobDataUrl } from "@/utils/draft-store"
@@ -249,6 +249,47 @@ export function createPromptSubmit(input: PromptSubmitInput) {
   const tabs = useTabs()
   const pendingKey = (sessionID: string) => ScopedKey.from(sdk().scope, sessionID)
 
+  const syncJarvisProfile = async () => {
+    const current = local.personality.current()
+    const presets = typeof local.personality.list === "function" ? local.personality.list() : current ? [current] : []
+    const jarvisClient = sdk().client.v2?.jarvis
+    const status = jarvisClient ? await jarvisClient.status() : undefined
+    const configuredPrimaryProfileID = status?.data?.config.primaryProfileID
+    const primaryProfileID =
+      (configuredPrimaryProfileID && presets.some((preset) => preset.id === configuredPrimaryProfileID)
+        ? configuredPrimaryProfileID
+        : undefined) ??
+      (typeof local.personality.currentID === "function" ? local.personality.currentID() : current?.id) ??
+      presets[0]?.id
+    const profiles = presets.map((preset) => ({
+      id: preset.id,
+      revision: preset.updatedAt,
+      name: preset.assistantName.trim() || preset.name,
+      userName: preset.userName.trim() || undefined,
+      addressAs: preset.addressAs.trim() || undefined,
+      language: preset.language,
+      archetype: preset.archetype,
+      tone: preset.tone,
+      detail: preset.detail,
+      humor: preset.humor,
+      proactivity: preset.proactivity,
+      instructions: preset.customInstructions.slice(0, 4_000),
+      catchphrases: agentCatchphrases(preset.catchphrases),
+      primary: preset.id === primaryProfileID,
+      updatedAt: preset.updatedAt,
+    }))
+    if (jarvisClient)
+      await jarvisClient.syncProfiles({
+        jarvisProfileSync: { profiles, primaryProfileID },
+      })
+    const selected = current ?? presets.find((preset) => preset.id === primaryProfileID)
+    return {
+      profileID: selected?.id,
+      profileRevision: selected?.updatedAt,
+      mode: "chat" as const,
+    }
+  }
+
   const errorMessage = (err: unknown) => {
     if (err && typeof err === "object" && "message" in err && typeof err.message === "string") return err.message
     if (err && typeof err === "object" && "data" in err) {
@@ -352,6 +393,8 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       return
     }
 
+    const jarvis = chat ? await syncJarvisProfile() : undefined
+
     input.addToHistory(currentPrompt, mode)
     input.resetHistoryNavigation()
 
@@ -413,7 +456,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
           mode: draftMode,
         })
         .then(normalizeSessionInfo)
-        .catch((err) => {
+        .catch((err: unknown) => {
           showToast({
             title: language.t("prompt.toast.sessionCreateFailed.title"),
             description: errorMessage(err),
@@ -448,6 +491,20 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       return
     }
 
+    if (chat && jarvis && sdk().client.v2?.session?.updateJarvis) {
+      session = await sdk()
+        .client.v2.session.updateJarvis({ sessionID: session.id, jarvisSessionMetadata: jarvis })
+        .then((result) => (result.data?.data ? normalizeSessionInfo(result.data.data) : undefined))
+        .catch((err: unknown) => {
+          showToast({
+            title: language.t("prompt.toast.promptSendFailed.title"),
+            description: errorMessage(err),
+          })
+          return undefined
+        })
+      if (!session) return
+    }
+
     const model = {
       modelID: currentModel.id,
       providerID: currentModel.provider.id,
@@ -462,7 +519,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       agent,
       model,
       variant,
-      personalizationInstruction: personality
+      personalizationInstruction: !chat && personality
         ? agentPersonalizationInstruction({ enabled: true, ...personality })
         : undefined,
     }

@@ -9,6 +9,7 @@ import { DateTimeUtcFromMillis, optional, RelativePath } from "./schema"
 import { SessionEvent } from "./session-event"
 import { SessionID } from "./session-id"
 import { Revert } from "./revert"
+import { Jarvis } from "./jarvis"
 
 export const ID = SessionID
 export type ID = SessionID
@@ -40,6 +41,7 @@ export const Info = Schema.Struct({
   title: Schema.String,
   location: Location.Ref,
   mode: Schema.Literals(["project", "chat"]).pipe(optional),
+  jarvis: Jarvis.SessionMetadata.pipe(optional),
   subpath: RelativePath.pipe(optional),
   revert: Revert.State.pipe(optional),
 }).annotate({ identifier: "SessionV2.Info" })

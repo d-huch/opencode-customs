@@ -49,7 +49,7 @@ export const SettingsAvatarBridgeV2: Component = () => {
           url: value.url,
           token: value.token,
           protocol: value.protocol,
-          protocolMinor: 1,
+          protocolMinor: 2,
           clientID: "jarvis-lab-pcvr",
           characterID: "jarvis",
           gameID: "jarvis-lab",

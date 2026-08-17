@@ -1,4 +1,4 @@
-# OpenCode Customs Unity/VR Avatar Bridge v2.1
+# OpenCode Customs Unity/VR Avatar Bridge v2.2
 
 The Unity 6 integration is a UPM package at `com.opencode.customs.avatar-bridge`. It turns one companion into a bounded autonomous agent driven by semantic world state, typed capabilities, a goal stack, trusted autonomy profiles, and save-scoped memory.
 
@@ -18,7 +18,7 @@ Add these components to the companion root:
 
 The included standard capabilities cover NavMesh `move_to`, `follow`, `stay`, character expressions, and generic registered interactions. Add game-specific doors, seats, inventory, combat, or quest choices by deriving from `AvatarCapabilityBehaviour` and returning a JSON Schema manifest. The game owns preconditions and risk; the agent cannot lower them.
 
-Every v2.1 manifest can also declare a permission category, expected postconditions, and side effects. Action results return a machine code, changed entity IDs, and whether the agent must observe again. Existing v2 clients remain compatible; absent v2.1 fields receive conservative defaults.
+Every v2.1+ manifest can also declare a permission category, expected postconditions, and side effects. Protocol v2.2 additionally identifies the selected Jarvis profile and its revision so Chat and Unity share one server-owned personality. Action results return a machine code, changed entity IDs, and whether the agent must observe again. Existing v2 clients remain compatible; absent newer fields receive conservative defaults and use the Primary Jarvis profile.
 
 ## Jarvis Lab vertical slice
 
@@ -43,7 +43,7 @@ Connect the VR microphone/VAD integration to `SubmitSpeechStart`, `SubmitSpeechP
 
 ## Protocol v1 compatibility
 
-`OpenCodeAvatarBridge.cs` remains the standalone v1 adapter for existing scenes. Desktop accepts v1, v2, and the backward-compatible v2.1 minor extension. New projects should use the UPM package: only v2 supports semantic perception, dynamic capabilities, bounded goals, save-slot memory, replay, approvals, reconnect/resume, Quest pairing, and binary audio.
+`OpenCodeAvatarBridge.cs` remains the standalone v1 adapter for existing scenes. Desktop accepts v1, v2, and the backward-compatible v2.1/v2.2 minor extensions. New projects should use the UPM package: only v2 supports semantic perception, dynamic capabilities, bounded goals, save-slot memory, replay, approvals, reconnect/resume, Quest pairing, and binary audio.
 
 ## Security boundaries
 

@@ -17,6 +17,7 @@ import { useTabs } from "@/context/tabs"
 import { useServerSync } from "@/context/server-sync"
 import { SettingsWebSearchV2 } from "./web-search"
 import { SettingsAvatarBridgeV2 } from "./avatar-bridge"
+import { SettingsJarvisV2 } from "./jarvis"
 
 export const DialogSettings: Component<{
   sessionID?: string
@@ -68,6 +69,10 @@ export const DialogSettings: Component<{
                       <Icon name="brain" />
                       {language.t("settings.tab.personalization")}
                     </TabsV2.Trigger>
+                    <TabsV2.Trigger value="jarvis" data-action="settings-jarvis-tab">
+                      <Icon name="status" />
+                      {language.t("settings.tab.jarvis")}
+                    </TabsV2.Trigger>
                     <TabsV2.Trigger value="voice">
                       <Icon name="speaker" />
                       {language.t("settings.tab.voice")}
@@ -117,6 +122,9 @@ export const DialogSettings: Component<{
         </TabsV2.Content>
         <TabsV2.Content value="personalization" class="settings-v2-panel">
           <SettingsPersonalizationV2 />
+        </TabsV2.Content>
+        <TabsV2.Content value="jarvis" class="settings-v2-panel">
+          <SettingsJarvisV2 />
         </TabsV2.Content>
         <TabsV2.Content value="voice" class="settings-v2-panel">
           <SettingsVoiceV2 sessionID={props.sessionID} />

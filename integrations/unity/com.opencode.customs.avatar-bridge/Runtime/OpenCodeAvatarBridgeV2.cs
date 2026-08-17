@@ -181,6 +181,7 @@ namespace OpenCode.Customs.AvatarBridge
                 type = "hello", protocol = AvatarProtocol.Version, protocolMinor = AvatarProtocol.Minor, token = profile.token,
                 clientID = profile.clientID, characterID = profile.characterID,
                 gameID = profile.gameID, saveSlotID = profile.saveSlotID, sessionID = profile.sessionID,
+                profileID = profile.profileID, profileRevision = profile.profileRevision,
                 resumeSequence = lastServerSequence,
                 actions = new[] { "animation.trigger", "emotion.set", "gesture.play", "look_at", "move_to", "speech.stop" },
                 voice = receiveVoice ? new

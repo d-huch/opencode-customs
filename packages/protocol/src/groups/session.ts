@@ -21,6 +21,7 @@ import { Model } from "@opencode-ai/schema/model"
 import { Location } from "@opencode-ai/schema/location"
 import { Revert } from "@opencode-ai/schema/revert"
 import { SessionEvent } from "@opencode-ai/schema/session-event"
+import { Jarvis } from "@opencode-ai/schema/jarvis"
 
 const SessionsQueryFields = {
   workspace: Workspace.ID.pipe(Schema.optional),
@@ -133,6 +134,7 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
           model: Model.Ref.pipe(Schema.optional),
           location: Location.Ref.pipe(Schema.optional),
           mode: Schema.Literals(["project", "chat"]).pipe(Schema.optional),
+          jarvis: Jarvis.SessionMetadata.pipe(Schema.optional),
         }),
         success: Schema.Struct({ data: Session.Info }),
       }).annotateMerge(
@@ -167,6 +169,22 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
             identifier: "v2.session.get",
             summary: "Get session",
             description: "Retrieve a session by ID.",
+          }),
+        ),
+    )
+    .add(
+      HttpApiEndpoint.patch("session.updateJarvis", "/api/session/:sessionID/jarvis", {
+        params: { sessionID: Session.ID },
+        payload: Jarvis.SessionMetadata,
+        success: Schema.Struct({ data: Session.Info }),
+        error: SessionNotFoundError,
+      })
+        .middleware(sessionLocationMiddleware)
+        .annotateMerge(
+          OpenApi.annotations({
+            identifier: "v2.session.updateJarvis",
+            summary: "Update session Jarvis profile",
+            description: "Select the sanitized Jarvis profile snapshot revision used by a Chat or Unity session.",
           }),
         ),
     )

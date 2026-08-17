@@ -10,7 +10,7 @@ namespace OpenCode.Customs.AvatarBridge
     public static class AvatarProtocol
     {
         public const int Version = 2;
-        public const int Minor = 1;
+        public const int Minor = 2;
         public const int MaxCapabilities = 128;
         public const int MaxEntities = 256;
         public const int MaxPayloadBytes = 64 * 1024;
@@ -43,6 +43,8 @@ namespace OpenCode.Customs.AvatarBridge
         public string gameID = "game";
         public string saveSlotID = "default";
         public string sessionID;
+        public string profileID;
+        public int profileRevision;
     }
 
     public sealed class AvatarCapabilityManifest

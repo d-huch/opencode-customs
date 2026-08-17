@@ -249,6 +249,12 @@ export type SessionsListOutput = {
     readonly title: string
     readonly location: { readonly directory: string; readonly workspaceID?: string }
     readonly mode?: "project" | "chat"
+    readonly jarvis?: {
+      readonly profileID?: string
+      readonly profileRevision?: number
+      readonly mode?: "chat" | "unity"
+      readonly inbox?: boolean
+    }
     readonly subpath?: string
     readonly revert?: {
       readonly messageID: string
@@ -274,6 +280,12 @@ export type SessionsCreateInput = {
     readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string } | null
     readonly location?: { readonly directory: string; readonly workspaceID?: string } | null
     readonly mode?: "project" | "chat" | null
+    readonly jarvis?: {
+      readonly profileID?: string
+      readonly profileRevision?: number
+      readonly mode?: "chat" | "unity"
+      readonly inbox?: boolean
+    } | null
   }["id"]
   readonly agent?: {
     readonly id?: string | null
@@ -281,6 +293,12 @@ export type SessionsCreateInput = {
     readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string } | null
     readonly location?: { readonly directory: string; readonly workspaceID?: string } | null
     readonly mode?: "project" | "chat" | null
+    readonly jarvis?: {
+      readonly profileID?: string
+      readonly profileRevision?: number
+      readonly mode?: "chat" | "unity"
+      readonly inbox?: boolean
+    } | null
   }["agent"]
   readonly model?: {
     readonly id?: string | null
@@ -288,6 +306,12 @@ export type SessionsCreateInput = {
     readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string } | null
     readonly location?: { readonly directory: string; readonly workspaceID?: string } | null
     readonly mode?: "project" | "chat" | null
+    readonly jarvis?: {
+      readonly profileID?: string
+      readonly profileRevision?: number
+      readonly mode?: "chat" | "unity"
+      readonly inbox?: boolean
+    } | null
   }["model"]
   readonly location?: {
     readonly id?: string | null
@@ -295,6 +319,12 @@ export type SessionsCreateInput = {
     readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string } | null
     readonly location?: { readonly directory: string; readonly workspaceID?: string } | null
     readonly mode?: "project" | "chat" | null
+    readonly jarvis?: {
+      readonly profileID?: string
+      readonly profileRevision?: number
+      readonly mode?: "chat" | "unity"
+      readonly inbox?: boolean
+    } | null
   }["location"]
   readonly mode?: {
     readonly id?: string | null
@@ -302,7 +332,26 @@ export type SessionsCreateInput = {
     readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string } | null
     readonly location?: { readonly directory: string; readonly workspaceID?: string } | null
     readonly mode?: "project" | "chat" | null
+    readonly jarvis?: {
+      readonly profileID?: string
+      readonly profileRevision?: number
+      readonly mode?: "chat" | "unity"
+      readonly inbox?: boolean
+    } | null
   }["mode"]
+  readonly jarvis?: {
+    readonly id?: string | null
+    readonly agent?: string | null
+    readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string } | null
+    readonly location?: { readonly directory: string; readonly workspaceID?: string } | null
+    readonly mode?: "project" | "chat" | null
+    readonly jarvis?: {
+      readonly profileID?: string
+      readonly profileRevision?: number
+      readonly mode?: "chat" | "unity"
+      readonly inbox?: boolean
+    } | null
+  }["jarvis"]
 }
 
 export type SessionsCreateOutput = {
@@ -323,6 +372,12 @@ export type SessionsCreateOutput = {
     readonly title: string
     readonly location: { readonly directory: string; readonly workspaceID?: string }
     readonly mode?: "project" | "chat"
+    readonly jarvis?: {
+      readonly profileID?: string
+      readonly profileRevision?: number
+      readonly mode?: "chat" | "unity"
+      readonly inbox?: boolean
+    }
     readonly subpath?: string
     readonly revert?: {
       readonly messageID: string
@@ -362,6 +417,81 @@ export type SessionsGetOutput = {
     readonly title: string
     readonly location: { readonly directory: string; readonly workspaceID?: string }
     readonly mode?: "project" | "chat"
+    readonly jarvis?: {
+      readonly profileID?: string
+      readonly profileRevision?: number
+      readonly mode?: "chat" | "unity"
+      readonly inbox?: boolean
+    }
+    readonly subpath?: string
+    readonly revert?: {
+      readonly messageID: string
+      readonly partID?: string
+      readonly snapshot?: string
+      readonly diff?: string
+      readonly files?: ReadonlyArray<{
+        readonly path: string
+        readonly status: "added" | "modified" | "deleted"
+        readonly additions: number
+        readonly deletions: number
+        readonly patch: string
+      }>
+    }
+  }
+}["data"]
+
+export type SessionsUpdateJarvisInput = {
+  readonly sessionID: { readonly sessionID: string }["sessionID"]
+  readonly profileID?: {
+    readonly profileID?: string
+    readonly profileRevision?: number
+    readonly mode?: "chat" | "unity"
+    readonly inbox?: boolean
+  }["profileID"]
+  readonly profileRevision?: {
+    readonly profileID?: string
+    readonly profileRevision?: number
+    readonly mode?: "chat" | "unity"
+    readonly inbox?: boolean
+  }["profileRevision"]
+  readonly mode?: {
+    readonly profileID?: string
+    readonly profileRevision?: number
+    readonly mode?: "chat" | "unity"
+    readonly inbox?: boolean
+  }["mode"]
+  readonly inbox?: {
+    readonly profileID?: string
+    readonly profileRevision?: number
+    readonly mode?: "chat" | "unity"
+    readonly inbox?: boolean
+  }["inbox"]
+}
+
+export type SessionsUpdateJarvisOutput = {
+  readonly data: {
+    readonly id: string
+    readonly parentID?: string
+    readonly projectID: string
+    readonly agent?: string
+    readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string }
+    readonly cost: number
+    readonly tokens: {
+      readonly input: number
+      readonly output: number
+      readonly reasoning: number
+      readonly cache: { readonly read: number; readonly write: number }
+    }
+    readonly time: { readonly created: number; readonly updated: number; readonly archived?: number }
+    readonly title: string
+    readonly location: { readonly directory: string; readonly workspaceID?: string }
+    readonly mode?: "project" | "chat"
+    readonly jarvis?: {
+      readonly profileID?: string
+      readonly profileRevision?: number
+      readonly mode?: "chat" | "unity"
+      readonly inbox?: boolean
+    }
     readonly subpath?: string
     readonly revert?: {
       readonly messageID: string
@@ -3279,3 +3409,1206 @@ export type RepositoryMapClearKnowledgeOutput = {
   }
   readonly data: { readonly removed: number }
 }
+
+export type ServerJarvisStatusOutput = {
+  readonly state: "ready" | "degraded" | "suspended"
+  readonly primaryProfile?: {
+    readonly id: string
+    readonly revision: number
+    readonly name: string
+    readonly userName?: string
+    readonly addressAs?: string
+    readonly language: string
+    readonly archetype: "natural" | "military" | "depressive" | "clown" | "jarvis" | "mentor" | "sarcastic"
+    readonly tone: string
+    readonly detail: string
+    readonly humor: string
+    readonly proactivity: string
+    readonly instructions: string
+    readonly catchphrases: ReadonlyArray<string>
+    readonly primary: boolean
+    readonly updatedAt: number
+  }
+  readonly config: {
+    readonly primaryProfileID?: string
+    readonly inboxSessionID?: string
+    readonly models: {
+      readonly dialogue?: { readonly providerID: string; readonly modelID: string }
+      readonly planner?: { readonly providerID: string; readonly modelID: string }
+      readonly embedding?: { readonly providerID: string; readonly modelID: string }
+    }
+    readonly plannerTimeoutMs: number
+    readonly plannerIdleUnloadMs: number
+    readonly initiative: {
+      readonly enabled: boolean
+      readonly quietStart: string
+      readonly quietEnd: string
+      readonly reflectionLimit: number
+      readonly eventLimit: number
+      readonly topicCooldownMinutes: number
+    }
+    readonly updatedAt: number
+  }
+  readonly activeGoals: number
+  readonly suspendedGoals: number
+  readonly pendingInbox: number
+  readonly memoryRecords: number
+  readonly degradedReasons: ReadonlyArray<string>
+}
+
+export type ServerJarvisConfigOutput = {
+  readonly primaryProfileID?: string
+  readonly inboxSessionID?: string
+  readonly models: {
+    readonly dialogue?: { readonly providerID: string; readonly modelID: string }
+    readonly planner?: { readonly providerID: string; readonly modelID: string }
+    readonly embedding?: { readonly providerID: string; readonly modelID: string }
+  }
+  readonly plannerTimeoutMs: number
+  readonly plannerIdleUnloadMs: number
+  readonly initiative: {
+    readonly enabled: boolean
+    readonly quietStart: string
+    readonly quietEnd: string
+    readonly reflectionLimit: number
+    readonly eventLimit: number
+    readonly topicCooldownMinutes: number
+  }
+  readonly updatedAt: number
+}
+
+export type ServerJarvisUpdateConfigInput = {
+  readonly primaryProfileID?: {
+    readonly primaryProfileID?: string
+    readonly inboxSessionID?: string
+    readonly models: {
+      readonly dialogue?: { readonly providerID: string; readonly modelID: string }
+      readonly planner?: { readonly providerID: string; readonly modelID: string }
+      readonly embedding?: { readonly providerID: string; readonly modelID: string }
+    }
+    readonly plannerTimeoutMs: number
+    readonly plannerIdleUnloadMs: number
+    readonly initiative: {
+      readonly enabled: boolean
+      readonly quietStart: string
+      readonly quietEnd: string
+      readonly reflectionLimit: number
+      readonly eventLimit: number
+      readonly topicCooldownMinutes: number
+    }
+    readonly updatedAt: number
+  }["primaryProfileID"]
+  readonly inboxSessionID?: {
+    readonly primaryProfileID?: string
+    readonly inboxSessionID?: string
+    readonly models: {
+      readonly dialogue?: { readonly providerID: string; readonly modelID: string }
+      readonly planner?: { readonly providerID: string; readonly modelID: string }
+      readonly embedding?: { readonly providerID: string; readonly modelID: string }
+    }
+    readonly plannerTimeoutMs: number
+    readonly plannerIdleUnloadMs: number
+    readonly initiative: {
+      readonly enabled: boolean
+      readonly quietStart: string
+      readonly quietEnd: string
+      readonly reflectionLimit: number
+      readonly eventLimit: number
+      readonly topicCooldownMinutes: number
+    }
+    readonly updatedAt: number
+  }["inboxSessionID"]
+  readonly models: {
+    readonly primaryProfileID?: string
+    readonly inboxSessionID?: string
+    readonly models: {
+      readonly dialogue?: { readonly providerID: string; readonly modelID: string }
+      readonly planner?: { readonly providerID: string; readonly modelID: string }
+      readonly embedding?: { readonly providerID: string; readonly modelID: string }
+    }
+    readonly plannerTimeoutMs: number
+    readonly plannerIdleUnloadMs: number
+    readonly initiative: {
+      readonly enabled: boolean
+      readonly quietStart: string
+      readonly quietEnd: string
+      readonly reflectionLimit: number
+      readonly eventLimit: number
+      readonly topicCooldownMinutes: number
+    }
+    readonly updatedAt: number
+  }["models"]
+  readonly plannerTimeoutMs: {
+    readonly primaryProfileID?: string
+    readonly inboxSessionID?: string
+    readonly models: {
+      readonly dialogue?: { readonly providerID: string; readonly modelID: string }
+      readonly planner?: { readonly providerID: string; readonly modelID: string }
+      readonly embedding?: { readonly providerID: string; readonly modelID: string }
+    }
+    readonly plannerTimeoutMs: number
+    readonly plannerIdleUnloadMs: number
+    readonly initiative: {
+      readonly enabled: boolean
+      readonly quietStart: string
+      readonly quietEnd: string
+      readonly reflectionLimit: number
+      readonly eventLimit: number
+      readonly topicCooldownMinutes: number
+    }
+    readonly updatedAt: number
+  }["plannerTimeoutMs"]
+  readonly plannerIdleUnloadMs: {
+    readonly primaryProfileID?: string
+    readonly inboxSessionID?: string
+    readonly models: {
+      readonly dialogue?: { readonly providerID: string; readonly modelID: string }
+      readonly planner?: { readonly providerID: string; readonly modelID: string }
+      readonly embedding?: { readonly providerID: string; readonly modelID: string }
+    }
+    readonly plannerTimeoutMs: number
+    readonly plannerIdleUnloadMs: number
+    readonly initiative: {
+      readonly enabled: boolean
+      readonly quietStart: string
+      readonly quietEnd: string
+      readonly reflectionLimit: number
+      readonly eventLimit: number
+      readonly topicCooldownMinutes: number
+    }
+    readonly updatedAt: number
+  }["plannerIdleUnloadMs"]
+  readonly initiative: {
+    readonly primaryProfileID?: string
+    readonly inboxSessionID?: string
+    readonly models: {
+      readonly dialogue?: { readonly providerID: string; readonly modelID: string }
+      readonly planner?: { readonly providerID: string; readonly modelID: string }
+      readonly embedding?: { readonly providerID: string; readonly modelID: string }
+    }
+    readonly plannerTimeoutMs: number
+    readonly plannerIdleUnloadMs: number
+    readonly initiative: {
+      readonly enabled: boolean
+      readonly quietStart: string
+      readonly quietEnd: string
+      readonly reflectionLimit: number
+      readonly eventLimit: number
+      readonly topicCooldownMinutes: number
+    }
+    readonly updatedAt: number
+  }["initiative"]
+  readonly updatedAt: {
+    readonly primaryProfileID?: string
+    readonly inboxSessionID?: string
+    readonly models: {
+      readonly dialogue?: { readonly providerID: string; readonly modelID: string }
+      readonly planner?: { readonly providerID: string; readonly modelID: string }
+      readonly embedding?: { readonly providerID: string; readonly modelID: string }
+    }
+    readonly plannerTimeoutMs: number
+    readonly plannerIdleUnloadMs: number
+    readonly initiative: {
+      readonly enabled: boolean
+      readonly quietStart: string
+      readonly quietEnd: string
+      readonly reflectionLimit: number
+      readonly eventLimit: number
+      readonly topicCooldownMinutes: number
+    }
+    readonly updatedAt: number
+  }["updatedAt"]
+}
+
+export type ServerJarvisUpdateConfigOutput = {
+  readonly primaryProfileID?: string
+  readonly inboxSessionID?: string
+  readonly models: {
+    readonly dialogue?: { readonly providerID: string; readonly modelID: string }
+    readonly planner?: { readonly providerID: string; readonly modelID: string }
+    readonly embedding?: { readonly providerID: string; readonly modelID: string }
+  }
+  readonly plannerTimeoutMs: number
+  readonly plannerIdleUnloadMs: number
+  readonly initiative: {
+    readonly enabled: boolean
+    readonly quietStart: string
+    readonly quietEnd: string
+    readonly reflectionLimit: number
+    readonly eventLimit: number
+    readonly topicCooldownMinutes: number
+  }
+  readonly updatedAt: number
+}
+
+export type ServerJarvisProfilesOutput = ReadonlyArray<{
+  readonly id: string
+  readonly revision: number
+  readonly name: string
+  readonly userName?: string
+  readonly addressAs?: string
+  readonly language: string
+  readonly archetype: "natural" | "military" | "depressive" | "clown" | "jarvis" | "mentor" | "sarcastic"
+  readonly tone: string
+  readonly detail: string
+  readonly humor: string
+  readonly proactivity: string
+  readonly instructions: string
+  readonly catchphrases: ReadonlyArray<string>
+  readonly primary: boolean
+  readonly updatedAt: number
+}>
+
+export type ServerJarvisSyncProfilesInput = {
+  readonly profiles: {
+    readonly profiles: ReadonlyArray<{
+      readonly id: string
+      readonly revision: number
+      readonly name: string
+      readonly userName?: string
+      readonly addressAs?: string
+      readonly language: string
+      readonly archetype: "natural" | "military" | "depressive" | "clown" | "jarvis" | "mentor" | "sarcastic"
+      readonly tone: string
+      readonly detail: string
+      readonly humor: string
+      readonly proactivity: string
+      readonly instructions: string
+      readonly catchphrases: ReadonlyArray<string>
+      readonly primary: boolean
+      readonly updatedAt: number
+    }>
+    readonly primaryProfileID?: string
+  }["profiles"]
+  readonly primaryProfileID?: {
+    readonly profiles: ReadonlyArray<{
+      readonly id: string
+      readonly revision: number
+      readonly name: string
+      readonly userName?: string
+      readonly addressAs?: string
+      readonly language: string
+      readonly archetype: "natural" | "military" | "depressive" | "clown" | "jarvis" | "mentor" | "sarcastic"
+      readonly tone: string
+      readonly detail: string
+      readonly humor: string
+      readonly proactivity: string
+      readonly instructions: string
+      readonly catchphrases: ReadonlyArray<string>
+      readonly primary: boolean
+      readonly updatedAt: number
+    }>
+    readonly primaryProfileID?: string
+  }["primaryProfileID"]
+}
+
+export type ServerJarvisSyncProfilesOutput = ReadonlyArray<{
+  readonly id: string
+  readonly revision: number
+  readonly name: string
+  readonly userName?: string
+  readonly addressAs?: string
+  readonly language: string
+  readonly archetype: "natural" | "military" | "depressive" | "clown" | "jarvis" | "mentor" | "sarcastic"
+  readonly tone: string
+  readonly detail: string
+  readonly humor: string
+  readonly proactivity: string
+  readonly instructions: string
+  readonly catchphrases: ReadonlyArray<string>
+  readonly primary: boolean
+  readonly updatedAt: number
+}>
+
+export type ServerJarvisGoalsInput = {
+  readonly status?: {
+    readonly status?: "pending" | "planning" | "active" | "suspended" | "completed" | "failed" | "cancelled" | undefined
+  }["status"]
+}
+
+export type ServerJarvisGoalsOutput = ReadonlyArray<{
+  readonly id: string
+  readonly profileID: string
+  readonly sessionID?: string
+  readonly mode: "chat" | "unity"
+  readonly gameID?: string
+  readonly saveSlotID?: string
+  readonly characterID?: string
+  readonly objective: string
+  readonly status: "pending" | "planning" | "active" | "suspended" | "completed" | "failed" | "cancelled"
+  readonly suspensionReason?: string
+  readonly worldRevision?: number
+  readonly capabilityRevision?: string
+  readonly actionCount: number
+  readonly cycleStartedAt?: number
+  readonly createdAt: number
+  readonly updatedAt: number
+  readonly plan?: {
+    readonly goal: string
+    readonly steps: ReadonlyArray<{
+      readonly id: string
+      readonly goalID: string
+      readonly position: number
+      readonly action: string
+      readonly arguments: { readonly [x: string]: JsonValue }
+      readonly expectedPostconditions: ReadonlyArray<string>
+      readonly status: "pending" | "running" | "completed" | "failed" | "suspended" | "cancelled"
+      readonly attempts: number
+      readonly lastError?: string
+      readonly updatedAt: number
+    }>
+    readonly stopConditions: ReadonlyArray<string>
+    readonly riskBudget: "ambient" | "interaction" | "critical"
+    readonly replanConditions: ReadonlyArray<string>
+  }
+}>
+
+export type ServerJarvisCreateGoalInput = {
+  readonly profileID: {
+    readonly profileID: string
+    readonly sessionID?: string
+    readonly mode: "chat" | "unity"
+    readonly gameID?: string
+    readonly saveSlotID?: string
+    readonly characterID?: string
+    readonly objective: string
+    readonly worldRevision?: number
+    readonly capabilityRevision?: string
+  }["profileID"]
+  readonly sessionID?: {
+    readonly profileID: string
+    readonly sessionID?: string
+    readonly mode: "chat" | "unity"
+    readonly gameID?: string
+    readonly saveSlotID?: string
+    readonly characterID?: string
+    readonly objective: string
+    readonly worldRevision?: number
+    readonly capabilityRevision?: string
+  }["sessionID"]
+  readonly mode: {
+    readonly profileID: string
+    readonly sessionID?: string
+    readonly mode: "chat" | "unity"
+    readonly gameID?: string
+    readonly saveSlotID?: string
+    readonly characterID?: string
+    readonly objective: string
+    readonly worldRevision?: number
+    readonly capabilityRevision?: string
+  }["mode"]
+  readonly gameID?: {
+    readonly profileID: string
+    readonly sessionID?: string
+    readonly mode: "chat" | "unity"
+    readonly gameID?: string
+    readonly saveSlotID?: string
+    readonly characterID?: string
+    readonly objective: string
+    readonly worldRevision?: number
+    readonly capabilityRevision?: string
+  }["gameID"]
+  readonly saveSlotID?: {
+    readonly profileID: string
+    readonly sessionID?: string
+    readonly mode: "chat" | "unity"
+    readonly gameID?: string
+    readonly saveSlotID?: string
+    readonly characterID?: string
+    readonly objective: string
+    readonly worldRevision?: number
+    readonly capabilityRevision?: string
+  }["saveSlotID"]
+  readonly characterID?: {
+    readonly profileID: string
+    readonly sessionID?: string
+    readonly mode: "chat" | "unity"
+    readonly gameID?: string
+    readonly saveSlotID?: string
+    readonly characterID?: string
+    readonly objective: string
+    readonly worldRevision?: number
+    readonly capabilityRevision?: string
+  }["characterID"]
+  readonly objective: {
+    readonly profileID: string
+    readonly sessionID?: string
+    readonly mode: "chat" | "unity"
+    readonly gameID?: string
+    readonly saveSlotID?: string
+    readonly characterID?: string
+    readonly objective: string
+    readonly worldRevision?: number
+    readonly capabilityRevision?: string
+  }["objective"]
+  readonly worldRevision?: {
+    readonly profileID: string
+    readonly sessionID?: string
+    readonly mode: "chat" | "unity"
+    readonly gameID?: string
+    readonly saveSlotID?: string
+    readonly characterID?: string
+    readonly objective: string
+    readonly worldRevision?: number
+    readonly capabilityRevision?: string
+  }["worldRevision"]
+  readonly capabilityRevision?: {
+    readonly profileID: string
+    readonly sessionID?: string
+    readonly mode: "chat" | "unity"
+    readonly gameID?: string
+    readonly saveSlotID?: string
+    readonly characterID?: string
+    readonly objective: string
+    readonly worldRevision?: number
+    readonly capabilityRevision?: string
+  }["capabilityRevision"]
+}
+
+export type ServerJarvisCreateGoalOutput = {
+  readonly id: string
+  readonly profileID: string
+  readonly sessionID?: string
+  readonly mode: "chat" | "unity"
+  readonly gameID?: string
+  readonly saveSlotID?: string
+  readonly characterID?: string
+  readonly objective: string
+  readonly status: "pending" | "planning" | "active" | "suspended" | "completed" | "failed" | "cancelled"
+  readonly suspensionReason?: string
+  readonly worldRevision?: number
+  readonly capabilityRevision?: string
+  readonly actionCount: number
+  readonly cycleStartedAt?: number
+  readonly createdAt: number
+  readonly updatedAt: number
+  readonly plan?: {
+    readonly goal: string
+    readonly steps: ReadonlyArray<{
+      readonly id: string
+      readonly goalID: string
+      readonly position: number
+      readonly action: string
+      readonly arguments: { readonly [x: string]: JsonValue }
+      readonly expectedPostconditions: ReadonlyArray<string>
+      readonly status: "pending" | "running" | "completed" | "failed" | "suspended" | "cancelled"
+      readonly attempts: number
+      readonly lastError?: string
+      readonly updatedAt: number
+    }>
+    readonly stopConditions: ReadonlyArray<string>
+    readonly riskBudget: "ambient" | "interaction" | "critical"
+    readonly replanConditions: ReadonlyArray<string>
+  }
+}
+
+export type ServerJarvisResumeGoalInput = {
+  readonly goalID: { readonly goalID: string }["goalID"]
+  readonly worldRevision: {
+    readonly worldRevision: number
+    readonly capabilityRevision: string
+    readonly gameID?: string
+    readonly saveSlotID?: string
+    readonly characterID?: string
+  }["worldRevision"]
+  readonly capabilityRevision: {
+    readonly worldRevision: number
+    readonly capabilityRevision: string
+    readonly gameID?: string
+    readonly saveSlotID?: string
+    readonly characterID?: string
+  }["capabilityRevision"]
+  readonly gameID?: {
+    readonly worldRevision: number
+    readonly capabilityRevision: string
+    readonly gameID?: string
+    readonly saveSlotID?: string
+    readonly characterID?: string
+  }["gameID"]
+  readonly saveSlotID?: {
+    readonly worldRevision: number
+    readonly capabilityRevision: string
+    readonly gameID?: string
+    readonly saveSlotID?: string
+    readonly characterID?: string
+  }["saveSlotID"]
+  readonly characterID?: {
+    readonly worldRevision: number
+    readonly capabilityRevision: string
+    readonly gameID?: string
+    readonly saveSlotID?: string
+    readonly characterID?: string
+  }["characterID"]
+}
+
+export type ServerJarvisResumeGoalOutput = {
+  readonly id: string
+  readonly profileID: string
+  readonly sessionID?: string
+  readonly mode: "chat" | "unity"
+  readonly gameID?: string
+  readonly saveSlotID?: string
+  readonly characterID?: string
+  readonly objective: string
+  readonly status: "pending" | "planning" | "active" | "suspended" | "completed" | "failed" | "cancelled"
+  readonly suspensionReason?: string
+  readonly worldRevision?: number
+  readonly capabilityRevision?: string
+  readonly actionCount: number
+  readonly cycleStartedAt?: number
+  readonly createdAt: number
+  readonly updatedAt: number
+  readonly plan?: {
+    readonly goal: string
+    readonly steps: ReadonlyArray<{
+      readonly id: string
+      readonly goalID: string
+      readonly position: number
+      readonly action: string
+      readonly arguments: { readonly [x: string]: JsonValue }
+      readonly expectedPostconditions: ReadonlyArray<string>
+      readonly status: "pending" | "running" | "completed" | "failed" | "suspended" | "cancelled"
+      readonly attempts: number
+      readonly lastError?: string
+      readonly updatedAt: number
+    }>
+    readonly stopConditions: ReadonlyArray<string>
+    readonly riskBudget: "ambient" | "interaction" | "critical"
+    readonly replanConditions: ReadonlyArray<string>
+  }
+} | null
+
+export type ServerJarvisRecordGoalStepInput = {
+  readonly goalID: { readonly goalID: string }["goalID"]
+  readonly stepID: { readonly stepID: string; readonly success: boolean; readonly error?: string }["stepID"]
+  readonly success: { readonly stepID: string; readonly success: boolean; readonly error?: string }["success"]
+  readonly error?: { readonly stepID: string; readonly success: boolean; readonly error?: string }["error"]
+}
+
+export type ServerJarvisRecordGoalStepOutput = {
+  readonly id: string
+  readonly profileID: string
+  readonly sessionID?: string
+  readonly mode: "chat" | "unity"
+  readonly gameID?: string
+  readonly saveSlotID?: string
+  readonly characterID?: string
+  readonly objective: string
+  readonly status: "pending" | "planning" | "active" | "suspended" | "completed" | "failed" | "cancelled"
+  readonly suspensionReason?: string
+  readonly worldRevision?: number
+  readonly capabilityRevision?: string
+  readonly actionCount: number
+  readonly cycleStartedAt?: number
+  readonly createdAt: number
+  readonly updatedAt: number
+  readonly plan?: {
+    readonly goal: string
+    readonly steps: ReadonlyArray<{
+      readonly id: string
+      readonly goalID: string
+      readonly position: number
+      readonly action: string
+      readonly arguments: { readonly [x: string]: JsonValue }
+      readonly expectedPostconditions: ReadonlyArray<string>
+      readonly status: "pending" | "running" | "completed" | "failed" | "suspended" | "cancelled"
+      readonly attempts: number
+      readonly lastError?: string
+      readonly updatedAt: number
+    }>
+    readonly stopConditions: ReadonlyArray<string>
+    readonly riskBudget: "ambient" | "interaction" | "critical"
+    readonly replanConditions: ReadonlyArray<string>
+  }
+} | null
+
+export type ServerJarvisOutcomesInput = { readonly goalID?: { readonly goalID?: string | undefined }["goalID"] }
+
+export type ServerJarvisOutcomesOutput = ReadonlyArray<{
+  readonly id: string
+  readonly goalID: string
+  readonly status: "completed" | "failed" | "cancelled"
+  readonly summary: string
+  readonly changedEntityIDs: ReadonlyArray<string>
+  readonly createdAt: number
+}>
+
+export type ServerJarvisCompleteGoalInput = {
+  readonly goalID: { readonly goalID: string }["goalID"]
+  readonly status: {
+    readonly status: "completed" | "failed" | "cancelled"
+    readonly summary: string
+    readonly changedEntityIDs: ReadonlyArray<string>
+  }["status"]
+  readonly summary: {
+    readonly status: "completed" | "failed" | "cancelled"
+    readonly summary: string
+    readonly changedEntityIDs: ReadonlyArray<string>
+  }["summary"]
+  readonly changedEntityIDs: {
+    readonly status: "completed" | "failed" | "cancelled"
+    readonly summary: string
+    readonly changedEntityIDs: ReadonlyArray<string>
+  }["changedEntityIDs"]
+}
+
+export type ServerJarvisCompleteGoalOutput = {
+  readonly id: string
+  readonly goalID: string
+  readonly status: "completed" | "failed" | "cancelled"
+  readonly summary: string
+  readonly changedEntityIDs: ReadonlyArray<string>
+  readonly createdAt: number
+} | null
+
+export type ServerJarvisSearchMemoryInput = {
+  readonly query: {
+    readonly query: string
+    readonly profileID?: string
+    readonly gameID?: string
+    readonly saveSlotID?: string
+    readonly characterID?: string
+    readonly limit?: number
+    readonly embedding?: ReadonlyArray<number | "Infinity" | "-Infinity" | "NaN">
+  }["query"]
+  readonly profileID?: {
+    readonly query: string
+    readonly profileID?: string
+    readonly gameID?: string
+    readonly saveSlotID?: string
+    readonly characterID?: string
+    readonly limit?: number
+    readonly embedding?: ReadonlyArray<number | "Infinity" | "-Infinity" | "NaN">
+  }["profileID"]
+  readonly gameID?: {
+    readonly query: string
+    readonly profileID?: string
+    readonly gameID?: string
+    readonly saveSlotID?: string
+    readonly characterID?: string
+    readonly limit?: number
+    readonly embedding?: ReadonlyArray<number | "Infinity" | "-Infinity" | "NaN">
+  }["gameID"]
+  readonly saveSlotID?: {
+    readonly query: string
+    readonly profileID?: string
+    readonly gameID?: string
+    readonly saveSlotID?: string
+    readonly characterID?: string
+    readonly limit?: number
+    readonly embedding?: ReadonlyArray<number | "Infinity" | "-Infinity" | "NaN">
+  }["saveSlotID"]
+  readonly characterID?: {
+    readonly query: string
+    readonly profileID?: string
+    readonly gameID?: string
+    readonly saveSlotID?: string
+    readonly characterID?: string
+    readonly limit?: number
+    readonly embedding?: ReadonlyArray<number | "Infinity" | "-Infinity" | "NaN">
+  }["characterID"]
+  readonly limit?: {
+    readonly query: string
+    readonly profileID?: string
+    readonly gameID?: string
+    readonly saveSlotID?: string
+    readonly characterID?: string
+    readonly limit?: number
+    readonly embedding?: ReadonlyArray<number | "Infinity" | "-Infinity" | "NaN">
+  }["limit"]
+  readonly embedding?: {
+    readonly query: string
+    readonly profileID?: string
+    readonly gameID?: string
+    readonly saveSlotID?: string
+    readonly characterID?: string
+    readonly limit?: number
+    readonly embedding?: ReadonlyArray<number | "Infinity" | "-Infinity" | "NaN">
+  }["embedding"]
+}
+
+export type ServerJarvisSearchMemoryOutput = ReadonlyArray<{
+  readonly id: string
+  readonly profileID?: string
+  readonly scope: "user" | "profile" | "game" | "working"
+  readonly gameID?: string
+  readonly saveSlotID?: string
+  readonly characterID?: string
+  readonly kind: "preference" | "episode" | "relationship" | "promise" | "knowledge" | "correction" | "plan"
+  readonly text: string
+  readonly sourceID: string
+  readonly confidence: number | "Infinity" | "-Infinity" | "NaN"
+  readonly importance: number | "Infinity" | "-Infinity" | "NaN"
+  readonly lifecycle: "candidate" | "verified" | "archived"
+  readonly pinned: boolean
+  readonly conflictsWith: ReadonlyArray<string>
+  readonly embedding?: ReadonlyArray<number | "Infinity" | "-Infinity" | "NaN">
+  readonly createdAt: number
+  readonly updatedAt: number
+  readonly lastUsedAt?: number
+}>
+
+export type ServerJarvisRememberInput = {
+  readonly id: {
+    readonly id: string
+    readonly profileID?: string
+    readonly scope: "user" | "profile" | "game" | "working"
+    readonly gameID?: string
+    readonly saveSlotID?: string
+    readonly characterID?: string
+    readonly kind: "preference" | "episode" | "relationship" | "promise" | "knowledge" | "correction" | "plan"
+    readonly text: string
+    readonly sourceID: string
+    readonly confidence: number | "Infinity" | "-Infinity" | "NaN"
+    readonly importance: number | "Infinity" | "-Infinity" | "NaN"
+    readonly lifecycle: "candidate" | "verified" | "archived"
+    readonly pinned: boolean
+    readonly conflictsWith: ReadonlyArray<string>
+    readonly embedding?: ReadonlyArray<number | "Infinity" | "-Infinity" | "NaN">
+    readonly createdAt: number
+    readonly updatedAt: number
+    readonly lastUsedAt?: number
+  }["id"]
+  readonly profileID?: {
+    readonly id: string
+    readonly profileID?: string
+    readonly scope: "user" | "profile" | "game" | "working"
+    readonly gameID?: string
+    readonly saveSlotID?: string
+    readonly characterID?: string
+    readonly kind: "preference" | "episode" | "relationship" | "promise" | "knowledge" | "correction" | "plan"
+    readonly text: string
+    readonly sourceID: string
+    readonly confidence: number | "Infinity" | "-Infinity" | "NaN"
+    readonly importance: number | "Infinity" | "-Infinity" | "NaN"
+    readonly lifecycle: "candidate" | "verified" | "archived"
+    readonly pinned: boolean
+    readonly conflictsWith: ReadonlyArray<string>
+    readonly embedding?: ReadonlyArray<number | "Infinity" | "-Infinity" | "NaN">
+    readonly createdAt: number
+    readonly updatedAt: number
+    readonly lastUsedAt?: number
+  }["profileID"]
+  readonly scope: {
+    readonly id: string
+    readonly profileID?: string
+    readonly scope: "user" | "profile" | "game" | "working"
+    readonly gameID?: string
+    readonly saveSlotID?: string
+    readonly characterID?: string
+    readonly kind: "preference" | "episode" | "relationship" | "promise" | "knowledge" | "correction" | "plan"
+    readonly text: string
+    readonly sourceID: string
+    readonly confidence: number | "Infinity" | "-Infinity" | "NaN"
+    readonly importance: number | "Infinity" | "-Infinity" | "NaN"
+    readonly lifecycle: "candidate" | "verified" | "archived"
+    readonly pinned: boolean
+    readonly conflictsWith: ReadonlyArray<string>
+    readonly embedding?: ReadonlyArray<number | "Infinity" | "-Infinity" | "NaN">
+    readonly createdAt: number
+    readonly updatedAt: number
+    readonly lastUsedAt?: number
+  }["scope"]
+  readonly gameID?: {
+    readonly id: string
+    readonly profileID?: string
+    readonly scope: "user" | "profile" | "game" | "working"
+    readonly gameID?: string
+    readonly saveSlotID?: string
+    readonly characterID?: string
+    readonly kind: "preference" | "episode" | "relationship" | "promise" | "knowledge" | "correction" | "plan"
+    readonly text: string
+    readonly sourceID: string
+    readonly confidence: number | "Infinity" | "-Infinity" | "NaN"
+    readonly importance: number | "Infinity" | "-Infinity" | "NaN"
+    readonly lifecycle: "candidate" | "verified" | "archived"
+    readonly pinned: boolean
+    readonly conflictsWith: ReadonlyArray<string>
+    readonly embedding?: ReadonlyArray<number | "Infinity" | "-Infinity" | "NaN">
+    readonly createdAt: number
+    readonly updatedAt: number
+    readonly lastUsedAt?: number
+  }["gameID"]
+  readonly saveSlotID?: {
+    readonly id: string
+    readonly profileID?: string
+    readonly scope: "user" | "profile" | "game" | "working"
+    readonly gameID?: string
+    readonly saveSlotID?: string
+    readonly characterID?: string
+    readonly kind: "preference" | "episode" | "relationship" | "promise" | "knowledge" | "correction" | "plan"
+    readonly text: string
+    readonly sourceID: string
+    readonly confidence: number | "Infinity" | "-Infinity" | "NaN"
+    readonly importance: number | "Infinity" | "-Infinity" | "NaN"
+    readonly lifecycle: "candidate" | "verified" | "archived"
+    readonly pinned: boolean
+    readonly conflictsWith: ReadonlyArray<string>
+    readonly embedding?: ReadonlyArray<number | "Infinity" | "-Infinity" | "NaN">
+    readonly createdAt: number
+    readonly updatedAt: number
+    readonly lastUsedAt?: number
+  }["saveSlotID"]
+  readonly characterID?: {
+    readonly id: string
+    readonly profileID?: string
+    readonly scope: "user" | "profile" | "game" | "working"
+    readonly gameID?: string
+    readonly saveSlotID?: string
+    readonly characterID?: string
+    readonly kind: "preference" | "episode" | "relationship" | "promise" | "knowledge" | "correction" | "plan"
+    readonly text: string
+    readonly sourceID: string
+    readonly confidence: number | "Infinity" | "-Infinity" | "NaN"
+    readonly importance: number | "Infinity" | "-Infinity" | "NaN"
+    readonly lifecycle: "candidate" | "verified" | "archived"
+    readonly pinned: boolean
+    readonly conflictsWith: ReadonlyArray<string>
+    readonly embedding?: ReadonlyArray<number | "Infinity" | "-Infinity" | "NaN">
+    readonly createdAt: number
+    readonly updatedAt: number
+    readonly lastUsedAt?: number
+  }["characterID"]
+  readonly kind: {
+    readonly id: string
+    readonly profileID?: string
+    readonly scope: "user" | "profile" | "game" | "working"
+    readonly gameID?: string
+    readonly saveSlotID?: string
+    readonly characterID?: string
+    readonly kind: "preference" | "episode" | "relationship" | "promise" | "knowledge" | "correction" | "plan"
+    readonly text: string
+    readonly sourceID: string
+    readonly confidence: number | "Infinity" | "-Infinity" | "NaN"
+    readonly importance: number | "Infinity" | "-Infinity" | "NaN"
+    readonly lifecycle: "candidate" | "verified" | "archived"
+    readonly pinned: boolean
+    readonly conflictsWith: ReadonlyArray<string>
+    readonly embedding?: ReadonlyArray<number | "Infinity" | "-Infinity" | "NaN">
+    readonly createdAt: number
+    readonly updatedAt: number
+    readonly lastUsedAt?: number
+  }["kind"]
+  readonly text: {
+    readonly id: string
+    readonly profileID?: string
+    readonly scope: "user" | "profile" | "game" | "working"
+    readonly gameID?: string
+    readonly saveSlotID?: string
+    readonly characterID?: string
+    readonly kind: "preference" | "episode" | "relationship" | "promise" | "knowledge" | "correction" | "plan"
+    readonly text: string
+    readonly sourceID: string
+    readonly confidence: number | "Infinity" | "-Infinity" | "NaN"
+    readonly importance: number | "Infinity" | "-Infinity" | "NaN"
+    readonly lifecycle: "candidate" | "verified" | "archived"
+    readonly pinned: boolean
+    readonly conflictsWith: ReadonlyArray<string>
+    readonly embedding?: ReadonlyArray<number | "Infinity" | "-Infinity" | "NaN">
+    readonly createdAt: number
+    readonly updatedAt: number
+    readonly lastUsedAt?: number
+  }["text"]
+  readonly sourceID: {
+    readonly id: string
+    readonly profileID?: string
+    readonly scope: "user" | "profile" | "game" | "working"
+    readonly gameID?: string
+    readonly saveSlotID?: string
+    readonly characterID?: string
+    readonly kind: "preference" | "episode" | "relationship" | "promise" | "knowledge" | "correction" | "plan"
+    readonly text: string
+    readonly sourceID: string
+    readonly confidence: number | "Infinity" | "-Infinity" | "NaN"
+    readonly importance: number | "Infinity" | "-Infinity" | "NaN"
+    readonly lifecycle: "candidate" | "verified" | "archived"
+    readonly pinned: boolean
+    readonly conflictsWith: ReadonlyArray<string>
+    readonly embedding?: ReadonlyArray<number | "Infinity" | "-Infinity" | "NaN">
+    readonly createdAt: number
+    readonly updatedAt: number
+    readonly lastUsedAt?: number
+  }["sourceID"]
+  readonly confidence: {
+    readonly id: string
+    readonly profileID?: string
+    readonly scope: "user" | "profile" | "game" | "working"
+    readonly gameID?: string
+    readonly saveSlotID?: string
+    readonly characterID?: string
+    readonly kind: "preference" | "episode" | "relationship" | "promise" | "knowledge" | "correction" | "plan"
+    readonly text: string
+    readonly sourceID: string
+    readonly confidence: number | "Infinity" | "-Infinity" | "NaN"
+    readonly importance: number | "Infinity" | "-Infinity" | "NaN"
+    readonly lifecycle: "candidate" | "verified" | "archived"
+    readonly pinned: boolean
+    readonly conflictsWith: ReadonlyArray<string>
+    readonly embedding?: ReadonlyArray<number | "Infinity" | "-Infinity" | "NaN">
+    readonly createdAt: number
+    readonly updatedAt: number
+    readonly lastUsedAt?: number
+  }["confidence"]
+  readonly importance: {
+    readonly id: string
+    readonly profileID?: string
+    readonly scope: "user" | "profile" | "game" | "working"
+    readonly gameID?: string
+    readonly saveSlotID?: string
+    readonly characterID?: string
+    readonly kind: "preference" | "episode" | "relationship" | "promise" | "knowledge" | "correction" | "plan"
+    readonly text: string
+    readonly sourceID: string
+    readonly confidence: number | "Infinity" | "-Infinity" | "NaN"
+    readonly importance: number | "Infinity" | "-Infinity" | "NaN"
+    readonly lifecycle: "candidate" | "verified" | "archived"
+    readonly pinned: boolean
+    readonly conflictsWith: ReadonlyArray<string>
+    readonly embedding?: ReadonlyArray<number | "Infinity" | "-Infinity" | "NaN">
+    readonly createdAt: number
+    readonly updatedAt: number
+    readonly lastUsedAt?: number
+  }["importance"]
+  readonly lifecycle: {
+    readonly id: string
+    readonly profileID?: string
+    readonly scope: "user" | "profile" | "game" | "working"
+    readonly gameID?: string
+    readonly saveSlotID?: string
+    readonly characterID?: string
+    readonly kind: "preference" | "episode" | "relationship" | "promise" | "knowledge" | "correction" | "plan"
+    readonly text: string
+    readonly sourceID: string
+    readonly confidence: number | "Infinity" | "-Infinity" | "NaN"
+    readonly importance: number | "Infinity" | "-Infinity" | "NaN"
+    readonly lifecycle: "candidate" | "verified" | "archived"
+    readonly pinned: boolean
+    readonly conflictsWith: ReadonlyArray<string>
+    readonly embedding?: ReadonlyArray<number | "Infinity" | "-Infinity" | "NaN">
+    readonly createdAt: number
+    readonly updatedAt: number
+    readonly lastUsedAt?: number
+  }["lifecycle"]
+  readonly pinned: {
+    readonly id: string
+    readonly profileID?: string
+    readonly scope: "user" | "profile" | "game" | "working"
+    readonly gameID?: string
+    readonly saveSlotID?: string
+    readonly characterID?: string
+    readonly kind: "preference" | "episode" | "relationship" | "promise" | "knowledge" | "correction" | "plan"
+    readonly text: string
+    readonly sourceID: string
+    readonly confidence: number | "Infinity" | "-Infinity" | "NaN"
+    readonly importance: number | "Infinity" | "-Infinity" | "NaN"
+    readonly lifecycle: "candidate" | "verified" | "archived"
+    readonly pinned: boolean
+    readonly conflictsWith: ReadonlyArray<string>
+    readonly embedding?: ReadonlyArray<number | "Infinity" | "-Infinity" | "NaN">
+    readonly createdAt: number
+    readonly updatedAt: number
+    readonly lastUsedAt?: number
+  }["pinned"]
+  readonly conflictsWith: {
+    readonly id: string
+    readonly profileID?: string
+    readonly scope: "user" | "profile" | "game" | "working"
+    readonly gameID?: string
+    readonly saveSlotID?: string
+    readonly characterID?: string
+    readonly kind: "preference" | "episode" | "relationship" | "promise" | "knowledge" | "correction" | "plan"
+    readonly text: string
+    readonly sourceID: string
+    readonly confidence: number | "Infinity" | "-Infinity" | "NaN"
+    readonly importance: number | "Infinity" | "-Infinity" | "NaN"
+    readonly lifecycle: "candidate" | "verified" | "archived"
+    readonly pinned: boolean
+    readonly conflictsWith: ReadonlyArray<string>
+    readonly embedding?: ReadonlyArray<number | "Infinity" | "-Infinity" | "NaN">
+    readonly createdAt: number
+    readonly updatedAt: number
+    readonly lastUsedAt?: number
+  }["conflictsWith"]
+  readonly embedding?: {
+    readonly id: string
+    readonly profileID?: string
+    readonly scope: "user" | "profile" | "game" | "working"
+    readonly gameID?: string
+    readonly saveSlotID?: string
+    readonly characterID?: string
+    readonly kind: "preference" | "episode" | "relationship" | "promise" | "knowledge" | "correction" | "plan"
+    readonly text: string
+    readonly sourceID: string
+    readonly confidence: number | "Infinity" | "-Infinity" | "NaN"
+    readonly importance: number | "Infinity" | "-Infinity" | "NaN"
+    readonly lifecycle: "candidate" | "verified" | "archived"
+    readonly pinned: boolean
+    readonly conflictsWith: ReadonlyArray<string>
+    readonly embedding?: ReadonlyArray<number | "Infinity" | "-Infinity" | "NaN">
+    readonly createdAt: number
+    readonly updatedAt: number
+    readonly lastUsedAt?: number
+  }["embedding"]
+  readonly createdAt: {
+    readonly id: string
+    readonly profileID?: string
+    readonly scope: "user" | "profile" | "game" | "working"
+    readonly gameID?: string
+    readonly saveSlotID?: string
+    readonly characterID?: string
+    readonly kind: "preference" | "episode" | "relationship" | "promise" | "knowledge" | "correction" | "plan"
+    readonly text: string
+    readonly sourceID: string
+    readonly confidence: number | "Infinity" | "-Infinity" | "NaN"
+    readonly importance: number | "Infinity" | "-Infinity" | "NaN"
+    readonly lifecycle: "candidate" | "verified" | "archived"
+    readonly pinned: boolean
+    readonly conflictsWith: ReadonlyArray<string>
+    readonly embedding?: ReadonlyArray<number | "Infinity" | "-Infinity" | "NaN">
+    readonly createdAt: number
+    readonly updatedAt: number
+    readonly lastUsedAt?: number
+  }["createdAt"]
+  readonly updatedAt: {
+    readonly id: string
+    readonly profileID?: string
+    readonly scope: "user" | "profile" | "game" | "working"
+    readonly gameID?: string
+    readonly saveSlotID?: string
+    readonly characterID?: string
+    readonly kind: "preference" | "episode" | "relationship" | "promise" | "knowledge" | "correction" | "plan"
+    readonly text: string
+    readonly sourceID: string
+    readonly confidence: number | "Infinity" | "-Infinity" | "NaN"
+    readonly importance: number | "Infinity" | "-Infinity" | "NaN"
+    readonly lifecycle: "candidate" | "verified" | "archived"
+    readonly pinned: boolean
+    readonly conflictsWith: ReadonlyArray<string>
+    readonly embedding?: ReadonlyArray<number | "Infinity" | "-Infinity" | "NaN">
+    readonly createdAt: number
+    readonly updatedAt: number
+    readonly lastUsedAt?: number
+  }["updatedAt"]
+  readonly lastUsedAt?: {
+    readonly id: string
+    readonly profileID?: string
+    readonly scope: "user" | "profile" | "game" | "working"
+    readonly gameID?: string
+    readonly saveSlotID?: string
+    readonly characterID?: string
+    readonly kind: "preference" | "episode" | "relationship" | "promise" | "knowledge" | "correction" | "plan"
+    readonly text: string
+    readonly sourceID: string
+    readonly confidence: number | "Infinity" | "-Infinity" | "NaN"
+    readonly importance: number | "Infinity" | "-Infinity" | "NaN"
+    readonly lifecycle: "candidate" | "verified" | "archived"
+    readonly pinned: boolean
+    readonly conflictsWith: ReadonlyArray<string>
+    readonly embedding?: ReadonlyArray<number | "Infinity" | "-Infinity" | "NaN">
+    readonly createdAt: number
+    readonly updatedAt: number
+    readonly lastUsedAt?: number
+  }["lastUsedAt"]
+}
+
+export type ServerJarvisRememberOutput = {
+  readonly id: string
+  readonly profileID?: string
+  readonly scope: "user" | "profile" | "game" | "working"
+  readonly gameID?: string
+  readonly saveSlotID?: string
+  readonly characterID?: string
+  readonly kind: "preference" | "episode" | "relationship" | "promise" | "knowledge" | "correction" | "plan"
+  readonly text: string
+  readonly sourceID: string
+  readonly confidence: number | "Infinity" | "-Infinity" | "NaN"
+  readonly importance: number | "Infinity" | "-Infinity" | "NaN"
+  readonly lifecycle: "candidate" | "verified" | "archived"
+  readonly pinned: boolean
+  readonly conflictsWith: ReadonlyArray<string>
+  readonly embedding?: ReadonlyArray<number | "Infinity" | "-Infinity" | "NaN">
+  readonly createdAt: number
+  readonly updatedAt: number
+  readonly lastUsedAt?: number
+}
+
+export type ServerJarvisRemoveMemoryInput = { readonly memoryID: { readonly memoryID: string }["memoryID"] }
+
+export type ServerJarvisRemoveMemoryOutput = { readonly changed: number }
+
+export type ServerJarvisInboxOutput = ReadonlyArray<{
+  readonly id: string
+  readonly profileID: string
+  readonly sessionID?: string
+  readonly kind: "attention" | "goal" | "promise" | "model" | "reflection" | "manual"
+  readonly topic: string
+  readonly text: string
+  readonly priority: number
+  readonly status: "pending" | "admitted" | "dismissed" | "blocked"
+  readonly notBefore: number
+  readonly createdAt: number
+}>
+
+export type ServerJarvisWakeInput = {
+  readonly sessionID?: {
+    readonly sessionID?: string
+    readonly kind: "attention" | "goal" | "promise" | "model" | "reflection" | "manual"
+    readonly topic: string
+    readonly text: string
+    readonly priority: number
+    readonly notBefore?: number
+  }["sessionID"]
+  readonly kind: {
+    readonly sessionID?: string
+    readonly kind: "attention" | "goal" | "promise" | "model" | "reflection" | "manual"
+    readonly topic: string
+    readonly text: string
+    readonly priority: number
+    readonly notBefore?: number
+  }["kind"]
+  readonly topic: {
+    readonly sessionID?: string
+    readonly kind: "attention" | "goal" | "promise" | "model" | "reflection" | "manual"
+    readonly topic: string
+    readonly text: string
+    readonly priority: number
+    readonly notBefore?: number
+  }["topic"]
+  readonly text: {
+    readonly sessionID?: string
+    readonly kind: "attention" | "goal" | "promise" | "model" | "reflection" | "manual"
+    readonly topic: string
+    readonly text: string
+    readonly priority: number
+    readonly notBefore?: number
+  }["text"]
+  readonly priority: {
+    readonly sessionID?: string
+    readonly kind: "attention" | "goal" | "promise" | "model" | "reflection" | "manual"
+    readonly topic: string
+    readonly text: string
+    readonly priority: number
+    readonly notBefore?: number
+  }["priority"]
+  readonly notBefore?: {
+    readonly sessionID?: string
+    readonly kind: "attention" | "goal" | "promise" | "model" | "reflection" | "manual"
+    readonly topic: string
+    readonly text: string
+    readonly priority: number
+    readonly notBefore?: number
+  }["notBefore"]
+}
+
+export type ServerJarvisWakeOutput = {
+  readonly id: string
+  readonly profileID: string
+  readonly sessionID?: string
+  readonly kind: "attention" | "goal" | "promise" | "model" | "reflection" | "manual"
+  readonly topic: string
+  readonly text: string
+  readonly priority: number
+  readonly status: "pending" | "admitted" | "dismissed" | "blocked"
+  readonly notBefore: number
+  readonly createdAt: number
+} | null

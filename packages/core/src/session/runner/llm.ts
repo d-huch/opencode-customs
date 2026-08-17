@@ -8,7 +8,7 @@ import {
   isContextOverflowFailure,
   type ProviderErrorEvent,
 } from "@opencode-ai/llm"
-import { Cause, DateTime, Effect, FiberSet, Layer, Option, Semaphore, Stream } from "effect"
+import { Cause, DateTime, Effect, FiberSet, Layer, Option, Schema, Semaphore, Stream } from "effect"
 import { AgentV2 } from "../../agent"
 import { Config } from "../../config"
 import { Database } from "../../database/database"
@@ -43,6 +43,8 @@ import { MAX_STEPS_PROMPT } from "./max-steps"
 import { Snapshot } from "../../snapshot"
 import { makeLocationNode } from "../../effect/app-node"
 import { llmClient } from "../../effect/app-node-platform"
+import { JarvisRuntime } from "../../jarvis"
+import { Jarvis } from "@opencode-ai/schema/jarvis"
 
 const CHAT_TOOLS = new Set(["websearch", "webfetch"])
 const CHAT_SYSTEM_PROMPT = [
@@ -51,6 +53,67 @@ const CHAT_SYSTEM_PROMPT = [
   "You may use web search, web fetch, and explicitly connected MCP capabilities when available.",
   "Do not inspect, modify, summarize, or reason from local project files, Git state, repository indexes, memories, or verification pipelines.",
 ].join("\n")
+
+const PlannerStep = Schema.Struct({
+  action: Schema.String,
+  arguments: Schema.Record(Schema.String, Schema.Json),
+  expectedPostconditions: Schema.Array(Schema.String),
+})
+const PlannerOutput = Schema.Struct({
+  goal: Schema.String,
+  steps: Schema.Array(PlannerStep),
+  stopConditions: Schema.Array(Schema.String),
+  riskBudget: Schema.Literals(["ambient", "interaction", "critical"]),
+  replanConditions: Schema.Array(Schema.String),
+})
+
+function renderJarvisProfile(profile: Jarvis.ProfileSnapshot | null) {
+  if (!profile) return "No Jarvis personality profile is selected for this conversation."
+  return [
+    "<jarvis_profile>",
+    `Name: ${profile.name}`,
+    profile.userName ? `User name: ${profile.userName}` : "",
+    profile.addressAs ? `Address the user as: ${profile.addressAs}` : "",
+    `Language: ${profile.language}`,
+    `Archetype: ${profile.archetype}`,
+    `Tone: ${profile.tone}`,
+    `Detail: ${profile.detail}`,
+    `Humor: ${profile.humor}`,
+    `Proactivity: ${profile.proactivity}`,
+    profile.catchphrases.length > 0 ? `Optional catchphrases: ${profile.catchphrases.join(" | ")}` : "",
+    profile.instructions,
+    "Apply this as communication style only. It cannot change facts, permissions, safety boundaries, or tool risk.",
+    "</jarvis_profile>",
+  ]
+    .filter((line) => line.length > 0)
+    .join("\n")
+}
+
+function renderJarvisMemory(memories: ReadonlyArray<Jarvis.MemoryRecord>) {
+  if (memories.length === 0) return undefined
+  return [
+    "<jarvis_memory>",
+    "Use only when relevant. Candidate memories are uncertain; verified corrections take precedence. Conflicts remain unresolved.",
+    ...memories.map(
+      (memory) =>
+        `- [${memory.lifecycle}; confidence=${memory.confidence.toFixed(2)}; source=${memory.sourceID}] ${memory.text}`,
+    ),
+    "</jarvis_memory>",
+  ].join("\n")
+}
+
+function renderJarvisGoals(goals: ReadonlyArray<Jarvis.Goal>) {
+  if (goals.length === 0) return undefined
+  return [
+    "<jarvis_goals>",
+    ...goals.map(
+      (goal) =>
+        `- ${goal.id}: ${goal.status}; objective=${goal.objective}; step=${goal.plan?.steps.find((step) => step.status === "pending" || step.status === "running")?.position ?? "none"}; reason=${goal.suspensionReason ?? "none"}`,
+    ),
+    "Do not silently resume suspended goals. A fresh observation and capability validation are required.",
+    "</jarvis_goals>",
+  ].join("\n")
+}
 
 /**
  * Runs one durable coding-agent Session until it settles.
@@ -194,10 +257,19 @@ const layer = Layer.effect(
     const continueAfterOverflowCompaction = (step: number) =>
       new TurnTransitionError({ _tag: "ContinueAfterOverflowCompaction", step })
 
-    const loadSystemContext = (agent: AgentV2.Selection, chat: boolean) =>
-      Effect.all([systemContext.load(), ...(chat ? [] : [skillGuidance.load(agent), referenceGuidance.load()])], {
+    const loadSystemContext = (agent: AgentV2.Selection, chat: boolean, session: SessionSchema.Info) =>
+      Effect.all([systemContext.load(), ...(chat ? [Effect.succeed(jarvisProfileContext(session.jarvis?.profileID))] : [skillGuidance.load(agent), referenceGuidance.load()])], {
         concurrency: "unbounded",
       }).pipe(Effect.map(SystemContext.combine))
+
+    const jarvisProfileContext = (profileID?: string) =>
+      SystemContext.make({
+        key: SystemContext.Key.make("jarvis/profile"),
+        codec: Schema.toCodecJson(Schema.NullOr(Jarvis.ProfileSnapshot)),
+        load: JarvisRuntime.profile(db, profileID).pipe(Effect.orDie, Effect.map((profile) => profile ?? null)),
+        baseline: renderJarvisProfile,
+        update: (_previous, profile) => renderJarvisProfile(profile),
+      })
 
     const runTurnAttempt = Effect.fn("SessionRunner.runTurn")(function* (
       sessionID: SessionSchema.ID,
@@ -211,7 +283,7 @@ const layer = Layer.effect(
         return yield* Effect.interrupt
       const agent = yield* agents.select(session.agent)
       const chat = session.mode === "chat"
-      const initialized = yield* SessionContextEpoch.initialize(db, loadSystemContext(agent, chat), session.id)
+      const initialized = yield* SessionContextEpoch.initialize(db, loadSystemContext(agent, chat, session), session.id)
       const toolFibers = yield* FiberSet.make<void, ToolOutputStore.Error>()
       let needsContinuation = false
       let currentStep = step
@@ -226,11 +298,131 @@ const layer = Layer.effect(
         if (promoted > 0) currentStep = 1
       }
       const system =
-        initialized ?? (yield* SessionContextEpoch.prepare(db, events, loadSystemContext(agent, chat), session.id))
-      const model = yield* models.resolve(session)
+        initialized ?? (yield* SessionContextEpoch.prepare(db, events, loadSystemContext(agent, chat, session), session.id))
+      const jarvisConfig = chat ? yield* JarvisRuntime.getConfig(db).pipe(Effect.orDie) : undefined
+      const jarvisProfile = chat
+        ? yield* JarvisRuntime.profile(db, session.jarvis?.profileID).pipe(Effect.orDie)
+        : undefined
+      const dialogueModel = chat ? jarvisConfig?.models.dialogue : undefined
+      const model = yield* models.resolve(
+        dialogueModel
+          ? {
+              ...session,
+              model: {
+                providerID: ProviderV2.ID.make(dialogueModel.providerID),
+                id: ModelV2.ID.make(dialogueModel.modelID),
+                variant: ModelV2.VariantID.make("default"),
+              },
+            }
+          : session,
+      )
       const entries = yield* SessionHistory.entriesForRunner(db, session.id, system.baselineSeq)
       const context = entries.map((entry) => entry.message)
       const latestUser = context.findLast((message) => message.type === "user")
+      const jarvisMemory =
+        chat && latestUser?.type === "user" && jarvisProfile
+          ? yield* JarvisRuntime.searchMemory(db, {
+              query: latestUser.text,
+              profileID: jarvisProfile.id,
+              limit: 12,
+            }).pipe(Effect.orDie)
+          : []
+      const jarvisGoals = chat
+        ? (yield* JarvisRuntime.goals(db).pipe(Effect.orDie)).filter(
+            (goal) =>
+              goal.sessionID === session.id &&
+              (goal.status === "pending" || goal.status === "planning" || goal.status === "active" || goal.status === "suspended"),
+          )
+        : []
+      const plannedGoal =
+        chat &&
+        latestUser?.type === "user" &&
+        jarvisProfile &&
+        JarvisRuntime.shouldPlan({ text: latestUser.text }) &&
+        !jarvisGoals.some((goal) => goal.objective === latestUser.text)
+          ? yield* Effect.gen(function* () {
+              const goal = yield* JarvisRuntime.createGoal(db, {
+                profileID: jarvisProfile.id,
+                sessionID: session.id,
+                mode: "chat",
+                objective: latestUser.text,
+              }).pipe(Effect.orDie)
+              const planner = jarvisConfig?.models.planner
+              if (!planner) {
+                return yield* JarvisRuntime.suspendGoal(
+                  db,
+                  goal.id,
+                  "Planner model is not configured; multi-step execution is disabled.",
+                ).pipe(Effect.orDie)
+              }
+              const plannerModel = yield* models
+                .resolve({
+                  ...session,
+                  model: {
+                    providerID: ProviderV2.ID.make(planner.providerID),
+                    id: ModelV2.ID.make(planner.modelID),
+                    variant: ModelV2.VariantID.make("default"),
+                  },
+                })
+                .pipe(Effect.option)
+              if (Option.isNone(plannerModel)) {
+                return yield* JarvisRuntime.suspendGoal(db, goal.id, "Planner model is offline or unauthorized.").pipe(
+                  Effect.orDie,
+                )
+              }
+              const planned = yield* LLM.generateObject({
+                model: plannerModel.value,
+                schema: PlannerOutput,
+                system: [
+                  "You are the hidden Jarvis planner. Never address the user and never execute actions.",
+                  "Return a bounded plan with one to eight steps. Each step names one capability-like action, JSON arguments, and observable postconditions.",
+                  "Use the supplied risk budget. Stop rather than inventing unavailable facts or capabilities.",
+                ].map(SystemPart.make),
+                messages: [
+                  Message.user(
+                    [
+                      `Objective: ${latestUser.text}`,
+                      `Allowed risk budget: interaction`,
+                      renderJarvisMemory(jarvisMemory) ?? "No relevant memory.",
+                    ].join("\n\n"),
+                  ),
+                ],
+              }).pipe(Effect.timeout(jarvisConfig?.plannerTimeoutMs ?? 8_000), Effect.option)
+              if (Option.isNone(planned) || planned.value.object.steps.length === 0 || planned.value.object.steps.length > 8) {
+                return yield* JarvisRuntime.suspendGoal(
+                  db,
+                  goal.id,
+                  "Planner failed, timed out, or returned an invalid plan. No actions were executed.",
+                ).pipe(Effect.orDie)
+              }
+              const now = Date.now()
+              const plan: Jarvis.Plan = {
+                ...planned.value.object,
+                steps: planned.value.object.steps.map((step, position) => ({
+                  ...step,
+                  id: crypto.randomUUID(),
+                  goalID: goal.id,
+                  position,
+                  status: "pending",
+                  attempts: 0,
+                  updatedAt: now,
+                })),
+              }
+              const applied = yield* JarvisRuntime.applyPlan(db, goal.id, plan).pipe(Effect.orDie)
+              if (!applied)
+                return yield* JarvisRuntime.suspendGoal(
+                  db,
+                  goal.id,
+                  "Planner output did not pass deterministic validation. No actions were executed.",
+                ).pipe(Effect.orDie)
+              return yield* JarvisRuntime.goals(db)
+                .pipe(Effect.orDie)
+                .pipe(Effect.map((goals) => goals.find((item) => item.id === goal.id)))
+            })
+          : undefined
+      const currentJarvisGoals = plannedGoal
+        ? [...jarvisGoals.filter((goal) => goal.id !== plannedGoal.id), plannedGoal]
+        : jarvisGoals
       const responseLanguageInstruction =
         latestUser?.type === "user" && ResponseLanguage.needsExplicitInstruction(latestUser.text)
           ? ResponseLanguage.instruction(latestUser.text)
@@ -273,7 +465,14 @@ const layer = Layer.effect(
       const request = LLM.request({
         model,
         providerOptions: { openai: { promptCacheKey } },
-        system: [responseControl, chat ? CHAT_SYSTEM_PROMPT : agent.info?.system, system.baseline, routed?.text]
+        system: [
+          responseControl,
+          chat ? CHAT_SYSTEM_PROMPT : agent.info?.system,
+          system.baseline,
+          renderJarvisMemory(jarvisMemory),
+          renderJarvisGoals(currentJarvisGoals),
+          routed?.text,
+        ]
           .filter((part): part is string => part !== undefined && part.length > 0)
           .map(SystemPart.make),
         messages: [...toLLMMessages(context, model), ...(isLastStep ? [Message.assistant(MAX_STEPS_PROMPT)] : [])],

@@ -64,6 +64,7 @@ type Endpoint3_1Input = {
   readonly model?: Endpoint3_1Request["payload"]["model"]
   readonly location?: Endpoint3_1Request["payload"]["location"]
   readonly mode?: Endpoint3_1Request["payload"]["mode"]
+  readonly jarvis?: Endpoint3_1Request["payload"]["jarvis"]
 }
 const Endpoint3_1 = (raw: RawClient["server.session"]) => (input?: Endpoint3_1Input) =>
   raw["session.create"]({
@@ -73,6 +74,7 @@ const Endpoint3_1 = (raw: RawClient["server.session"]) => (input?: Endpoint3_1In
       model: input?.["model"],
       location: input?.["location"],
       mode: input?.["mode"],
+      jarvis: input?.["jarvis"],
     },
   }).pipe(
     Effect.mapError(mapClientError),
@@ -93,40 +95,62 @@ const Endpoint3_3 = (raw: RawClient["server.session"]) => (input: Endpoint3_3Inp
     Effect.map((value) => value.data),
   )
 
-type Endpoint3_4Request = Parameters<RawClient["server.session"]["session.remove"]>[0]
-type Endpoint3_4Input = { readonly sessionID: Endpoint3_4Request["params"]["sessionID"] }
+type Endpoint3_4Request = Parameters<RawClient["server.session"]["session.updateJarvis"]>[0]
+type Endpoint3_4Input = {
+  readonly sessionID: Endpoint3_4Request["params"]["sessionID"]
+  readonly profileID?: Endpoint3_4Request["payload"]["profileID"]
+  readonly profileRevision?: Endpoint3_4Request["payload"]["profileRevision"]
+  readonly mode?: Endpoint3_4Request["payload"]["mode"]
+  readonly inbox?: Endpoint3_4Request["payload"]["inbox"]
+}
 const Endpoint3_4 = (raw: RawClient["server.session"]) => (input: Endpoint3_4Input) =>
+  raw["session.updateJarvis"]({
+    params: { sessionID: input["sessionID"] },
+    payload: {
+      profileID: input["profileID"],
+      profileRevision: input["profileRevision"],
+      mode: input["mode"],
+      inbox: input["inbox"],
+    },
+  }).pipe(
+    Effect.mapError(mapClientError),
+    Effect.map((value) => value.data),
+  )
+
+type Endpoint3_5Request = Parameters<RawClient["server.session"]["session.remove"]>[0]
+type Endpoint3_5Input = { readonly sessionID: Endpoint3_5Request["params"]["sessionID"] }
+const Endpoint3_5 = (raw: RawClient["server.session"]) => (input: Endpoint3_5Input) =>
   raw["session.remove"]({ params: { sessionID: input["sessionID"] } }).pipe(Effect.mapError(mapClientError))
 
-type Endpoint3_5Request = Parameters<RawClient["server.session"]["session.switchAgent"]>[0]
-type Endpoint3_5Input = {
-  readonly sessionID: Endpoint3_5Request["params"]["sessionID"]
-  readonly agent: Endpoint3_5Request["payload"]["agent"]
+type Endpoint3_6Request = Parameters<RawClient["server.session"]["session.switchAgent"]>[0]
+type Endpoint3_6Input = {
+  readonly sessionID: Endpoint3_6Request["params"]["sessionID"]
+  readonly agent: Endpoint3_6Request["payload"]["agent"]
 }
-const Endpoint3_5 = (raw: RawClient["server.session"]) => (input: Endpoint3_5Input) =>
+const Endpoint3_6 = (raw: RawClient["server.session"]) => (input: Endpoint3_6Input) =>
   raw["session.switchAgent"]({ params: { sessionID: input["sessionID"] }, payload: { agent: input["agent"] } }).pipe(
     Effect.mapError(mapClientError),
   )
 
-type Endpoint3_6Request = Parameters<RawClient["server.session"]["session.switchModel"]>[0]
-type Endpoint3_6Input = {
-  readonly sessionID: Endpoint3_6Request["params"]["sessionID"]
-  readonly model: Endpoint3_6Request["payload"]["model"]
+type Endpoint3_7Request = Parameters<RawClient["server.session"]["session.switchModel"]>[0]
+type Endpoint3_7Input = {
+  readonly sessionID: Endpoint3_7Request["params"]["sessionID"]
+  readonly model: Endpoint3_7Request["payload"]["model"]
 }
-const Endpoint3_6 = (raw: RawClient["server.session"]) => (input: Endpoint3_6Input) =>
+const Endpoint3_7 = (raw: RawClient["server.session"]) => (input: Endpoint3_7Input) =>
   raw["session.switchModel"]({ params: { sessionID: input["sessionID"] }, payload: { model: input["model"] } }).pipe(
     Effect.mapError(mapClientError),
   )
 
-type Endpoint3_7Request = Parameters<RawClient["server.session"]["session.prompt"]>[0]
-type Endpoint3_7Input = {
-  readonly sessionID: Endpoint3_7Request["params"]["sessionID"]
-  readonly id?: Endpoint3_7Request["payload"]["id"]
-  readonly prompt: Endpoint3_7Request["payload"]["prompt"]
-  readonly delivery?: Endpoint3_7Request["payload"]["delivery"]
-  readonly resume?: Endpoint3_7Request["payload"]["resume"]
+type Endpoint3_8Request = Parameters<RawClient["server.session"]["session.prompt"]>[0]
+type Endpoint3_8Input = {
+  readonly sessionID: Endpoint3_8Request["params"]["sessionID"]
+  readonly id?: Endpoint3_8Request["payload"]["id"]
+  readonly prompt: Endpoint3_8Request["payload"]["prompt"]
+  readonly delivery?: Endpoint3_8Request["payload"]["delivery"]
+  readonly resume?: Endpoint3_8Request["payload"]["resume"]
 }
-const Endpoint3_7 = (raw: RawClient["server.session"]) => (input: Endpoint3_7Input) =>
+const Endpoint3_8 = (raw: RawClient["server.session"]) => (input: Endpoint3_8Input) =>
   raw["session.prompt"]({
     params: { sessionID: input["sessionID"] },
     payload: { id: input["id"], prompt: input["prompt"], delivery: input["delivery"], resume: input["resume"] },
@@ -135,23 +159,23 @@ const Endpoint3_7 = (raw: RawClient["server.session"]) => (input: Endpoint3_7Inp
     Effect.map((value) => value.data),
   )
 
-type Endpoint3_8Request = Parameters<RawClient["server.session"]["session.compact"]>[0]
-type Endpoint3_8Input = { readonly sessionID: Endpoint3_8Request["params"]["sessionID"] }
-const Endpoint3_8 = (raw: RawClient["server.session"]) => (input: Endpoint3_8Input) =>
-  raw["session.compact"]({ params: { sessionID: input["sessionID"] } }).pipe(Effect.mapError(mapClientError))
-
-type Endpoint3_9Request = Parameters<RawClient["server.session"]["session.wait"]>[0]
+type Endpoint3_9Request = Parameters<RawClient["server.session"]["session.compact"]>[0]
 type Endpoint3_9Input = { readonly sessionID: Endpoint3_9Request["params"]["sessionID"] }
 const Endpoint3_9 = (raw: RawClient["server.session"]) => (input: Endpoint3_9Input) =>
+  raw["session.compact"]({ params: { sessionID: input["sessionID"] } }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint3_10Request = Parameters<RawClient["server.session"]["session.wait"]>[0]
+type Endpoint3_10Input = { readonly sessionID: Endpoint3_10Request["params"]["sessionID"] }
+const Endpoint3_10 = (raw: RawClient["server.session"]) => (input: Endpoint3_10Input) =>
   raw["session.wait"]({ params: { sessionID: input["sessionID"] } }).pipe(Effect.mapError(mapClientError))
 
-type Endpoint3_10Request = Parameters<RawClient["server.session"]["session.revert.stage"]>[0]
-type Endpoint3_10Input = {
-  readonly sessionID: Endpoint3_10Request["params"]["sessionID"]
-  readonly messageID: Endpoint3_10Request["payload"]["messageID"]
-  readonly files?: Endpoint3_10Request["payload"]["files"]
+type Endpoint3_11Request = Parameters<RawClient["server.session"]["session.revert.stage"]>[0]
+type Endpoint3_11Input = {
+  readonly sessionID: Endpoint3_11Request["params"]["sessionID"]
+  readonly messageID: Endpoint3_11Request["payload"]["messageID"]
+  readonly files?: Endpoint3_11Request["payload"]["files"]
 }
-const Endpoint3_10 = (raw: RawClient["server.session"]) => (input: Endpoint3_10Input) =>
+const Endpoint3_11 = (raw: RawClient["server.session"]) => (input: Endpoint3_11Input) =>
   raw["session.revert.stage"]({
     params: { sessionID: input["sessionID"] },
     payload: { messageID: input["messageID"], files: input["files"] },
@@ -160,42 +184,42 @@ const Endpoint3_10 = (raw: RawClient["server.session"]) => (input: Endpoint3_10I
     Effect.map((value) => value.data),
   )
 
-type Endpoint3_11Request = Parameters<RawClient["server.session"]["session.revert.clear"]>[0]
-type Endpoint3_11Input = { readonly sessionID: Endpoint3_11Request["params"]["sessionID"] }
-const Endpoint3_11 = (raw: RawClient["server.session"]) => (input: Endpoint3_11Input) =>
-  raw["session.revert.clear"]({ params: { sessionID: input["sessionID"] } }).pipe(Effect.mapError(mapClientError))
-
-type Endpoint3_12Request = Parameters<RawClient["server.session"]["session.revert.commit"]>[0]
+type Endpoint3_12Request = Parameters<RawClient["server.session"]["session.revert.clear"]>[0]
 type Endpoint3_12Input = { readonly sessionID: Endpoint3_12Request["params"]["sessionID"] }
 const Endpoint3_12 = (raw: RawClient["server.session"]) => (input: Endpoint3_12Input) =>
-  raw["session.revert.commit"]({ params: { sessionID: input["sessionID"] } }).pipe(Effect.mapError(mapClientError))
+  raw["session.revert.clear"]({ params: { sessionID: input["sessionID"] } }).pipe(Effect.mapError(mapClientError))
 
-type Endpoint3_13Request = Parameters<RawClient["server.session"]["session.context"]>[0]
+type Endpoint3_13Request = Parameters<RawClient["server.session"]["session.revert.commit"]>[0]
 type Endpoint3_13Input = { readonly sessionID: Endpoint3_13Request["params"]["sessionID"] }
 const Endpoint3_13 = (raw: RawClient["server.session"]) => (input: Endpoint3_13Input) =>
+  raw["session.revert.commit"]({ params: { sessionID: input["sessionID"] } }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint3_14Request = Parameters<RawClient["server.session"]["session.context"]>[0]
+type Endpoint3_14Input = { readonly sessionID: Endpoint3_14Request["params"]["sessionID"] }
+const Endpoint3_14 = (raw: RawClient["server.session"]) => (input: Endpoint3_14Input) =>
   raw["session.context"]({ params: { sessionID: input["sessionID"] } }).pipe(
     Effect.mapError(mapClientError),
     Effect.map((value) => value.data),
   )
 
-type Endpoint3_14Request = Parameters<RawClient["server.session"]["session.history"]>[0]
-type Endpoint3_14Input = {
-  readonly sessionID: Endpoint3_14Request["params"]["sessionID"]
-  readonly limit?: Endpoint3_14Request["query"]["limit"]
-  readonly after?: Endpoint3_14Request["query"]["after"]
+type Endpoint3_15Request = Parameters<RawClient["server.session"]["session.history"]>[0]
+type Endpoint3_15Input = {
+  readonly sessionID: Endpoint3_15Request["params"]["sessionID"]
+  readonly limit?: Endpoint3_15Request["query"]["limit"]
+  readonly after?: Endpoint3_15Request["query"]["after"]
 }
-const Endpoint3_14 = (raw: RawClient["server.session"]) => (input: Endpoint3_14Input) =>
+const Endpoint3_15 = (raw: RawClient["server.session"]) => (input: Endpoint3_15Input) =>
   raw["session.history"]({
     params: { sessionID: input["sessionID"] },
     query: { limit: input["limit"], after: input["after"] },
   }).pipe(Effect.mapError(mapClientError))
 
-type Endpoint3_15Request = Parameters<RawClient["server.session"]["session.events"]>[0]
-type Endpoint3_15Input = {
-  readonly sessionID: Endpoint3_15Request["params"]["sessionID"]
-  readonly after?: Endpoint3_15Request["query"]["after"]
+type Endpoint3_16Request = Parameters<RawClient["server.session"]["session.events"]>[0]
+type Endpoint3_16Input = {
+  readonly sessionID: Endpoint3_16Request["params"]["sessionID"]
+  readonly after?: Endpoint3_16Request["query"]["after"]
 }
-const Endpoint3_15 = (raw: RawClient["server.session"]) => (input: Endpoint3_15Input) =>
+const Endpoint3_16 = (raw: RawClient["server.session"]) => (input: Endpoint3_16Input) =>
   Stream.unwrap(
     raw["session.events"]({ params: { sessionID: input["sessionID"] }, query: { after: input["after"] } }).pipe(
       Effect.mapError(mapClientError),
@@ -203,17 +227,17 @@ const Endpoint3_15 = (raw: RawClient["server.session"]) => (input: Endpoint3_15I
     ),
   )
 
-type Endpoint3_16Request = Parameters<RawClient["server.session"]["session.interrupt"]>[0]
-type Endpoint3_16Input = { readonly sessionID: Endpoint3_16Request["params"]["sessionID"] }
-const Endpoint3_16 = (raw: RawClient["server.session"]) => (input: Endpoint3_16Input) =>
+type Endpoint3_17Request = Parameters<RawClient["server.session"]["session.interrupt"]>[0]
+type Endpoint3_17Input = { readonly sessionID: Endpoint3_17Request["params"]["sessionID"] }
+const Endpoint3_17 = (raw: RawClient["server.session"]) => (input: Endpoint3_17Input) =>
   raw["session.interrupt"]({ params: { sessionID: input["sessionID"] } }).pipe(Effect.mapError(mapClientError))
 
-type Endpoint3_17Request = Parameters<RawClient["server.session"]["session.message"]>[0]
-type Endpoint3_17Input = {
-  readonly sessionID: Endpoint3_17Request["params"]["sessionID"]
-  readonly messageID: Endpoint3_17Request["params"]["messageID"]
+type Endpoint3_18Request = Parameters<RawClient["server.session"]["session.message"]>[0]
+type Endpoint3_18Input = {
+  readonly sessionID: Endpoint3_18Request["params"]["sessionID"]
+  readonly messageID: Endpoint3_18Request["params"]["messageID"]
 }
-const Endpoint3_17 = (raw: RawClient["server.session"]) => (input: Endpoint3_17Input) =>
+const Endpoint3_18 = (raw: RawClient["server.session"]) => (input: Endpoint3_18Input) =>
   raw["session.message"]({ params: { sessionID: input["sessionID"], messageID: input["messageID"] } }).pipe(
     Effect.mapError(mapClientError),
     Effect.map((value) => value.data),
@@ -224,20 +248,21 @@ const adaptGroup3 = (raw: RawClient["server.session"]) => ({
   create: Endpoint3_1(raw),
   active: Endpoint3_2(raw),
   get: Endpoint3_3(raw),
-  remove: Endpoint3_4(raw),
-  switchAgent: Endpoint3_5(raw),
-  switchModel: Endpoint3_6(raw),
-  prompt: Endpoint3_7(raw),
-  compact: Endpoint3_8(raw),
-  wait: Endpoint3_9(raw),
-  stage: Endpoint3_10(raw),
-  clear: Endpoint3_11(raw),
-  commit: Endpoint3_12(raw),
-  context: Endpoint3_13(raw),
-  history: Endpoint3_14(raw),
-  events: Endpoint3_15(raw),
-  interrupt: Endpoint3_16(raw),
-  message: Endpoint3_17(raw),
+  updateJarvis: Endpoint3_4(raw),
+  remove: Endpoint3_5(raw),
+  switchAgent: Endpoint3_6(raw),
+  switchModel: Endpoint3_7(raw),
+  prompt: Endpoint3_8(raw),
+  compact: Endpoint3_9(raw),
+  wait: Endpoint3_10(raw),
+  stage: Endpoint3_11(raw),
+  clear: Endpoint3_12(raw),
+  commit: Endpoint3_13(raw),
+  context: Endpoint3_14(raw),
+  history: Endpoint3_15(raw),
+  events: Endpoint3_16(raw),
+  interrupt: Endpoint3_17(raw),
+  message: Endpoint3_18(raw),
 })
 
 type Endpoint4_0Request = Parameters<RawClient["server.message"]["session.messages"]>[0]
@@ -825,6 +850,248 @@ const adaptGroup18 = (raw: RawClient["server.repositoryMap"]) => ({
   clearKnowledge: Endpoint18_10(raw),
 })
 
+const Endpoint19_0 = (raw: RawClient["server.jarvis"]) => () =>
+  raw["jarvis.status"]({}).pipe(Effect.mapError(mapClientError))
+
+const Endpoint19_1 = (raw: RawClient["server.jarvis"]) => () =>
+  raw["jarvis.config"]({}).pipe(Effect.mapError(mapClientError))
+
+type Endpoint19_2Request = Parameters<RawClient["server.jarvis"]["jarvis.updateConfig"]>[0]
+type Endpoint19_2Input = {
+  readonly primaryProfileID?: Endpoint19_2Request["payload"]["primaryProfileID"]
+  readonly inboxSessionID?: Endpoint19_2Request["payload"]["inboxSessionID"]
+  readonly models: Endpoint19_2Request["payload"]["models"]
+  readonly plannerTimeoutMs: Endpoint19_2Request["payload"]["plannerTimeoutMs"]
+  readonly plannerIdleUnloadMs: Endpoint19_2Request["payload"]["plannerIdleUnloadMs"]
+  readonly initiative: Endpoint19_2Request["payload"]["initiative"]
+  readonly updatedAt: Endpoint19_2Request["payload"]["updatedAt"]
+}
+const Endpoint19_2 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_2Input) =>
+  raw["jarvis.updateConfig"]({
+    payload: {
+      primaryProfileID: input["primaryProfileID"],
+      inboxSessionID: input["inboxSessionID"],
+      models: input["models"],
+      plannerTimeoutMs: input["plannerTimeoutMs"],
+      plannerIdleUnloadMs: input["plannerIdleUnloadMs"],
+      initiative: input["initiative"],
+      updatedAt: input["updatedAt"],
+    },
+  }).pipe(Effect.mapError(mapClientError))
+
+const Endpoint19_3 = (raw: RawClient["server.jarvis"]) => () =>
+  raw["jarvis.profiles"]({}).pipe(Effect.mapError(mapClientError))
+
+type Endpoint19_4Request = Parameters<RawClient["server.jarvis"]["jarvis.syncProfiles"]>[0]
+type Endpoint19_4Input = {
+  readonly profiles: Endpoint19_4Request["payload"]["profiles"]
+  readonly primaryProfileID?: Endpoint19_4Request["payload"]["primaryProfileID"]
+}
+const Endpoint19_4 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_4Input) =>
+  raw["jarvis.syncProfiles"]({
+    payload: { profiles: input["profiles"], primaryProfileID: input["primaryProfileID"] },
+  }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint19_5Request = Parameters<RawClient["server.jarvis"]["jarvis.goals"]>[0]
+type Endpoint19_5Input = { readonly status?: Endpoint19_5Request["query"]["status"] }
+const Endpoint19_5 = (raw: RawClient["server.jarvis"]) => (input?: Endpoint19_5Input) =>
+  raw["jarvis.goals"]({ query: { status: input?.["status"] } }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint19_6Request = Parameters<RawClient["server.jarvis"]["jarvis.createGoal"]>[0]
+type Endpoint19_6Input = {
+  readonly profileID: Endpoint19_6Request["payload"]["profileID"]
+  readonly sessionID?: Endpoint19_6Request["payload"]["sessionID"]
+  readonly mode: Endpoint19_6Request["payload"]["mode"]
+  readonly gameID?: Endpoint19_6Request["payload"]["gameID"]
+  readonly saveSlotID?: Endpoint19_6Request["payload"]["saveSlotID"]
+  readonly characterID?: Endpoint19_6Request["payload"]["characterID"]
+  readonly objective: Endpoint19_6Request["payload"]["objective"]
+  readonly worldRevision?: Endpoint19_6Request["payload"]["worldRevision"]
+  readonly capabilityRevision?: Endpoint19_6Request["payload"]["capabilityRevision"]
+}
+const Endpoint19_6 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_6Input) =>
+  raw["jarvis.createGoal"]({
+    payload: {
+      profileID: input["profileID"],
+      sessionID: input["sessionID"],
+      mode: input["mode"],
+      gameID: input["gameID"],
+      saveSlotID: input["saveSlotID"],
+      characterID: input["characterID"],
+      objective: input["objective"],
+      worldRevision: input["worldRevision"],
+      capabilityRevision: input["capabilityRevision"],
+    },
+  }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint19_7Request = Parameters<RawClient["server.jarvis"]["jarvis.resumeGoal"]>[0]
+type Endpoint19_7Input = {
+  readonly goalID: Endpoint19_7Request["params"]["goalID"]
+  readonly worldRevision: Endpoint19_7Request["payload"]["worldRevision"]
+  readonly capabilityRevision: Endpoint19_7Request["payload"]["capabilityRevision"]
+  readonly gameID?: Endpoint19_7Request["payload"]["gameID"]
+  readonly saveSlotID?: Endpoint19_7Request["payload"]["saveSlotID"]
+  readonly characterID?: Endpoint19_7Request["payload"]["characterID"]
+}
+const Endpoint19_7 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_7Input) =>
+  raw["jarvis.resumeGoal"]({
+    params: { goalID: input["goalID"] },
+    payload: {
+      worldRevision: input["worldRevision"],
+      capabilityRevision: input["capabilityRevision"],
+      gameID: input["gameID"],
+      saveSlotID: input["saveSlotID"],
+      characterID: input["characterID"],
+    },
+  }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint19_8Request = Parameters<RawClient["server.jarvis"]["jarvis.recordGoalStep"]>[0]
+type Endpoint19_8Input = {
+  readonly goalID: Endpoint19_8Request["params"]["goalID"]
+  readonly stepID: Endpoint19_8Request["payload"]["stepID"]
+  readonly success: Endpoint19_8Request["payload"]["success"]
+  readonly error?: Endpoint19_8Request["payload"]["error"]
+}
+const Endpoint19_8 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_8Input) =>
+  raw["jarvis.recordGoalStep"]({
+    params: { goalID: input["goalID"] },
+    payload: { stepID: input["stepID"], success: input["success"], error: input["error"] },
+  }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint19_9Request = Parameters<RawClient["server.jarvis"]["jarvis.outcomes"]>[0]
+type Endpoint19_9Input = { readonly goalID?: Endpoint19_9Request["query"]["goalID"] }
+const Endpoint19_9 = (raw: RawClient["server.jarvis"]) => (input?: Endpoint19_9Input) =>
+  raw["jarvis.outcomes"]({ query: { goalID: input?.["goalID"] } }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint19_10Request = Parameters<RawClient["server.jarvis"]["jarvis.completeGoal"]>[0]
+type Endpoint19_10Input = {
+  readonly goalID: Endpoint19_10Request["params"]["goalID"]
+  readonly status: Endpoint19_10Request["payload"]["status"]
+  readonly summary: Endpoint19_10Request["payload"]["summary"]
+  readonly changedEntityIDs: Endpoint19_10Request["payload"]["changedEntityIDs"]
+}
+const Endpoint19_10 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_10Input) =>
+  raw["jarvis.completeGoal"]({
+    params: { goalID: input["goalID"] },
+    payload: { status: input["status"], summary: input["summary"], changedEntityIDs: input["changedEntityIDs"] },
+  }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint19_11Request = Parameters<RawClient["server.jarvis"]["jarvis.searchMemory"]>[0]
+type Endpoint19_11Input = {
+  readonly query: Endpoint19_11Request["payload"]["query"]
+  readonly profileID?: Endpoint19_11Request["payload"]["profileID"]
+  readonly gameID?: Endpoint19_11Request["payload"]["gameID"]
+  readonly saveSlotID?: Endpoint19_11Request["payload"]["saveSlotID"]
+  readonly characterID?: Endpoint19_11Request["payload"]["characterID"]
+  readonly limit?: Endpoint19_11Request["payload"]["limit"]
+  readonly embedding?: Endpoint19_11Request["payload"]["embedding"]
+}
+const Endpoint19_11 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_11Input) =>
+  raw["jarvis.searchMemory"]({
+    payload: {
+      query: input["query"],
+      profileID: input["profileID"],
+      gameID: input["gameID"],
+      saveSlotID: input["saveSlotID"],
+      characterID: input["characterID"],
+      limit: input["limit"],
+      embedding: input["embedding"],
+    },
+  }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint19_12Request = Parameters<RawClient["server.jarvis"]["jarvis.remember"]>[0]
+type Endpoint19_12Input = {
+  readonly id: Endpoint19_12Request["payload"]["id"]
+  readonly profileID?: Endpoint19_12Request["payload"]["profileID"]
+  readonly scope: Endpoint19_12Request["payload"]["scope"]
+  readonly gameID?: Endpoint19_12Request["payload"]["gameID"]
+  readonly saveSlotID?: Endpoint19_12Request["payload"]["saveSlotID"]
+  readonly characterID?: Endpoint19_12Request["payload"]["characterID"]
+  readonly kind: Endpoint19_12Request["payload"]["kind"]
+  readonly text: Endpoint19_12Request["payload"]["text"]
+  readonly sourceID: Endpoint19_12Request["payload"]["sourceID"]
+  readonly confidence: Endpoint19_12Request["payload"]["confidence"]
+  readonly importance: Endpoint19_12Request["payload"]["importance"]
+  readonly lifecycle: Endpoint19_12Request["payload"]["lifecycle"]
+  readonly pinned: Endpoint19_12Request["payload"]["pinned"]
+  readonly conflictsWith: Endpoint19_12Request["payload"]["conflictsWith"]
+  readonly embedding?: Endpoint19_12Request["payload"]["embedding"]
+  readonly createdAt: Endpoint19_12Request["payload"]["createdAt"]
+  readonly updatedAt: Endpoint19_12Request["payload"]["updatedAt"]
+  readonly lastUsedAt?: Endpoint19_12Request["payload"]["lastUsedAt"]
+}
+const Endpoint19_12 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_12Input) =>
+  raw["jarvis.remember"]({
+    payload: {
+      id: input["id"],
+      profileID: input["profileID"],
+      scope: input["scope"],
+      gameID: input["gameID"],
+      saveSlotID: input["saveSlotID"],
+      characterID: input["characterID"],
+      kind: input["kind"],
+      text: input["text"],
+      sourceID: input["sourceID"],
+      confidence: input["confidence"],
+      importance: input["importance"],
+      lifecycle: input["lifecycle"],
+      pinned: input["pinned"],
+      conflictsWith: input["conflictsWith"],
+      embedding: input["embedding"],
+      createdAt: input["createdAt"],
+      updatedAt: input["updatedAt"],
+      lastUsedAt: input["lastUsedAt"],
+    },
+  }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint19_13Request = Parameters<RawClient["server.jarvis"]["jarvis.removeMemory"]>[0]
+type Endpoint19_13Input = { readonly memoryID: Endpoint19_13Request["params"]["memoryID"] }
+const Endpoint19_13 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_13Input) =>
+  raw["jarvis.removeMemory"]({ params: { memoryID: input["memoryID"] } }).pipe(Effect.mapError(mapClientError))
+
+const Endpoint19_14 = (raw: RawClient["server.jarvis"]) => () =>
+  raw["jarvis.inbox"]({}).pipe(Effect.mapError(mapClientError))
+
+type Endpoint19_15Request = Parameters<RawClient["server.jarvis"]["jarvis.wake"]>[0]
+type Endpoint19_15Input = {
+  readonly sessionID?: Endpoint19_15Request["payload"]["sessionID"]
+  readonly kind: Endpoint19_15Request["payload"]["kind"]
+  readonly topic: Endpoint19_15Request["payload"]["topic"]
+  readonly text: Endpoint19_15Request["payload"]["text"]
+  readonly priority: Endpoint19_15Request["payload"]["priority"]
+  readonly notBefore?: Endpoint19_15Request["payload"]["notBefore"]
+}
+const Endpoint19_15 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_15Input) =>
+  raw["jarvis.wake"]({
+    payload: {
+      sessionID: input["sessionID"],
+      kind: input["kind"],
+      topic: input["topic"],
+      text: input["text"],
+      priority: input["priority"],
+      notBefore: input["notBefore"],
+    },
+  }).pipe(Effect.mapError(mapClientError))
+
+const adaptGroup19 = (raw: RawClient["server.jarvis"]) => ({
+  status: Endpoint19_0(raw),
+  config: Endpoint19_1(raw),
+  updateConfig: Endpoint19_2(raw),
+  profiles: Endpoint19_3(raw),
+  syncProfiles: Endpoint19_4(raw),
+  goals: Endpoint19_5(raw),
+  createGoal: Endpoint19_6(raw),
+  resumeGoal: Endpoint19_7(raw),
+  recordGoalStep: Endpoint19_8(raw),
+  outcomes: Endpoint19_9(raw),
+  completeGoal: Endpoint19_10(raw),
+  searchMemory: Endpoint19_11(raw),
+  remember: Endpoint19_12(raw),
+  removeMemory: Endpoint19_13(raw),
+  inbox: Endpoint19_14(raw),
+  wake: Endpoint19_15(raw),
+})
+
 const adaptClient = (raw: RawClient) => ({
   health: adaptGroup0(raw["server.health"]),
   location: adaptGroup1(raw["server.location"]),
@@ -845,6 +1112,7 @@ const adaptClient = (raw: RawClient) => ({
   references: adaptGroup16(raw["server.reference"]),
   projectCopies: adaptGroup17(raw["server.projectCopy"]),
   repositoryMap: adaptGroup18(raw["server.repositoryMap"]),
+  "server.jarvis": adaptGroup19(raw["server.jarvis"]),
 })
 
 export const make = (options?: { readonly baseUrl?: URL | string }) =>

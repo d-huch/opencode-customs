@@ -74,6 +74,7 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
               model: ctx.payload.model,
               location: ctx.payload.location ?? { directory: AbsolutePath.make(process.cwd()) },
               mode: ctx.payload.mode,
+              jarvis: ctx.payload.jarvis,
             }),
           }
         }),
@@ -93,6 +94,23 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
         Effect.fn(function* (ctx) {
           return {
             data: yield* session.get(ctx.params.sessionID).pipe(
+              Effect.catchTag(
+                "Session.NotFoundError",
+                (error) =>
+                  new SessionNotFoundError({
+                    sessionID: error.sessionID,
+                    message: `Session not found: ${error.sessionID}`,
+                  }),
+              ),
+            ),
+          }
+        }),
+      )
+      .handle(
+        "session.updateJarvis",
+        Effect.fn(function* (ctx) {
+          return {
+            data: yield* session.updateJarvis({ sessionID: ctx.params.sessionID, jarvis: ctx.payload }).pipe(
               Effect.catchTag(
                 "Session.NotFoundError",
                 (error) =>

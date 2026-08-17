@@ -45,8 +45,8 @@ if (missing.length > 0) {
   process.exit(1)
 }
 const manifest = await Bun.file(resolve(root, unityFiles[0])).json()
-if (manifest.version !== "2.1.0" || !manifest.samples?.some((sample: { path?: string }) => sample.path === "Samples~/JarvisLab")) {
-  console.error("[Jarvis] Unity package manifest does not expose Jarvis Lab v2.1")
+if (manifest.version !== "2.2.0" || !manifest.samples?.some((sample: { path?: string }) => sample.path === "Samples~/JarvisLab")) {
+  console.error("[Jarvis] Unity package manifest does not expose Jarvis Lab v2.2")
   process.exit(1)
 }
 console.log("\n[Jarvis] Unity UPM manifest and vertical-slice assets are present")

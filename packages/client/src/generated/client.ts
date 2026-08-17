@@ -11,6 +11,8 @@ import type {
   SessionsActiveOutput,
   SessionsGetInput,
   SessionsGetOutput,
+  SessionsUpdateJarvisInput,
+  SessionsUpdateJarvisOutput,
   SessionsRemoveInput,
   SessionsRemoveOutput,
   SessionsSwitchAgentInput,
@@ -136,6 +138,34 @@ import type {
   RepositoryMapFeedbackRetrievalOutput,
   RepositoryMapClearKnowledgeInput,
   RepositoryMapClearKnowledgeOutput,
+  ServerJarvisStatusOutput,
+  ServerJarvisConfigOutput,
+  ServerJarvisUpdateConfigInput,
+  ServerJarvisUpdateConfigOutput,
+  ServerJarvisProfilesOutput,
+  ServerJarvisSyncProfilesInput,
+  ServerJarvisSyncProfilesOutput,
+  ServerJarvisGoalsInput,
+  ServerJarvisGoalsOutput,
+  ServerJarvisCreateGoalInput,
+  ServerJarvisCreateGoalOutput,
+  ServerJarvisResumeGoalInput,
+  ServerJarvisResumeGoalOutput,
+  ServerJarvisRecordGoalStepInput,
+  ServerJarvisRecordGoalStepOutput,
+  ServerJarvisOutcomesInput,
+  ServerJarvisOutcomesOutput,
+  ServerJarvisCompleteGoalInput,
+  ServerJarvisCompleteGoalOutput,
+  ServerJarvisSearchMemoryInput,
+  ServerJarvisSearchMemoryOutput,
+  ServerJarvisRememberInput,
+  ServerJarvisRememberOutput,
+  ServerJarvisRemoveMemoryInput,
+  ServerJarvisRemoveMemoryOutput,
+  ServerJarvisInboxOutput,
+  ServerJarvisWakeInput,
+  ServerJarvisWakeOutput,
 } from "./types"
 import { ClientError } from "./client-error"
 
@@ -339,6 +369,7 @@ export function make(options: ClientOptions) {
               model: input?.["model"],
               location: input?.["location"],
               mode: input?.["mode"],
+              jarvis: input?.["jarvis"],
             },
             successStatus: 200,
             declaredStatuses: [401, 400],
@@ -362,6 +393,23 @@ export function make(options: ClientOptions) {
           {
             method: "GET",
             path: `/api/session/${encodeURIComponent(input.sessionID)}`,
+            successStatus: 200,
+            declaredStatuses: [404, 400, 401],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+      updateJarvis: (input: SessionsUpdateJarvisInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: SessionsUpdateJarvisOutput }>(
+          {
+            method: "PATCH",
+            path: `/api/session/${encodeURIComponent(input.sessionID)}/jarvis`,
+            body: {
+              profileID: input["profileID"],
+              profileRevision: input["profileRevision"],
+              mode: input["mode"],
+              inbox: input["inbox"],
+            },
             successStatus: 200,
             declaredStatuses: [404, 400, 401],
             empty: false,
@@ -1163,6 +1211,235 @@ export function make(options: ClientOptions) {
             method: "DELETE",
             path: `/api/repository-map/knowledge/${encodeURIComponent(input.scope)}`,
             query: { location: input["location"] },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+    },
+    "server.jarvis": {
+      status: (requestOptions?: RequestOptions) =>
+        request<ServerJarvisStatusOutput>(
+          { method: "GET", path: `/api/jarvis/status`, successStatus: 200, declaredStatuses: [401, 400], empty: false },
+          requestOptions,
+        ),
+      config: (requestOptions?: RequestOptions) =>
+        request<ServerJarvisConfigOutput>(
+          { method: "GET", path: `/api/jarvis/config`, successStatus: 200, declaredStatuses: [401, 400], empty: false },
+          requestOptions,
+        ),
+      updateConfig: (input: ServerJarvisUpdateConfigInput, requestOptions?: RequestOptions) =>
+        request<ServerJarvisUpdateConfigOutput>(
+          {
+            method: "PUT",
+            path: `/api/jarvis/config`,
+            body: {
+              primaryProfileID: input["primaryProfileID"],
+              inboxSessionID: input["inboxSessionID"],
+              models: input["models"],
+              plannerTimeoutMs: input["plannerTimeoutMs"],
+              plannerIdleUnloadMs: input["plannerIdleUnloadMs"],
+              initiative: input["initiative"],
+              updatedAt: input["updatedAt"],
+            },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      profiles: (requestOptions?: RequestOptions) =>
+        request<ServerJarvisProfilesOutput>(
+          {
+            method: "GET",
+            path: `/api/jarvis/profiles`,
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      syncProfiles: (input: ServerJarvisSyncProfilesInput, requestOptions?: RequestOptions) =>
+        request<ServerJarvisSyncProfilesOutput>(
+          {
+            method: "PUT",
+            path: `/api/jarvis/profiles`,
+            body: { profiles: input["profiles"], primaryProfileID: input["primaryProfileID"] },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      goals: (input?: ServerJarvisGoalsInput, requestOptions?: RequestOptions) =>
+        request<ServerJarvisGoalsOutput>(
+          {
+            method: "GET",
+            path: `/api/jarvis/goals`,
+            query: { status: input?.["status"] },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      createGoal: (input: ServerJarvisCreateGoalInput, requestOptions?: RequestOptions) =>
+        request<ServerJarvisCreateGoalOutput>(
+          {
+            method: "POST",
+            path: `/api/jarvis/goals`,
+            body: {
+              profileID: input["profileID"],
+              sessionID: input["sessionID"],
+              mode: input["mode"],
+              gameID: input["gameID"],
+              saveSlotID: input["saveSlotID"],
+              characterID: input["characterID"],
+              objective: input["objective"],
+              worldRevision: input["worldRevision"],
+              capabilityRevision: input["capabilityRevision"],
+            },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      resumeGoal: (input: ServerJarvisResumeGoalInput, requestOptions?: RequestOptions) =>
+        request<ServerJarvisResumeGoalOutput>(
+          {
+            method: "POST",
+            path: `/api/jarvis/goals/${encodeURIComponent(input.goalID)}/resume`,
+            body: {
+              worldRevision: input["worldRevision"],
+              capabilityRevision: input["capabilityRevision"],
+              gameID: input["gameID"],
+              saveSlotID: input["saveSlotID"],
+              characterID: input["characterID"],
+            },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      recordGoalStep: (input: ServerJarvisRecordGoalStepInput, requestOptions?: RequestOptions) =>
+        request<ServerJarvisRecordGoalStepOutput>(
+          {
+            method: "POST",
+            path: `/api/jarvis/goals/${encodeURIComponent(input.goalID)}/steps/result`,
+            body: { stepID: input["stepID"], success: input["success"], error: input["error"] },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      outcomes: (input?: ServerJarvisOutcomesInput, requestOptions?: RequestOptions) =>
+        request<ServerJarvisOutcomesOutput>(
+          {
+            method: "GET",
+            path: `/api/jarvis/outcomes`,
+            query: { goalID: input?.["goalID"] },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      completeGoal: (input: ServerJarvisCompleteGoalInput, requestOptions?: RequestOptions) =>
+        request<ServerJarvisCompleteGoalOutput>(
+          {
+            method: "POST",
+            path: `/api/jarvis/goals/${encodeURIComponent(input.goalID)}/outcome`,
+            body: { status: input["status"], summary: input["summary"], changedEntityIDs: input["changedEntityIDs"] },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      searchMemory: (input: ServerJarvisSearchMemoryInput, requestOptions?: RequestOptions) =>
+        request<ServerJarvisSearchMemoryOutput>(
+          {
+            method: "POST",
+            path: `/api/jarvis/memory/search`,
+            body: {
+              query: input["query"],
+              profileID: input["profileID"],
+              gameID: input["gameID"],
+              saveSlotID: input["saveSlotID"],
+              characterID: input["characterID"],
+              limit: input["limit"],
+              embedding: input["embedding"],
+            },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      remember: (input: ServerJarvisRememberInput, requestOptions?: RequestOptions) =>
+        request<ServerJarvisRememberOutput>(
+          {
+            method: "POST",
+            path: `/api/jarvis/memory`,
+            body: {
+              id: input["id"],
+              profileID: input["profileID"],
+              scope: input["scope"],
+              gameID: input["gameID"],
+              saveSlotID: input["saveSlotID"],
+              characterID: input["characterID"],
+              kind: input["kind"],
+              text: input["text"],
+              sourceID: input["sourceID"],
+              confidence: input["confidence"],
+              importance: input["importance"],
+              lifecycle: input["lifecycle"],
+              pinned: input["pinned"],
+              conflictsWith: input["conflictsWith"],
+              embedding: input["embedding"],
+              createdAt: input["createdAt"],
+              updatedAt: input["updatedAt"],
+              lastUsedAt: input["lastUsedAt"],
+            },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      removeMemory: (input: ServerJarvisRemoveMemoryInput, requestOptions?: RequestOptions) =>
+        request<ServerJarvisRemoveMemoryOutput>(
+          {
+            method: "DELETE",
+            path: `/api/jarvis/memory/${encodeURIComponent(input.memoryID)}`,
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      inbox: (requestOptions?: RequestOptions) =>
+        request<ServerJarvisInboxOutput>(
+          { method: "GET", path: `/api/jarvis/inbox`, successStatus: 200, declaredStatuses: [401, 400], empty: false },
+          requestOptions,
+        ),
+      wake: (input: ServerJarvisWakeInput, requestOptions?: RequestOptions) =>
+        request<ServerJarvisWakeOutput>(
+          {
+            method: "POST",
+            path: `/api/jarvis/wake`,
+            body: {
+              sessionID: input["sessionID"],
+              kind: input["kind"],
+              topic: input["topic"],
+              text: input["text"],
+              priority: input["priority"],
+              notBefore: input["notBefore"],
+            },
             successStatus: 200,
             declaredStatuses: [401, 400],
             empty: false,
