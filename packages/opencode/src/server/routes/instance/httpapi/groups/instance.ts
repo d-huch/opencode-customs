@@ -22,6 +22,7 @@ const PathInfo = Schema.Struct({
   config: Schema.String,
   worktree: Schema.String,
   directory: Schema.String,
+  chat: Schema.optional(Schema.String),
 }).annotate({ identifier: "Path" })
 
 export const VcsDiffQuery = Schema.Struct({

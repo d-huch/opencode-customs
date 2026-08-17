@@ -546,6 +546,7 @@ export const SessionInfo = Schema.Struct({
   projectID: Project.ID,
   workspaceID: optional(WorkspaceID),
   directory: Schema.String,
+  mode: optional(Schema.Literals(["project", "chat"])),
   path: optional(Schema.String),
   parentID: optional(SessionID),
   summary: optional(SessionSummary),

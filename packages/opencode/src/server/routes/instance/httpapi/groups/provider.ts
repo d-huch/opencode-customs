@@ -9,6 +9,7 @@ import { WorkspaceRoutingMiddleware, WorkspaceRoutingQuery } from "../middleware
 import { described } from "./metadata"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { LmStudioProbe } from "@/local-agent-runtime/lmstudio"
+import { LlamaServerProbe } from "@/local-agent-runtime/llama-server"
 import { ResourceGovernorSnapshot } from "@/local-agent-runtime/resource-governor"
 import { ModelCapabilityRouter } from "@opencode-ai/core/model-capability-router"
 import { SessionExecutionCheckpoint } from "@opencode-ai/core/session/execution-checkpoint"
@@ -74,6 +75,17 @@ export const ProviderApi = HttpApi.make("provider")
             summary: "Probe LM Studio capabilities",
             description:
               "Check LM Studio connectivity and discover loaded models, context limits, tool use, vision, reasoning, and embedding capabilities without running inference.",
+          }),
+        ),
+        HttpApiEndpoint.get("llamaServerProbe", `${root}/llama-server/probe`, {
+          query: WorkspaceRoutingQuery,
+          success: described(LlamaServerProbe, "llama-server capability snapshot"),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "provider.llamaServer.probe",
+            summary: "Probe llama-server capabilities",
+            description:
+              "Check an external llama.cpp server and discover single-model or router models, states, context limits, modalities, and chat-template tool capability without running inference or changing model state.",
           }),
         ),
         HttpApiEndpoint.get("resourceGovernor", `${root}/runtime/resources`, {

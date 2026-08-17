@@ -1,6 +1,8 @@
 import { createPromptProjectController } from "@/components/prompt-project-selector"
 import { useTitlebarRightMount } from "@/components/titlebar"
 import { useSettings } from "@/context/settings"
+import { useTabs } from "@/context/tabs"
+import { useSearchParams } from "@solidjs/router"
 import { createEffect, createResource } from "solid-js"
 import { createNewSessionDraftController } from "./new-session/new-session-draft-controller"
 import { NewSessionStatus, NewSessionView } from "./new-session/new-session-view"
@@ -10,11 +12,15 @@ import { useNewSessionCommands } from "./new-session/use-new-session-commands"
 /** The draft-only V2 session page. Submitting promotes the draft into a real session. */
 export default function NewSessionPage() {
   const settings = useSettings()
+  const tabs = useTabs()
+  const [search] = useSearchParams<{ draftId?: string }>()
+  const chat = () => (search.draftId ? tabs.draft(search.draftId).mode === "chat" : false)
   const rightMount = useTitlebarRightMount()
   const workspace = createNewSessionWorkspaceController()
   const draft = createNewSessionDraftController({
     worktree: workspace.selection.value,
     resetWorktree: workspace.selection.reset,
+    mode: () => (chat() ? "chat" : "project"),
   })
   const project = createPromptProjectController({
     controls: draft.project.controls,
@@ -23,8 +29,10 @@ export default function NewSessionPage() {
   useNewSessionCommands({
     restoreFocus: draft.input.restoreFocus,
     project: {
-      empty: project.empty,
-      open: () => project.setOpen(true),
+      empty: () => chat() || project.empty(),
+      open: () => {
+        if (!chat()) project.setOpen(true)
+      },
     },
   })
   createEffect(() => {
@@ -42,7 +50,7 @@ export default function NewSessionPage() {
       {suspendUntilPromptReady()}
       <NewSessionStatus mount={rightMount} visible={settings.visibility.status} />
       <div class="flex-1 min-h-0 flex flex-col gap-2 p-2">
-        <NewSessionView input={draft.input} project={project} workspace={workspace} />
+        <NewSessionView input={draft.input} project={project} workspace={workspace} chat={chat} />
       </div>
     </div>
   )

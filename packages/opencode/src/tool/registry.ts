@@ -57,6 +57,7 @@ import { McpCatalog } from "@/mcp/catalog"
 import { VerificationTool } from "./verification"
 import { EvidenceTool } from "./evidence"
 import { CriticTool } from "./critic"
+import { AvatarControlTool } from "./avatar-control"
 
 export function webSearchEnabled(providerID: ProviderV2.ID, flags = { exa: false, parallel: false }) {
   return (
@@ -122,6 +123,7 @@ const layer = Layer.effect(
     const verification = yield* VerificationTool
     const evidence = yield* EvidenceTool
     const critic = yield* CriticTool
+    const avatar = yield* AvatarControlTool
     const agent = yield* Agent.Service
     const codeMode = flags.experimentalCodeMode ? yield* Effect.promise(() => import("./code-mode")) : undefined
     const codeModeTool = codeMode ? yield* codeMode.CodeModeTool : undefined
@@ -234,6 +236,7 @@ const layer = Layer.effect(
           verification: Tool.init(verification),
           evidence: Tool.init(evidence),
           critic: Tool.init(critic),
+          avatar: Tool.init(avatar),
           plan: Tool.init(plan),
           ...(codeModeTool ? { execute: Tool.init(codeModeTool) } : {}),
         })
@@ -258,6 +261,9 @@ const layer = Layer.effect(
             tool.verification,
             tool.evidence,
             tool.critic,
+            ...(process.env.OPENCODE_AVATAR_BRIDGE_URL && process.env.OPENCODE_AVATAR_BRIDGE_TOKEN
+              ? [tool.avatar]
+              : []),
             ...(tool.execute ? [tool.execute] : []),
             ...(flags.experimentalLspTool ? [tool.lsp] : []),
             ...(flags.experimentalPlanMode && flags.client === "cli" ? [tool.plan] : []),

@@ -10,6 +10,7 @@ export function normalizeSessionInfo(input: SessionInfo | Session): Session {
     projectID: input.projectID,
     workspaceID: input.location.workspaceID,
     directory: input.location.directory,
+    mode: "mode" in input && (input.mode === "project" || input.mode === "chat") ? input.mode : undefined,
     path: input.subpath,
     parentID: input.parentID,
     cost: input.cost,

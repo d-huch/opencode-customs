@@ -8,7 +8,6 @@ import { write as writeLog } from "./logging"
 import { hasExistingAppState } from "./install-state"
 
 const DEFAULT_PROJECT_DIR = "Default Project"
-const CHAT_WORKSPACE_DIR = "OpenCode Customs Chat"
 
 export function initializeOldLayoutEligibility(userDataPath: string) {
   const entries = existsSync(userDataPath) ? readdirSync(userDataPath, { withFileTypes: true }) : []
@@ -43,11 +42,4 @@ export async function finishFirstLaunchOnboarding(createDefaultProject: boolean)
   getStore().set(FIRST_LAUNCH_ONBOARDING_COMPLETE_KEY, true)
   writeLog("onboarding", "first launch onboarding completed", { createDefaultProject, defaultProject })
   return defaultProject
-}
-
-export async function ensureChatWorkspace() {
-  const directory = join(app.getPath("documents"), CHAT_WORKSPACE_DIR)
-  await mkdir(directory, { recursive: true })
-  writeLog("onboarding", "chat workspace ensured", { directory })
-  return directory
 }

@@ -22,7 +22,6 @@ import { DiffChanges } from "@opencode-ai/ui/diff-changes"
 import { Icon } from "@opencode-ai/ui/icon"
 import { TextShimmer } from "@opencode-ai/ui/text-shimmer"
 import { SessionRetry } from "./session-retry"
-import { TextReveal } from "@opencode-ai/ui/text-reveal"
 import { createAutoScroll } from "@opencode-ai/ui/hooks"
 import { useI18n } from "@opencode-ai/ui/context/i18n"
 import { normalize } from "./session-diff"
@@ -112,42 +111,6 @@ function partState(part: PartType, showReasoningSummaries: boolean) {
   }
   if (PART_MAPPING[part.type]) return "visible" as const
   return
-}
-
-function clean(value: string) {
-  return value
-    .replace(/`([^`]+)`/g, "$1")
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
-    .replace(/[*_~]+/g, "")
-    .trim()
-}
-
-function heading(text: string) {
-  const markdown = text.replace(/\r\n?/g, "\n")
-
-  const html = markdown.match(/<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>/i)
-  if (html?.[1]) {
-    const value = clean(html[1].replace(/<[^>]+>/g, " "))
-    if (value) return value
-  }
-
-  const atx = markdown.match(/^\s{0,3}#{1,6}[ \t]+(.+?)(?:[ \t]+#+[ \t]*)?$/m)
-  if (atx?.[1]) {
-    const value = clean(atx[1])
-    if (value) return value
-  }
-
-  const setext = markdown.match(/^([^\n]+)\n(?:=+|-+)\s*$/m)
-  if (setext?.[1]) {
-    const value = clean(setext[1])
-    if (value) return value
-  }
-
-  const strong = markdown.match(/^\s*(?:\*\*|__)(.+?)(?:\*\*|__)\s*$/m)
-  if (strong?.[1]) {
-    const value = clean(strong[1])
-    if (value) return value
-  }
 }
 
 export function SessionTurn(
@@ -350,25 +313,18 @@ export function SessionTurn(
     if (end < start) return undefined
     return end - start
   })
-  const assistantDerived = createMemo(() => {
+  const assistantVisible = createMemo(() => {
     let visible = 0
-    let reason: string | undefined
     const show = showReasoningSummaries()
     for (const message of assistantMessages()) {
       for (const part of list(data.store.part?.[message.id], emptyParts)) {
         if (partState(part, show) === "visible") {
           visible++
         }
-        if (part.type === "reasoning" && part.text) {
-          const h = heading(part.text)
-          if (h) reason = h
-        }
       }
     }
-    return { visible, reason }
+    return visible
   })
-  const assistantVisible = createMemo(() => assistantDerived().visible)
-  const reasoningHeading = createMemo(() => assistantDerived().reason)
   const showThinking = createMemo(() => {
     if (!working() || !!error()) return false
     if (status().type === "retry") return false
@@ -422,14 +378,6 @@ export function SessionTurn(
               <Show when={showThinking()}>
                 <div data-slot="session-turn-thinking">
                   <TextShimmer text={i18n.t("ui.sessionTurn.status.thinking")} />
-                  <Show when={!showReasoningSummaries()}>
-                    <TextReveal
-                      text={reasoningHeading()}
-                      class="session-turn-thinking-heading"
-                      travel={25}
-                      duration={700}
-                    />
-                  </Show>
                 </div>
               </Show>
               <SessionRetry status={status()} show={active()} />

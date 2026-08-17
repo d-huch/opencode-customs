@@ -212,7 +212,7 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
 
 type PromptSubmitInput = {
   prompt: ReturnType<typeof usePrompt>
-  info: Accessor<{ id: string } | undefined>
+  info: Accessor<{ id: string; mode?: "project" | "chat" } | undefined>
   imageAttachments: Accessor<ImageAttachmentPart[]>
   commentCount: Accessor<number>
   autoAccept: Accessor<boolean>
@@ -340,7 +340,9 @@ export function createPromptSubmit(input: PromptSubmitInput) {
 
     const modelSelection = input.model ?? local.model
     const currentModel = modelSelection.current()
-    const currentAgent = local.agent.current()
+    const draftMode = search.draftId ? tabs.draft(search.draftId).mode : undefined
+    const chat = input.info()?.mode === "chat" || draftMode === "chat"
+    const currentAgent = chat ? { name: "chat" } : local.agent.current()
     const variant = modelSelection.variant.current()
     if (!currentModel || !currentAgent) {
       showToast({
@@ -408,6 +410,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
           agent: currentAgent.name,
           model: { id: currentModel.id, providerID: currentModel.provider.id, variant },
           location: { directory: sessionDirectory },
+          mode: draftMode,
         })
         .then(normalizeSessionInfo)
         .catch((err) => {

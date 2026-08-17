@@ -567,7 +567,7 @@ noLLMServer.instance(
 
 it.instance("loop exits without an LLM request for interrupted orphan tool calls", () =>
   Effect.gen(function* () {
-    const { llm } = yield* useServerConfig(providerCfg)
+    const { llm } = yield* useServerConfig(visionProviderCfg)
     const prompt = yield* SessionPrompt.Service
     const sessions = yield* Session.Service
     const chat = yield* sessions.create({ title: "Pinned" })
@@ -817,6 +817,60 @@ it.instance("loop instructs the model to match the user's language", () =>
     expect(body).not.toContain("<response-language>")
     expect(body).toContain("Поясни, як працює цей модуль")
     expect(yield* llm.serviceHits).toHaveLength(1)
+    yield* Fiber.interrupt(fiber)
+  }),
+)
+
+it.instance("lets the primary Chat turn interpret colloquial intent without phrase hardcoding or voice attribution", () =>
+  Effect.gen(function* () {
+    const { llm } = yield* useServerConfig(visionProviderCfg)
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const agents = yield* AgentSvc.Service
+    const registry = yield* ToolRegistry.Service
+    const chat = yield* sessions.create({
+      title: "Current price",
+      mode: "chat",
+      permission: [{ permission: "*", pattern: "*", action: "allow" }],
+    })
+    const agent = yield* agents.get("chat")
+    if (!agent) throw new Error("Chat agent is unavailable")
+    const definitions = yield* registry.tools({
+      providerID: ProviderV2.ID.make("lmstudio"),
+      modelID: ModelV2.ID.make("vision-instance"),
+      agent,
+      permission: chat.permission,
+      ids: ["websearch", "webfetch"],
+    })
+    expect(definitions.map((item) => item.id)).toContain("websearch")
+    yield* llm.hang
+    yield* prompt.prompt({
+      sessionID: chat.id,
+      agent: "chat",
+      model: { providerID: ProviderV2.ID.make("lmstudio"), modelID: ModelV2.ID.make("vision-model") },
+      noReply: true,
+      parts: [{ type: "text", text: "По чому в Одесі рубероїд?" }],
+    })
+
+    const fiber = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.forkChild)
+    yield* awaitWithTimeout(llm.wait(1), "timed out waiting for current-price request", "10 seconds")
+
+    const body = (yield* llm.hits)[0]?.body
+    const request = JSON.stringify(body)
+    expect(request).toContain("По чому в Одесі рубероїд?")
+    expect(request).toContain("Determine intent from meaning and conversational context")
+    expect(request).not.toContain("по чому/почому X?")
+    expect(request).toContain('\"name\":\"websearch\"')
+    expect(request).not.toContain('\"name\":\"read\"')
+    expect(request).not.toContain("This request came from the voice interface.")
+
+    const messages = yield* sessions.messages({ sessionID: chat.id })
+    const userMessage = messages.findLast((message) => message.info.role === "user")
+    const text = userMessage?.parts.find(
+      (part): part is SessionV1.TextPart => part.type === "text" && part.text === "По чому в Одесі рубероїд?",
+    )
+    expect(text?.metadata?.opencodeVoice).toBeUndefined()
+    expect(text?.metadata?.freshness).toBeUndefined()
     yield* Fiber.interrupt(fiber)
   }),
 )

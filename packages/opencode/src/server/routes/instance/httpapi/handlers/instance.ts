@@ -12,6 +12,8 @@ import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
 import { ApiVcsApplyError } from "../groups/instance"
 import { markInstanceForDisposal } from "../lifecycle"
+import path from "path"
+import fs from "fs/promises"
 
 export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance", (handlers) =>
   Effect.gen(function* () {
@@ -29,12 +31,15 @@ export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance"
 
     const getPath = Effect.fn("InstanceHttpApi.path")(function* () {
       const ctx = yield* InstanceState.context
+      const chat = path.join(Global.Path.data, "chat")
+      yield* Effect.promise(() => fs.mkdir(chat, { recursive: true }))
       return {
         home: Global.Path.home,
         state: Global.Path.state,
         config: Global.Path.config,
         worktree: ctx.worktree,
         directory: ctx.directory,
+        chat,
       }
     })
 

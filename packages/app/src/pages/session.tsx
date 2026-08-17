@@ -377,6 +377,10 @@ export default function Page() {
   const reviewFile = () => view().review.file()
   const sessionOwnership = createSessionOwnership(sessionKey)
   const newSessionDesign = createMemo(() => settings.general.newLayoutDesigns())
+  const nonRepository = createMemo(
+    () =>
+      (params.id ? sync().session.get(params.id)?.mode === "chat" : false) || isNonRepositoryDirectory(sdk().directory),
+  )
 
   createEffect(() => {
     if (!prompt.ready()) return
@@ -404,6 +408,7 @@ export default function Page() {
   const inputController = createPromptInputController({
     sessionKey,
     sessionID: () => params.id,
+    mode: () => (nonRepository() ? "chat" : "project"),
     queryOptions: serverSync().queryOptions,
   })
 
@@ -449,7 +454,6 @@ export default function Page() {
 
   const isDesktop = createMediaQuery("(min-width: 768px)")
   const size = createSizing()
-  const nonRepository = createMemo(() => isNonRepositoryDirectory(sdk().directory))
   const desktopReviewOpen = createMemo(() => isDesktop() && !nonRepository() && view().reviewPanel.opened())
   const desktopV2ReviewOpen = createMemo(() => newSessionDesign() && desktopReviewOpen() && !!params.id)
   const terminalOpen = createMemo(() => view().terminal.opened())
@@ -460,6 +464,7 @@ export default function Page() {
   const desktopFileTreeOpen = createMemo(
     () =>
       isDesktop() &&
+      !nonRepository() &&
       shouldShowFileTree({
         visible: settings.visibility.fileTree(),
         opened: layout.fileTree.opened(),
@@ -1142,7 +1147,7 @@ export default function Page() {
     inputRef?.focus()
   }
 
-  useComposerCommands()
+  useComposerCommands({ agentVisible: () => !nonRepository() && local.agent.visible() })
   useSessionCommands({
     navigateMessageByOffset,
     setActiveMessage,

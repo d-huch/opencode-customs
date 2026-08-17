@@ -21,6 +21,7 @@ const session = (input: {
   parentID?: string
   archived?: number
   updated?: number
+  mode?: "project" | "chat"
 }) => ({
   id: input.id,
   parentID: input.parentID,
@@ -30,6 +31,7 @@ const session = (input: {
   time: { created: 1, updated: input.updated ?? 1, archived: input.archived },
   title: input.id,
   location: { directory: input.directory ?? "/project" },
+  mode: input.mode,
 })
 
 describe("Home V2 session index", () => {
@@ -103,6 +105,14 @@ describe("Home V2 session index", () => {
         time: { created: 1, updated: 20, archived: null },
       }),
     ])
+  })
+
+  test("preserves explicit Chat mode independently of its server directory name", () => {
+    expect(parseHomeSessionIndex([session({ id: "chat", directory: "/data/chat", mode: "chat" })])[0]).toMatchObject({
+      id: "chat",
+      directory: "/data/chat",
+      mode: "chat",
+    })
   })
 
   test("preserves the per-directory Home retention limit", () => {

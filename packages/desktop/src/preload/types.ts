@@ -106,6 +106,32 @@ export type FatalRendererError = {
   os?: string
 }
 
+export type ResearchBrowserStatus = {
+  available: boolean
+  phase: "idle" | "searching" | "reading" | "waiting_user" | "requires_user" | "failed"
+  engine: "duckduckgo" | "google" | "bing"
+  visible: boolean
+  query?: string
+  url?: string
+  domain?: string
+  resultCount?: number
+  message?: string
+}
+
+export type AvatarBridgeStatus = {
+  available: boolean
+  protocol: number
+  url?: string
+  token?: string
+  message?: string
+  connectedClients: Array<{
+    clientID: string
+    characterID: string
+    sessionID?: string
+    actions: string[]
+  }>
+}
+
 export type ElectronAPI = {
   killSidecar: () => Promise<void>
   installCli: () => Promise<string>
@@ -117,7 +143,6 @@ export type ElectronAPI = {
   setDefaultServerUrl: (url: string | null) => Promise<void>
   isFirstLaunchOnboardingPending: () => Promise<boolean>
   finishFirstLaunchOnboarding: (createDefaultProject: boolean) => Promise<string | null>
-  ensureChatWorkspace: () => Promise<string>
   isOldLayoutEligible: () => Promise<boolean>
   getDisplayBackend: () => Promise<LinuxDisplayBackend | null>
   setDisplayBackend: (backend: LinuxDisplayBackend | null) => Promise<void>
@@ -194,6 +219,10 @@ export type ElectronAPI = {
     sessionID: string,
     turnID: string,
   ) => Promise<{ path: string; contentType: string; audio: ArrayBuffer } | undefined>
+  getResearchBrowserStatus: () => Promise<ResearchBrowserStatus>
+  showResearchBrowser: () => Promise<void>
+  clearResearchBrowserData: () => Promise<void>
+  getAvatarBridgeStatus: () => Promise<AvatarBridgeStatus>
   showNotification: (title: string, body?: string) => void
   getWindowFocused: () => Promise<boolean>
   getWindowFullscreen: () => Promise<boolean>

@@ -39,6 +39,7 @@ export const Info = Schema.Struct({
   }),
   title: Schema.String,
   location: Location.Ref,
+  mode: Schema.Literals(["project", "chat"]).pipe(optional),
   subpath: RelativePath.pipe(optional),
   revert: Revert.State.pipe(optional),
 }).annotate({ identifier: "SessionV2.Info" })

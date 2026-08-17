@@ -22,11 +22,12 @@ import { showToast } from "@/utils/toast"
 import { Binary } from "@opencode-ai/core/util/binary"
 import { archiveHomeSession } from "../home-session-archive"
 import type { HomeController } from "./home-controller"
+import { isChatWorkspaceDirectory } from "@/utils/project"
 
 const HOME_SESSION_LIMIT = 64
 export type HomeSessionRecord = {
   session: Session
-  project: LocalProject
+  project?: LocalProject
   projectName: string
 }
 
@@ -86,17 +87,36 @@ export function createHomeSessionsController(home: HomeController) {
       Date.now(),
     ),
   )
-  const allRecords = createMemo(() =>
+  const allRecords = createMemo<HomeSessionRecord[]>(() =>
     buildHomeSessionRecords({
       sessions: indexedSessions,
       projectDirectories,
       projects: home.project.list,
       projectByID,
+      chat: home.chat.selected,
     }),
   )
   const records = createMemo(() => allRecords().slice(0, HOME_SESSION_LIMIT))
   const groups = createMemo(() => groupSessions(records(), language))
   const prefetched = new Set<string>()
+
+  createEffect(() => {
+    if (!home.chat.selected() || sessionLoad.isLoading || records().length > 0) return
+    const conn = home.server.focused()
+    const directory = home.chat.directory()
+    if (!conn || !directory) return
+    if (
+      tabs.store.some(
+        (tab) =>
+          tab.type === "draft" &&
+          tab.server === ServerConnection.key(conn) &&
+          tab.mode === "chat" &&
+          pathKey(tab.directory) === pathKey(directory),
+      )
+    )
+      return
+    home.chat.create()
+  })
 
   createEffect(() => {
     const ctx = home.server.focusedContext()
@@ -174,11 +194,13 @@ export function createHomeSessionsController(home: HomeController) {
       searchRecords: allRecords,
     },
     session: {
-      showProjectName: () => !home.project.selected(),
+      showProjectName: () => !home.chat.selected() && !home.project.selected(),
       server: () => home.selection.value().server,
-      canCreate: () => !!home.project.newSession(),
-      create: home.project.openNewSession,
+      chat: home.chat.selected,
+      canCreate: () => (home.chat.selected() ? !!home.chat.directory() : !!home.project.newSession()),
+      create: () => (home.chat.selected() ? home.chat.create() : home.project.openNewSession()),
       open: (session: Session, options?: OpenSessionOptions) => {
+        const chat = session.mode === "chat" || isChatWorkspaceDirectory(session.directory)
         const directoryKey = pathKey(session.directory)
         const project =
           home.project
@@ -193,12 +215,12 @@ export function createHomeSessionsController(home: HomeController) {
         const directory = project?.worktree ?? session.directory
         const ctx = home.server.focusedContext()
         if (!ctx) return
-        ctx.projects.open(directory)
+        if (!chat) ctx.projects.open(directory)
         if (options?.background) {
           tabs.addSessionTab({ server: ServerConnection.key(conn), sessionId: session.id })
           return
         }
-        ctx.projects.touch(directory)
+        if (!chat) ctx.projects.touch(directory)
         void startTransition(() => {
           const tab = tabs.addSessionTab({ server: ServerConnection.key(conn), sessionId: session.id })
           tabs.select(tab)
@@ -250,9 +272,13 @@ function buildHomeSessionRecords(input: {
   projectDirectories: () => string[]
   projects: () => LocalProject[]
   projectByID: () => Map<string, LocalProject>
+  chat: () => boolean
 }) {
   const directories = new Set(input.projectDirectories().map(pathKey))
-  const sessions = input.sessions().filter((session) => directories.has(pathKey(session.directory)))
+  const sessions = input.sessions().filter((session) => {
+    const chat = session.mode === "chat" || isChatWorkspaceDirectory(session.directory)
+    return input.chat() ? chat : !chat && directories.has(pathKey(session.directory))
+  })
   return [...new Map(sessions.map((session) => [session.id, session] as const)).values()]
     .sort(compareSessionTime)
     .flatMap((session) => {
@@ -264,8 +290,9 @@ function buildHomeSessionRecords(input: {
             (item) =>
               pathKey(item.worktree) === directory || item.sandboxes?.some((sandbox) => pathKey(sandbox) === directory),
           ) ?? projectForSession(session, input.projects(), input.projectByID())
+      if (input.chat()) return [{ session, projectName: "Chat" } satisfies HomeSessionRecord]
       if (!project) return []
-      return { session, project, projectName: displayName(project) }
+      return [{ session, project, projectName: displayName(project) } satisfies HomeSessionRecord]
     })
 }
 

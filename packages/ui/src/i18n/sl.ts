@@ -211,4 +211,7 @@ export const dict: Record<string, string> = {
   "ui.sessionTurn.status.model": "Model: {{model}}",
   "ui.message.speakResponse": "Speak response",
   "ui.message.stopSpeaking": "Stop speaking",
+  "ui.message.reasoning.active": "Thinking… · {{duration}}",
+  "ui.message.reasoning.completed": "Thought for {{duration}}",
+  "ui.message.reasoning.fallback": "Thoughts",
 }

@@ -13,13 +13,19 @@ import contextMenu from "electron-context-menu"
 
 import type { ServerReadyData } from "../preload/types"
 import { checkAppExists, resolveAppPath } from "./apps"
-import { CHANNEL } from "./constants"
+import { CHANNEL, CUSTOMS } from "./constants"
 import { registerIpcHandlers, sendDeepLinks, sendMenuCommand } from "./ipc"
 import { forwardInitializationFailure } from "./initialization"
-import { clearDebugLogs, exportDebugLogs, initCrashReporter, initLogging, startNetLog, write as writeLog } from "./logging"
+import {
+  clearDebugLogs,
+  exportDebugLogs,
+  initCrashReporter,
+  initLogging,
+  startNetLog,
+  write as writeLog,
+} from "./logging"
 import { createMenu } from "./menu"
 import {
-  ensureChatWorkspace,
   finishFirstLaunchOnboarding,
   initializeOldLayoutEligibility,
   isFirstLaunchOnboardingPending,
@@ -50,6 +56,8 @@ import { migrate } from "./migrate"
 import { cleanupStoreFiles } from "./store-cleanup"
 import { startBackgroundCli } from "./background-cli"
 import { setNativeTranslations } from "./native-translations"
+import { startResearchBrowser, type ResearchBrowserController } from "./research-browser"
+import { startAvatarBridge, type AvatarBridgeController } from "./avatar-bridge"
 
 const APP_NAMES: Record<string, string> = {
   dev: "OpenCode Dev",
@@ -67,6 +75,8 @@ const jsCallStackFeature = "DocumentPolicyIncludeJSCallStacksInCrashReports"
 
 let logger: ReturnType<typeof initLogging>
 let server: SidecarListener | null = null
+let researchBrowser: ResearchBrowserController | undefined
+let avatarBridge: AvatarBridgeController | undefined
 
 const pendingDeepLinks: string[] = []
 
@@ -139,7 +149,7 @@ const main = Effect.gen(function* () {
     process.env.XDG_STATE_HOME = join(root, "state")
     return root
   })()
-  app.setName(app.isPackaged ? APP_NAMES[CHANNEL] : "OpenCode Dev")
+  app.setName(app.isPackaged ? (CUSTOMS ? "OpenCode Customs" : APP_NAMES[CHANNEL]) : CUSTOMS ? "OpenCode Customs" : "OpenCode Dev")
   app.setAppUserModelId(appId)
   app.setPath(
     "userData",
@@ -167,6 +177,10 @@ const main = Effect.gen(function* () {
   )
   const stopSidecars = async () => {
     await killSidecar()
+    await researchBrowser?.stop()
+    researchBrowser = undefined
+    await avatarBridge?.stop()
+    avatarBridge = undefined
     wslServers.stopAll()
   }
   const relaunch = () => {
@@ -256,6 +270,31 @@ const main = Effect.gen(function* () {
 
   yield* Effect.promise(() => app.whenReady())
 
+  researchBrowser = yield* Effect.promise(() => startResearchBrowser()).pipe(
+    Effect.catch((error) =>
+      Effect.sync(() => {
+        logger.warn("failed to start research browser", error)
+        return undefined
+      }),
+    ),
+  )
+  if (researchBrowser) {
+    process.env.OPENCODE_RESEARCH_BROWSER_URL = researchBrowser.url
+    process.env.OPENCODE_RESEARCH_BROWSER_TOKEN = researchBrowser.token
+  }
+  avatarBridge = yield* Effect.promise(() => startAvatarBridge()).pipe(
+    Effect.catch((error) =>
+      Effect.sync(() => {
+        logger.warn("failed to start Unity Avatar Bridge", error)
+        return undefined
+      }),
+    ),
+  )
+  if (avatarBridge) {
+    process.env.OPENCODE_AVATAR_BRIDGE_URL = avatarBridge.url.replace("/avatar", "")
+    process.env.OPENCODE_AVATAR_BRIDGE_TOKEN = avatarBridge.token
+  }
+
   if (!TEST_ONBOARDING) migrate()
   yield* Effect.promise(() => cleanupStoreFiles(app.getPath("userData"))).pipe(
     Effect.tap((result) =>
@@ -299,7 +338,6 @@ const main = Effect.gen(function* () {
     setDefaultServerUrl: (url) => setDefaultServerUrl(url),
     isFirstLaunchOnboardingPending,
     finishFirstLaunchOnboarding,
-    ensureChatWorkspace,
     isOldLayoutEligible,
     getDisplayBackend: async () => null,
     setDisplayBackend: async () => undefined,
@@ -310,6 +348,23 @@ const main = Effect.gen(function* () {
     setBackgroundColor: (color) => setBackgroundColor(color),
     exportDebugLogs: () => exportDebugLogs(),
     clearDebugLogs: () => clearDebugLogs(),
+    getResearchBrowserStatus: () =>
+      researchBrowser?.status() ?? {
+        available: false,
+        phase: "failed",
+        engine: "duckduckgo",
+        visible: false,
+        message: "Research Browser is unavailable",
+      },
+    showResearchBrowser: () => researchBrowser?.show() ?? Promise.reject(new Error("Research Browser is unavailable")),
+    clearResearchBrowserData: () => researchBrowser?.clear() ?? Promise.resolve(),
+    getAvatarBridgeStatus: () =>
+      avatarBridge?.status() ?? {
+        available: false,
+        protocol: 1,
+        connectedClients: [],
+        message: "Unity Avatar Bridge is unavailable",
+      },
     recordFatalRendererError: (error) => writeLog("renderer", "fatal renderer error", { ...error }, "error"),
     setNativeTranslations: (bundle) => {
       if (setNativeTranslations(bundle)) createMenu(menuDeps)
@@ -338,6 +393,11 @@ const main = Effect.gen(function* () {
       logger.log("spawning v2 sidecar")
       const sidecar = yield* Effect.promise(() => startBackgroundCli(logger, shellEnv?.XDG_STATE_HOME))
       yield* Deferred.succeed(serverReady, {
+        url: sidecar.url,
+        username: sidecar.username,
+        password: sidecar.password,
+      })
+      avatarBridge?.configureServer({
         url: sidecar.url,
         username: sidecar.username,
         password: sidecar.password,
@@ -393,6 +453,7 @@ const main = Effect.gen(function* () {
       username: "opencode",
       password,
     })
+    avatarBridge?.configureServer({ url, username: "opencode", password })
 
     if (process.platform === "win32") {
       void wslServers.initialize().catch((error) => logger.error("wsl server initialization failed", error))

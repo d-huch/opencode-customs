@@ -1,5 +1,5 @@
 import { useSearchParams } from "@solidjs/router"
-import { createEffect, untrack } from "solid-js"
+import { createEffect, untrack, type Accessor } from "solid-js"
 import { usePromptInputV2Controller } from "@/components/prompt-input-v2"
 import { useComments } from "@/context/comments"
 import { useLocal } from "@/context/local"
@@ -10,7 +10,11 @@ import { createPromptModelSelection } from "@/pages/session/composer/prompt-mode
 import { useSessionKey } from "@/pages/session/session-layout"
 import { useComposerCommands } from "@/pages/session/use-composer-commands"
 
-export function createNewSessionDraftController(workspace: { worktree: () => string; resetWorktree: () => void }) {
+export function createNewSessionDraftController(workspace: {
+  worktree: () => string
+  resetWorktree: () => void
+  mode: Accessor<"project" | "chat">
+}) {
   const prompt = usePrompt()
   const serverSync = useServerSync()
   const comments = useComments()
@@ -19,11 +23,12 @@ export function createNewSessionDraftController(workspace: { worktree: () => str
   const [searchParams, setSearchParams] = useSearchParams<{ draftId?: string; prompt?: string }>()
   const model = createPromptModelSelection({ agent: () => local.agent.current() })
 
-  useComposerCommands({ model })
+  useComposerCommands({ model, agentVisible: () => workspace.mode() === "project" && local.agent.visible() })
 
   const controls = createPromptInputController({
     sessionKey: route.sessionKey,
     sessionID: () => route.params.id,
+    mode: workspace.mode,
     queryOptions: serverSync().queryOptions,
     model,
   })

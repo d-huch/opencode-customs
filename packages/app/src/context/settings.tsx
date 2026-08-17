@@ -30,6 +30,17 @@ export interface SoundSettings {
 
 export type VoicePersonalityMode = "normal" | "work" | "night" | "emergency"
 export type FishSpeechLanguage = "auto" | "uk" | "en" | "mixed"
+export type WebSearchEngine = "duckduckgo" | "google" | "bing"
+export type ResearchBrowserVisibility = "background" | "always" | "hidden"
+
+export interface WebSearchSettings {
+  enabled: boolean
+  engine: WebSearchEngine
+  visibility: ResearchBrowserVisibility
+  authenticatedPages: boolean
+  privateNetwork: boolean
+  externalFallback: boolean
+}
 
 export interface VoiceSettings {
   enabled: boolean
@@ -119,6 +130,7 @@ export interface Settings {
   sounds: SoundSettings
   personalization: AgentPersonalizationSettings
   voice: VoiceSettings
+  webSearch: WebSearchSettings
 }
 
 export const monoDefault = "System Mono"
@@ -247,6 +259,16 @@ export function terminalFontFamily(font: string | undefined) {
   return stack(font, terminalBase)
 }
 
+export const showReasoningSummariesDefault = true
+export const webSearchDefaults = {
+  enabled: true,
+  engine: "duckduckgo",
+  visibility: "background",
+  authenticatedPages: true,
+  privateNetwork: false,
+  externalFallback: false,
+} satisfies WebSearchSettings
+
 const defaultSettings: Settings = {
   general: {
     autoSave: true,
@@ -257,7 +279,7 @@ const defaultSettings: Settings = {
     showSearch: false,
     showStatus: false,
     showTerminal: false,
-    showReasoningSummaries: false,
+    showReasoningSummaries: showReasoningSummariesDefault,
     shellToolPartsExpanded: false,
     editToolPartsExpanded: false,
     showCustomAgents: false,
@@ -337,6 +359,7 @@ const defaultSettings: Settings = {
     fishMemoryCache: true,
     fishMaxNewTokens: 1024,
   },
+  webSearch: webSearchDefaults,
 }
 
 function withFallback<T>(read: () => T | undefined, fallback: T) {
@@ -407,12 +430,13 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
     }
 
     createEffect(() => {
-      if (!ready() || (store.personalization?.version ?? 0) >= 1) return
+      if (!ready() || (store.personalization?.version ?? 0) >= 2) return
       const migration = migrateAgentPersonalization({
         enabled: store.personalization?.enabled,
         activePresetID: store.personalization?.activePresetID,
         presets: store.personalization?.presets,
         values: {
+          archetype: "natural",
           assistantName: store.personalization?.assistantName ?? defaultSettings.personalization.assistantName,
           userName: store.personalization?.userName ?? defaultSettings.personalization.userName,
           addressAs: store.personalization?.addressAs ?? defaultSettings.personalization.addressAs,
@@ -687,6 +711,38 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         errors: withFallback(() => store.sounds?.errors, defaultSettings.sounds.errors),
         setErrors(value: string) {
           setStore("sounds", "errors", value)
+        },
+      },
+      webSearch: {
+        enabled: withFallback(() => store.webSearch?.enabled, defaultSettings.webSearch.enabled),
+        setEnabled(value: boolean) {
+          setStore("webSearch", "enabled", value)
+        },
+        engine: withFallback(() => store.webSearch?.engine, defaultSettings.webSearch.engine),
+        setEngine(value: WebSearchEngine) {
+          setStore("webSearch", "engine", value)
+        },
+        visibility: withFallback(() => store.webSearch?.visibility, defaultSettings.webSearch.visibility),
+        setVisibility(value: ResearchBrowserVisibility) {
+          setStore("webSearch", "visibility", value)
+        },
+        authenticatedPages: withFallback(
+          () => store.webSearch?.authenticatedPages,
+          defaultSettings.webSearch.authenticatedPages,
+        ),
+        setAuthenticatedPages(value: boolean) {
+          setStore("webSearch", "authenticatedPages", value)
+        },
+        privateNetwork: withFallback(() => store.webSearch?.privateNetwork, defaultSettings.webSearch.privateNetwork),
+        setPrivateNetwork(value: boolean) {
+          setStore("webSearch", "privateNetwork", value)
+        },
+        externalFallback: withFallback(
+          () => store.webSearch?.externalFallback,
+          defaultSettings.webSearch.externalFallback,
+        ),
+        setExternalFallback(value: boolean) {
+          setStore("webSearch", "externalFallback", value)
         },
       },
       personalization: {

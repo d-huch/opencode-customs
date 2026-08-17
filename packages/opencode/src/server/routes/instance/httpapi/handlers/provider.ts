@@ -11,6 +11,7 @@ import { InstanceHttpApi } from "../api"
 import { ProviderAuthApiError } from "../groups/provider"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { probeLmStudio } from "@/local-agent-runtime/lmstudio"
+import { probeLlamaServer } from "@/local-agent-runtime/llama-server"
 import { snapshot } from "@/local-agent-runtime/resource-governor"
 import { CapabilityRouter } from "@/local-agent-runtime/capability-router"
 import { Database } from "@opencode-ai/core/database/database"
@@ -59,12 +60,17 @@ export const providerHandlers = HttpApiBuilder.group(InstanceHttpApi, "provider"
         connected,
       )
       const lmstudio = config.provider?.lmstudio
+      const llamaServer = config.provider?.["llama-server"]
       return {
         all: Object.values(providers).map(Provider.toPublicInfo),
         default: yield* Effect.promise(() =>
           Provider.runtimeDefaultModelIDs(providers, {
             baseURL: lmstudio?.options?.baseURL,
             apiKey: lmstudio?.options?.apiKey,
+            llamaServer: {
+              baseURL: llamaServer?.options?.baseURL,
+              apiKey: llamaServer?.options?.apiKey,
+            },
           }),
         ),
         connected: Object.keys(connected),
@@ -80,6 +86,17 @@ export const providerHandlers = HttpApiBuilder.group(InstanceHttpApi, "provider"
       const info = config.provider?.lmstudio
       return yield* Effect.promise(() =>
         probeLmStudio({
+          baseURL: info?.options?.baseURL,
+          apiKey: info?.options?.apiKey,
+        }),
+      )
+    })
+
+    const llamaServerProbe = Effect.fn("ProviderHttpApi.llamaServerProbe")(function* () {
+      const config = yield* cfg.get()
+      const info = config.provider?.["llama-server"]
+      return yield* Effect.promise(() =>
+        probeLlamaServer({
           baseURL: info?.options?.baseURL,
           apiKey: info?.options?.apiKey,
         }),
@@ -164,6 +181,7 @@ export const providerHandlers = HttpApiBuilder.group(InstanceHttpApi, "provider"
     return handlers
       .handle("list", list)
       .handle("lmStudioProbe", lmStudioProbe)
+      .handle("llamaServerProbe", llamaServerProbe)
       .handle("resourceGovernor", resourceGovernor)
       .handle("capabilityRouter", capabilityRouter)
       .handle("agentTurn", agentTurn)

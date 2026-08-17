@@ -194,6 +194,7 @@ function toLegacySummary(session: SessionV2Info): Session {
     projectID: session.projectID,
     workspaceID: session.location.workspaceID,
     directory: session.location.directory,
+    mode: "mode" in session && (session.mode === "project" || session.mode === "chat") ? session.mode : undefined,
     path: session.subpath,
     parentID: session.parentID,
     cost: session.cost,

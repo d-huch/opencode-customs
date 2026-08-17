@@ -11,6 +11,7 @@ import {
 
 const profile: AgentPersonalizationProfile = {
   enabled: true,
+  archetype: "natural",
   assistantName: "OpenCode Customs",
   userName: "Денис",
   addressAs: "Денис",
@@ -23,6 +24,7 @@ const profile: AgentPersonalizationProfile = {
   customInstructions: "Lead with the result.",
 }
 const profileValues: AgentPersonalizationValues = {
+  archetype: "natural",
   assistantName: profile.assistantName,
   userName: profile.userName,
   addressAs: profile.addressAs,
@@ -76,6 +78,22 @@ describe("agentPersonalizationInstruction", () => {
     ])
     expect(agentCatchphrases(Array.from({ length: 25 }, (_, index) => `phrase ${index}`).join(","))).toHaveLength(20)
   })
+
+  test.each([
+    ["natural", "naturally and neutrally"],
+    ["military", "disciplined, structured, direct"],
+    ["depressive", "Never encourage hopelessness, self-harm, or giving up"],
+    ["clown", "Suppress jokes in dangerous, sensitive, high-stakes"],
+    ["jarvis", "calm, precise, composed"],
+    ["mentor", "patient, educational, encouraging"],
+    ["sarcastic", "without insulting, belittling, or antagonizing"],
+  ] as const)("renders the %s archetype guardrails", (archetype, expected) => {
+    const instruction = agentPersonalizationInstruction({ ...profile, archetype })
+
+    expect(instruction).toContain(`Personality archetype: ${archetype}.`)
+    expect(instruction).toContain(expected)
+    expect(instruction).toContain("take priority in their respective dimensions")
+  })
 })
 
 describe("migrateAgentPersonalization", () => {
@@ -87,7 +105,7 @@ describe("migrateAgentPersonalization", () => {
       now: 123,
     })
 
-    expect(result.version).toBe(1)
+    expect(result.version).toBe(2)
     expect(result.defaultPresetID).toBe("")
     expect(result.presets).toHaveLength(1)
     expect(result.presets[0]).toMatchObject({ id: "starter", name: "OpenCode Customs", voice: null })
@@ -112,6 +130,38 @@ describe("migrateAgentPersonalization", () => {
 
     expect(result.defaultPresetID).toBe("work")
     expect(result.presets[0]?.voice).toBeNull()
+  })
+
+  test("adds the natural archetype to v1 presets without changing their selection", () => {
+    const result = migrateAgentPersonalization({
+      enabled: true,
+      activePresetID: "legacy",
+      presets: [
+        {
+          id: "legacy",
+          name: "Legacy",
+          assistantName: profileValues.assistantName,
+          userName: profileValues.userName,
+          addressAs: profileValues.addressAs,
+          language: profileValues.language,
+          tone: profileValues.tone,
+          detail: profileValues.detail,
+          proactivity: profileValues.proactivity,
+          humor: profileValues.humor,
+          catchphrases: profileValues.catchphrases,
+          customInstructions: profileValues.customInstructions,
+          createdAt: 1,
+          updatedAt: 2,
+        },
+      ],
+      values: profileValues,
+      createID: () => "unused",
+      now: 123,
+    })
+
+    expect(result.version).toBe(2)
+    expect(result.defaultPresetID).toBe("legacy")
+    expect(result.presets[0]?.archetype).toBe("natural")
   })
 
   test("preserves a complete voice snapshot during migration", () => {

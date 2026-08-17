@@ -45,6 +45,22 @@ test("session settings use the remote server context", async ({ page }) => {
   await expect(dialog.getByRole("switch", { name: "Server A Model" })).toHaveCount(0)
 })
 
+test("Research Browser settings stay unavailable for remote servers", async ({ page }) => {
+  await mockServers(page, [])
+  await configureServers(page)
+
+  await page.goto(`/server/${base64Encode(serverB)}/session/${sessionB.id}`)
+  await expect(page.getByText(sessionB.title).first()).toBeVisible()
+  await page.keyboard.press("Control+,")
+
+  const dialog = page.locator(".settings-v2-dialog")
+  await dialog.getByRole("tab", { name: "Web search" }).click()
+  await expect(dialog.getByRole("heading", { name: "Web search" })).toBeVisible()
+  await expect(dialog.getByText("Unavailable", { exact: true })).toBeVisible()
+  await expect(dialog.getByRole("button", { name: "Open browser" })).toBeDisabled()
+  await expect(dialog.getByRole("button", { name: "Clear profile data" })).toBeDisabled()
+})
+
 test("personalization is a separate draft-based settings tab", async ({ page }) => {
   await mockServers(page, [])
   await configureServers(

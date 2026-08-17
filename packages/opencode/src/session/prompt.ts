@@ -1173,10 +1173,10 @@ const layer = Layer.effect(
       checkpoint: SessionExecutionCheckpoint.Token,
     ) {
       const ctx = yield* InstanceState.context
-      const chatMode = SessionChatMode.enabled(ctx.directory)
       let structured: unknown
       let step = 0
       const session = yield* sessions.get(sessionID).pipe(Effect.orDie)
+      const chatMode = SessionChatMode.enabled(ctx.directory, session.mode, session.metadata)
       const cfg = yield* config.get()
       const verification = cfg.verification
       const execution = yield* SessionExecutionCheckpoint.load(db, sessionID)
@@ -1314,7 +1314,7 @@ const layer = Layer.effect(
             })
           }
           const evidenceDecision =
-            verification?.evidence === false
+            chatMode || verification?.evidence === false
               ? ({ type: "none" } as const)
               : SessionEvidence.inspect({
                   messages: msgs,
@@ -1373,7 +1373,7 @@ const layer = Layer.effect(
               "session.id": sessionID,
             })
           const decision =
-            verification?.auto === false
+            chatMode || verification?.auto === false
               ? ({ type: "none" } as const)
               : SessionVerification.inspect({
                   messages: msgs,
@@ -1609,7 +1609,7 @@ const layer = Layer.effect(
                   : "No repository verification required",
           })
           const memoryRequest = MessageV2.activeUserRequest(msgs)
-          const memoryDecision = SessionFreshness.read(memoryRequest)
+          const memoryDecision = chatMode ? undefined : SessionFreshness.read(memoryRequest)
           if (memoryDecision?.memory) {
             yield* RequestPipelineScheduler.mark({
               db,
@@ -1800,7 +1800,7 @@ const layer = Layer.effect(
           const compactedText = compacted?.parts
             .flatMap((part) => (part.type === "text" && part.text.trim() ? [part.text.trim()] : []))
             .join("\n\n")
-          if (compactedText) yield* sys.repositoryRemember(compactedText).pipe(Effect.forkIn(scope))
+          if (!chatMode && compactedText) yield* sys.repositoryRemember(compactedText).pipe(Effect.forkIn(scope))
           continue
         }
 
@@ -1835,7 +1835,7 @@ const layer = Layer.effect(
         const routingImages = (criticMode ? [] : (routingRequest?.parts ?? [])).filter(
           (part): part is SessionV1.FilePart => part.type === "file" && part.mime.startsWith("image/"),
         )
-        const routingMemoryText = criticMode ? "" : MessageV2.userRequestText(routingRequest).trim()
+        const routingMemoryText = criticMode || chatMode ? "" : MessageV2.userRequestText(routingRequest).trim()
         const modelRequestCharacters = criticMode
           ? (lastUserMsg?.parts ?? []).flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n").length
           : MessageV2.userRequestText(routingRequest).length
@@ -2087,7 +2087,7 @@ const layer = Layer.effect(
               part.type === "text" && (part.synthetic !== true || part.metadata?.compaction_continue === true),
           )
           const storedFreshness = SessionFreshness.read(requestUserMsg)
-          const freshnessText = routingMemoryText
+          const freshnessText = chatMode ? MessageV2.userRequestText(requestUserMsg).trim() : routingMemoryText
           const requestFiles = (requestUserMsg?.parts ?? [])
             .filter((part) => part.type === "file")
             .map((part) => part.url)
@@ -2111,8 +2111,10 @@ const layer = Layer.effect(
                 db,
                 checkpoint,
                 phase: "classification",
-                detail: "Dedicated Chat mode does not route into repository evidence",
-              }).pipe(Effect.as(undefined))
+                detail: storedFreshness
+                  ? "Reused the web routing decision stored on the active chat request"
+                  : "Used deterministic Chat mode web routing without another model turn",
+              }).pipe(Effect.as(storedFreshness ?? SessionFreshness.heuristic(freshnessText)))
             : criticMode
               ? yield* RequestPipelineScheduler.skip({
                   db,
@@ -2285,11 +2287,13 @@ const layer = Layer.effect(
                     : `Request routed to local conversation: ${freshnessDecision.reason}`,
             })
           }
-          const recalledMemory = memoryRecallFiber
-            ? yield* Fiber.join(memoryRecallFiber)
-            : durableMemoryCache !== null && durableMemoryCache !== undefined
-              ? { files: [], notes: durableMemoryCache, matches: durableMemoryCache.length, uses: [] }
-              : { files: [], notes: [], matches: 0, uses: [] }
+          const recalledMemory = chatMode
+            ? { files: [], notes: [], matches: 0, uses: [] }
+            : memoryRecallFiber
+              ? yield* Fiber.join(memoryRecallFiber)
+              : durableMemoryCache !== null && durableMemoryCache !== undefined
+                ? { files: [], notes: durableMemoryCache, matches: durableMemoryCache.length, uses: [] }
+                : { files: [], notes: [], matches: 0, uses: [] }
           const durableMemory = recalledMemory.notes
           if (durableMemory.length)
             yield* Effect.promise(() =>
@@ -2335,6 +2339,8 @@ const layer = Layer.effect(
                 )
               : undefined
           const chatPreviousResponseID = chatChain?.previousResponseID
+          const chatPreviousSystemFingerprint =
+            chatChain && "systemFingerprint" in chatChain ? chatChain.systemFingerprint : undefined
           if (chatMode && chatContextLimit && chatChain)
             recordProviderContext({
               providerID: model.providerID,
@@ -2363,7 +2369,8 @@ const layer = Layer.effect(
             bypassAgentCheck,
             messages: msgs,
             promptOps,
-            toolIDs: chatMode ? [] : undefined,
+            toolIDs: chatMode ? ["websearch", "webfetch", "avatar_control"] : undefined,
+            includeMcp: chatMode,
           }).pipe(
             Effect.provideService(Plugin.Service, plugin),
             Effect.provideService(Permission.Service, permission),
@@ -2374,7 +2381,7 @@ const layer = Layer.effect(
             Effect.provideService(Database.Service, database),
           )
           const contextTools = SessionTools.forContext(resolvedTools, agent.permission, session.permission ?? [])
-          const scopedTools = chatMode ? SessionChatMode.tools(contextTools.tools) : contextTools.tools
+          const scopedTools = contextTools.tools
           const tools =
             criticMode && contextTools.tools[SessionCritic.TOOL_ID]
               ? { [SessionCritic.TOOL_ID]: contextTools.tools[SessionCritic.TOOL_ID] }
@@ -2419,6 +2426,20 @@ const layer = Layer.effect(
             .flatMap((part) => (part.type === "text" && part.text.trim() ? [part.text.trim()] : []))
             .join("\n\n")
 
+          const chatModelMessages = chatMode
+            ? yield* MessageV2.toModelMessagesEffect(
+                msgs.filter(
+                  (message) =>
+                    message.info.role !== "assistant" ||
+                    (message.info.finish !== "error" && message.info.error === undefined),
+                ),
+                model,
+              )
+            : undefined
+          const chatReplayMessages = chatModelMessages
+            ? SessionChatMode.messages(chatModelMessages, false, checkpointSummary)
+            : undefined
+
           if (chatMode && SessionChatMode.requiresCompaction(chatChain, checkpointSummaryMessage?.info.id)) {
             yield* Effect.promise(() =>
               SessionLog.write({
@@ -2461,9 +2482,9 @@ const layer = Layer.effect(
                   skills: undefined,
                   env: [] as string[],
                   instructions: [] as string[],
-                  mcpInstructions: undefined,
+                  mcpInstructions: yield* sys.mcp(agent, session.permission),
                   modelMsgs: SessionChatMode.messages(
-                    yield* MessageV2.toModelMessagesEffect(msgs, model),
+                    chatModelMessages ?? [],
                     Boolean(chatPreviousResponseID),
                     checkpointSummary,
                   ),
@@ -2475,11 +2496,13 @@ const layer = Layer.effect(
                   mcpInstructions: sys.mcp(agent, session.permission),
                   modelMsgs: MessageV2.toModelMessagesEffect(msgs, model),
                 })
-          const requestTools = chatMode ? {} : freshnessRoute.tools
+          const requestTools = freshnessRoute.tools
           const stableSystem = criticMode
             ? [SessionCritic.systemPrompt]
             : chatMode
-              ? []
+              ? context.mcpInstructions
+                ? [context.mcpInstructions]
+                : []
               : [
                   ...context.env,
                   ...context.instructions,
@@ -2490,6 +2513,10 @@ const layer = Layer.effect(
           const dynamicSystem = criticMode
             ? []
             : [
+                ...(freshnessPrompt ? [freshnessPrompt] : []),
+                ...(freshnessDecision?.scope === "external"
+                  ? [`Current date: ${new Date().toISOString().slice(0, 10)}`]
+                  : []),
                 responseControl,
                 ...(!evidenceRequired
                   ? []
@@ -2503,10 +2530,6 @@ const layer = Layer.effect(
                   : freshnessDecision?.scope !== "repository"
                     ? [GENERAL_CONVERSATION_SYSTEM_PROMPT]
                     : []),
-                ...(freshnessPrompt ? [freshnessPrompt] : []),
-                ...(freshnessDecision?.scope === "external"
-                  ? [`Current date: ${new Date().toISOString().slice(0, 10)}`]
-                  : []),
                 ...(lastUser.system ? [lastUser.system] : []),
               ]
           const format = criticMode
@@ -2658,11 +2681,13 @@ const layer = Layer.effect(
               model,
               statefulResponses: chatMode && model.providerID === "lmstudio",
               previousResponseID: chatPreviousResponseID,
+              previousSystemFingerprint: chatPreviousSystemFingerprint,
+              lmStudioReplayMessages: chatReplayMessages,
               providerChainContext: chatContextLimit,
-              toolChoice: chatMode
+              toolChoice: isLastStep
                 ? "none"
-                : isLastStep
-                  ? "none"
+                : chatMode
+                  ? undefined
                   : (freshnessRoute.toolChoice ?? (format.type === "json_schema" ? "required" : undefined)),
             })
             .pipe(

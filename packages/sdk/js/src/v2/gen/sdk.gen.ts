@@ -149,6 +149,8 @@ import type {
   ProviderAuthResponses,
   ProviderListErrors,
   ProviderListResponses,
+  ProviderLlamaServerProbeErrors,
+  ProviderLlamaServerProbeResponses,
   ProviderLmstudioProbeErrors,
   ProviderLmstudioProbeResponses,
   ProviderOauthAuthorizeErrors,
@@ -3307,6 +3309,42 @@ export class Lmstudio extends HeyApiClient {
   }
 }
 
+export class LlamaServer extends HeyApiClient {
+  /**
+   * Probe llama-server capabilities
+   *
+   * Check an external llama.cpp server and discover single-model or router models, states, context limits, modalities, and chat-template tool capability without running inference or changing model state.
+   */
+  public probe<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      ProviderLlamaServerProbeResponses,
+      ProviderLlamaServerProbeErrors,
+      ThrowOnError
+    >({
+      url: "/provider/llama-server/probe",
+      ...options,
+      ...params,
+    })
+  }
+}
+
 export class Runtime extends HeyApiClient {
   /**
    * Inspect Local Agent Runtime resources
@@ -3567,6 +3605,11 @@ export class Provider extends HeyApiClient {
     return (this._lmstudio ??= new Lmstudio({ client: this.client }))
   }
 
+  private _llamaServer?: LlamaServer
+  get llamaServer(): LlamaServer {
+    return (this._llamaServer ??= new LlamaServer({ client: this.client }))
+  }
+
   private _runtime?: Runtime
   get runtime(): Runtime {
     return (this._runtime ??= new Runtime({ client: this.client }))
@@ -3643,6 +3686,7 @@ export class Session2 extends HeyApiClient {
       }
       permission?: PermissionRuleset
       workspaceID?: string
+      mode?: "project" | "chat"
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -3660,6 +3704,7 @@ export class Session2 extends HeyApiClient {
             { in: "body", key: "metadata" },
             { in: "body", key: "permission" },
             { in: "body", key: "workspaceID" },
+            { in: "body", key: "mode" },
           ],
         },
       ],
@@ -5760,6 +5805,7 @@ export class Session3 extends HeyApiClient {
       agent?: string
       model?: ModelRef
       location?: LocationRef
+      mode?: "project" | "chat"
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -5772,6 +5818,7 @@ export class Session3 extends HeyApiClient {
             { in: "body", key: "agent" },
             { in: "body", key: "model" },
             { in: "body", key: "location" },
+            { in: "body", key: "mode" },
           ],
         },
       ],

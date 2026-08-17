@@ -24,6 +24,7 @@
   },
   "main": "./out/main/index.js",
   "dependencies": {
+    "@mozilla/readability": "0.6.0",
     "@zip.js/zip.js": "2.7.62",
     "effect": "catalog:",
     "electron-context-menu": "4.1.2",
@@ -32,7 +33,9 @@
     "electron-updater": "6.8.9",
     "electron-window-state": "^5.0.3",
     "drizzle-orm": "catalog:",
-    "msgpackr": "2.0.2"
+    "linkedom": "0.18.12",
+    "msgpackr": "2.0.2",
+    "ws": "8.21.0"
   },
   "devDependencies": {
     "@actions/artifact": "4.0.0",
@@ -47,6 +50,7 @@
     "@solidjs/router": "0.15.4",
     "@types/bun": "catalog:",
     "@types/node": "catalog:",
+    "@types/ws": "8.18.1",
     "@typescript/native-preview": "catalog:",
     "@valibot/to-json-schema": "1.6.0",
     "electron": "42.3.3",

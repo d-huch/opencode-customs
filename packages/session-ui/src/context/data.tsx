@@ -54,6 +54,7 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
     sessionID?: string
     onNavigateToSession?: NavigateToSessionFn
     onSessionHref?: SessionHrefFn
+    onOpenResearchBrowser?: () => void
   }) => {
     return {
       get store() {
@@ -67,6 +68,7 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
       },
       navigateToSession: props.onNavigateToSession,
       sessionHref: props.onSessionHref,
+      openResearchBrowser: props.onOpenResearchBrowser,
     }
   },
 })

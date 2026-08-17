@@ -27,7 +27,9 @@ export function createHomeController() {
     () => focusedServerCtx()?.projects.recentlyClosed() ?? layout.projects.recentlyClosed(),
   )
   const homedir = createMemo(() => focusedSync().data.path.home ?? "")
-  const selectedProject = createMemo(() => projects().find((project) => project.worktree === selection().directory))
+  const selectedProject = createMemo(() =>
+    selection().mode === "chat" ? undefined : projects().find((project) => project.worktree === selection().directory),
+  )
   const newSessionProject = createMemo(
     () =>
       selectedProject() ??
@@ -115,6 +117,25 @@ export function createHomeController() {
       },
       openProjectNewSession,
     },
+    chat: {
+      selected: () => selection().mode === "chat",
+      directory: () => focusedSync().data.path.chat,
+      open: () => {
+        const conn = focusedServer()
+        if (!conn || homeServerUnavailable(conn)) return
+        setSelection({ server: ServerConnection.key(conn), mode: "chat" })
+      },
+      create: () => {
+        const conn = focusedServer()
+        const directory = focusedSync().data.path.chat
+        if (!conn || !directory || homeServerUnavailable(conn)) return
+        void tabs.newDraft({ server: ServerConnection.key(conn), directory, mode: "chat" })
+      },
+    },
+  }
+
+  function homeServerUnavailable(conn: ServerConnection.Any) {
+    return global.servers.health[ServerConnection.key(conn)]?.healthy === false
   }
 }
 

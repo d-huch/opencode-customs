@@ -1,10 +1,12 @@
 import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
+import { TextInputV2 } from "@opencode-ai/ui/v2/text-input-v2"
 import { Tag } from "@opencode-ai/ui/v2/badge-v2"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { ProviderIcon } from "@opencode-ai/ui/provider-icon"
 import { showToast } from "@/utils/toast"
 import { popularProviders, useProviders } from "@/hooks/use-providers"
-import { createMemo, type Accessor, type Component, For, Show } from "solid-js"
+import { createMemo, createResource, createSignal, type Accessor, type Component, For, Show } from "solid-js"
+import { createStore } from "solid-js/store"
 import { useLanguage } from "@/context/language"
 import { useServerProtocol, useServerSDK } from "@/context/server-sdk"
 import { useServerSync } from "@/context/server-sync"
@@ -149,6 +151,7 @@ export const SettingsProvidersV2: Component<{
       </div>
 
       <div class="settings-v2-tab-body settings-v2-providers">
+        <LlamaServerConnection />
         <div class="settings-v2-section" data-component="connected-providers-section">
           <h3 class="settings-v2-section-title">{language.t("settings.providers.section.connected")}</h3>
           <SettingsListV2>
@@ -263,5 +266,107 @@ export const SettingsProvidersV2: Component<{
         </div>
       </div>
     </>
+  )
+}
+
+function LlamaServerConnection() {
+  const language = useLanguage()
+  const serverSdk = useServerSDK()
+  const serverSync = useServerSync()
+  const [revision, setRevision] = createSignal(0)
+  const configured = () => serverSync().data.config.provider?.["llama-server"]
+  const [form, setForm] = createStore({
+    endpoint: String(configured()?.options?.baseURL ?? "http://127.0.0.1:8080/v1"),
+    apiKey: String(configured()?.options?.apiKey ?? ""),
+    saving: false,
+    message: "",
+  })
+  const [probe, { refetch }] = createResource(
+    () => (configured() ? ([serverSdk(), revision()] as const) : undefined),
+    ([sdk]) => sdk.client.provider.llamaServer.probe().then((result) => result.data),
+  )
+
+  const save = async () => {
+    setForm({ saving: true, message: "" })
+    await serverSync()
+      .updateConfig({
+        provider: {
+          "llama-server": {
+            name: "llama.cpp",
+            npm: "@ai-sdk/openai-compatible",
+            options: {
+              baseURL: form.endpoint.trim() || "http://127.0.0.1:8080/v1",
+              ...(form.apiKey.trim() ? { apiKey: form.apiKey.trim() } : {}),
+            },
+            models: {},
+          },
+        },
+      })
+      .then(async () => {
+        setRevision((value) => value + 1)
+        await refetch()
+        setForm("message", language.t("provider.llamaServer.saved"))
+      })
+      .catch((error: unknown) => setForm("message", error instanceof Error ? error.message : String(error)))
+    setForm("saving", false)
+  }
+
+  return (
+    <div class="settings-v2-section" data-component="llama-server-connection">
+      <h3 class="settings-v2-section-title">{language.t("provider.llamaServer.title")}</h3>
+      <div class="grid gap-3 rounded-lg border border-v2-border-border-base p-4">
+        <p class="settings-v2-provider-description">{language.t("provider.llamaServer.description")}</p>
+        <div class="grid gap-3 md:grid-cols-2">
+          <label class="grid gap-1 text-12-medium text-v2-text-text-muted">
+            {language.t("provider.llamaServer.endpoint")}
+            <TextInputV2
+              class="!w-full"
+              value={form.endpoint}
+              placeholder="http://127.0.0.1:8080/v1"
+              onInput={(event) => setForm("endpoint", event.currentTarget.value)}
+            />
+          </label>
+          <label class="grid gap-1 text-12-medium text-v2-text-text-muted">
+            {language.t("provider.llamaServer.apiKey")}
+            <TextInputV2
+              class="!w-full"
+              type="password"
+              value={form.apiKey}
+              onInput={(event) => setForm("apiKey", event.currentTarget.value)}
+            />
+          </label>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+          <ButtonV2 variant="neutral" disabled={form.saving} onClick={() => void save()}>
+            {form.saving ? language.t("common.loading") : language.t("provider.llamaServer.saveTest")}
+          </ButtonV2>
+          <Show when={probe()}>
+            {(value) => (
+              <Tag>
+                {language.t(`provider.llamaServer.status.${value().status}`)} · {value().serverMode}
+              </Tag>
+            )}
+          </Show>
+          <Show when={form.message}>
+            <span class="text-12-regular text-v2-text-text-muted">{form.message}</span>
+          </Show>
+        </div>
+        <Show when={probe()?.models.length}>
+          <div class="flex flex-wrap gap-2">
+            <For each={probe()?.models}>
+              {(model) => (
+                <Tag>
+                  {model.name} · {model.status}
+                  {model.context.active || model.context.supported
+                    ? ` · ${model.context.active ?? model.context.supported} ctx`
+                    : ""}
+                </Tag>
+              )}
+            </For>
+          </div>
+        </Show>
+        <Show when={probe()?.error}>{(error) => <p class="text-12-regular text-v2-text-text-muted">{error()}</p>}</Show>
+      </div>
+    </div>
   )
 }

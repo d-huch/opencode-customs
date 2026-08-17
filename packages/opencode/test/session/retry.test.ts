@@ -279,6 +279,20 @@ describe("session.retry.retryable", () => {
     expect(SessionRetry.retryable(error, retryProvider)).toEqual({ message: "Internal server error" })
   })
 
+  test("does not back off on deterministic LM Studio Responses compatibility errors", () => {
+    const error = Schema.decodeUnknownSync(SessionV1.APIError.Schema)(
+      new SessionV1.APIError({
+        message: "Prediction failed",
+        isRetryable: true,
+        statusCode: 500,
+        responseBody: "Jinja Exception: System message must be at the beginning.",
+      }).toObject(),
+    )
+
+    expect(SessionRetry.retryable(error, "lmstudio")).toBeUndefined()
+    expect(SessionRetry.retryable(error, retryProvider)).toEqual({ message: "Prediction failed" })
+  })
+
   test("retries 502 bad gateway errors", () => {
     const error = Schema.decodeUnknownSync(SessionV1.APIError.Schema)(
       new SessionV1.APIError({

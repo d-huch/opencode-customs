@@ -27,6 +27,21 @@ describe("tab migration", () => {
     expect(migrateTabs(null, server)).toEqual([])
     expect(migrateTabs({}, server)).toEqual([])
   })
+
+  test("preserves Chat drafts and defaults old drafts to project mode", () => {
+    expect(
+      migrateTabs(
+        [
+          { type: "draft", draftID: "chat", server, directory: "/data/chat", mode: "chat" },
+          { type: "draft", draftID: "project", server, directory: "/repo" },
+        ],
+        server,
+      ),
+    ).toEqual([
+      { type: "draft", draftID: "chat", server, directory: "/data/chat", mode: "chat" },
+      { type: "draft", draftID: "project", server, directory: "/repo", mode: "project" },
+    ])
+  })
 })
 
 describe("tab memory", () => {

@@ -43,7 +43,6 @@ import { SessionRetry } from "@opencode-ai/session-ui/session-retry"
 import { isScrollKeyTarget, scrollKey, scrollKeyOwner, ScrollView } from "@opencode-ai/ui/scroll-view"
 import { StickyAccordionHeader } from "@opencode-ai/ui/sticky-accordion-header"
 import { TextField } from "@opencode-ai/ui/text-field"
-import { TextReveal } from "@opencode-ai/ui/text-reveal"
 import { TextShimmer } from "@opencode-ai/ui/text-shimmer"
 import type {
   AssistantMessage,
@@ -132,12 +131,7 @@ const markBoundaryGesture = (input: {
   }
 }
 
-function TimelineThinkingRow(props: {
-  reasoningHeading?: string
-  showReasoningSummaries: boolean
-  status: SessionStatus
-  model?: string
-}) {
+function TimelineThinkingRow(props: { status: SessionStatus; model?: string }) {
   const language = useLanguage()
   const [now, setNow] = createSignal(Date.now())
   createEffect(() => {
@@ -174,9 +168,6 @@ function TimelineThinkingRow(props: {
           )}
         </Show>
       </div>
-      <Show when={!props.showReasoningSummaries}>
-        <TextReveal text={props.reasoningHeading} class="session-turn-thinking-heading" travel={25} duration={700} />
-      </Show>
     </div>
   )
 }
@@ -1382,12 +1373,7 @@ export function MessageTimeline(props: {
         return (
           <TimelineRowFrame row={thinkingRow}>
             <div data-slot="session-turn-message-container" class="w-full px-4 md:px-5">
-              <TimelineThinkingRow
-                reasoningHeading={thinkingRow().reasoningHeading}
-                showReasoningSummaries={settings.general.showReasoningSummaries()}
-                status={thinkingRow().status}
-                model={model()}
-              />
+              <TimelineThinkingRow status={thinkingRow().status} model={model()} />
             </div>
           </TimelineRowFrame>
         )

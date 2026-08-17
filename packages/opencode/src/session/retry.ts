@@ -4,6 +4,7 @@ import { Cause, Clock, Duration, Effect, Schedule } from "effect"
 import { MessageV2 } from "./message-v2"
 import { iife } from "@/util/iife"
 import { isRecord } from "@/util/record"
+import { LmStudioChatTransport } from "@/local-agent-runtime/lmstudio-chat-transport"
 
 export type Err = ReturnType<NamedError["toObject"]>
 
@@ -84,6 +85,7 @@ function exponential(attempt: number, random: number) {
 export function retryable(error: Err, provider: string) {
   // context overflow errors should not be retried
   if (SessionV1.ContextOverflowError.isInstance(error)) return undefined
+  if (provider === "lmstudio" && LmStudioChatTransport.fallbackReason(error)) return undefined
   if (SessionV1.APIError.isInstance(error)) {
     const status = error.data.statusCode
     // 5xx errors are transient server failures and should always be retried,

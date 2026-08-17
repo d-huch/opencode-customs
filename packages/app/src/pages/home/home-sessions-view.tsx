@@ -40,6 +40,7 @@ export type HomeSessionsViewProps = {
   language: ReturnType<typeof useLanguage>
   groups: Accessor<HomeSessionGroup[]>
   showProjectName: Accessor<boolean>
+  chat: Accessor<boolean>
   server: Accessor<ServerConnection.Key>
   canCreateSession: Accessor<boolean>
   searchValue: Accessor<string>
@@ -91,7 +92,7 @@ export function HomeSessionsView(props: HomeSessionsViewProps) {
                 class="pointer-events-auto h-7 px-2 [font-weight:530]"
                 onClick={props.onCreateSession}
               >
-                {props.language.t("command.session.new")}
+                {props.chat() ? props.language.t("home.chat.new") : props.language.t("command.session.new")}
               </ButtonV2>
             </div>
           </Show>
@@ -190,13 +191,24 @@ function HomeSessionLeading(props: {
           style={{ right: "calc(100% + 4px)" }}
         />
       </Show>
-      <SessionTabAvatarView
-        project={props.record.project}
-        directory={props.record.session.directory}
-        revealProjectOnHover={props.revealProjectOnHover}
-        unread={props.unread}
-        loading={props.loading}
-      />
+      <Show
+        when={props.record.project}
+        fallback={
+          <span class="flex size-6 items-center justify-center rounded-[6px] bg-v2-background-bg-layer-03 text-v2-icon-icon-muted">
+            <IconV2 name="brain" size="small" />
+          </span>
+        }
+      >
+        {(project) => (
+          <SessionTabAvatarView
+            project={project()}
+            directory={props.record.session.directory}
+            revealProjectOnHover={props.revealProjectOnHover}
+            unread={props.unread}
+            loading={props.loading}
+          />
+        )}
+      </Show>
     </div>
   )
 }

@@ -12,6 +12,8 @@ const channel = (() => {
   return "dev"
 })()
 
+const customs = process.env.OPENCODE_ICON_CHANNEL === "customs"
+
 const nodePtyPkg = `@lydell/node-pty-${process.platform}-${process.arch}`
 
 const sentry =
@@ -35,6 +37,7 @@ export default defineConfig({
   main: {
     define: {
       "import.meta.env.OPENCODE_CHANNEL": JSON.stringify(channel),
+      "import.meta.env.OPENCODE_ICON_CHANNEL": JSON.stringify(customs ? "customs" : ""),
     },
     build: {
       rollupOptions: {

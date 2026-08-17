@@ -1434,6 +1434,25 @@ describe("OpenAI Responses route", () => {
     }),
   )
 
+  it.effect("surfaces LM Studio error event details nested under error", () =>
+    Effect.gen(function* () {
+      const response = yield* LLMClient.generate(request).pipe(
+        Effect.provide(
+          fixedResponse(
+            sseEvents({
+              type: "error",
+              error: { code: "invalid_union", param: "input", message: "Invalid type for 'input'." },
+            }),
+          ),
+        ),
+      )
+
+      expect(response.events).toEqual([
+        { type: "provider-error", message: "invalid_union: Invalid type for 'input'." },
+      ])
+    }),
+  )
+
   it.effect("falls back to a stable default when both error and response are absent", () =>
     Effect.gen(function* () {
       const response = yield* LLMClient.generate(request).pipe(

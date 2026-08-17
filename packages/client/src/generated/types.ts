@@ -248,6 +248,7 @@ export type SessionsListOutput = {
     readonly time: { readonly created: number; readonly updated: number; readonly archived?: number }
     readonly title: string
     readonly location: { readonly directory: string; readonly workspaceID?: string }
+    readonly mode?: "project" | "chat"
     readonly subpath?: string
     readonly revert?: {
       readonly messageID: string
@@ -272,25 +273,36 @@ export type SessionsCreateInput = {
     readonly agent?: string | null
     readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string } | null
     readonly location?: { readonly directory: string; readonly workspaceID?: string } | null
+    readonly mode?: "project" | "chat" | null
   }["id"]
   readonly agent?: {
     readonly id?: string | null
     readonly agent?: string | null
     readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string } | null
     readonly location?: { readonly directory: string; readonly workspaceID?: string } | null
+    readonly mode?: "project" | "chat" | null
   }["agent"]
   readonly model?: {
     readonly id?: string | null
     readonly agent?: string | null
     readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string } | null
     readonly location?: { readonly directory: string; readonly workspaceID?: string } | null
+    readonly mode?: "project" | "chat" | null
   }["model"]
   readonly location?: {
     readonly id?: string | null
     readonly agent?: string | null
     readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string } | null
     readonly location?: { readonly directory: string; readonly workspaceID?: string } | null
+    readonly mode?: "project" | "chat" | null
   }["location"]
+  readonly mode?: {
+    readonly id?: string | null
+    readonly agent?: string | null
+    readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string } | null
+    readonly location?: { readonly directory: string; readonly workspaceID?: string } | null
+    readonly mode?: "project" | "chat" | null
+  }["mode"]
 }
 
 export type SessionsCreateOutput = {
@@ -310,6 +322,7 @@ export type SessionsCreateOutput = {
     readonly time: { readonly created: number; readonly updated: number; readonly archived?: number }
     readonly title: string
     readonly location: { readonly directory: string; readonly workspaceID?: string }
+    readonly mode?: "project" | "chat"
     readonly subpath?: string
     readonly revert?: {
       readonly messageID: string
@@ -348,6 +361,7 @@ export type SessionsGetOutput = {
     readonly time: { readonly created: number; readonly updated: number; readonly archived?: number }
     readonly title: string
     readonly location: { readonly directory: string; readonly workspaceID?: string }
+    readonly mode?: "project" | "chat"
     readonly subpath?: string
     readonly revert?: {
       readonly messageID: string

@@ -66,6 +66,8 @@ import { animate } from "motion"
 import { attached, inline, kind, typeLabel } from "./message-file"
 import { readPartText } from "./message-part-text"
 import { SessionProgressIndicatorV2 } from "../v2/components/session-progress-indicator-v2"
+import { formatCompactDuration } from "./message-duration"
+import { ReasoningPartDisclosure } from "./reasoning-part"
 
 async function writeClipboard(text: string): Promise<boolean> {
   const body = typeof document === "undefined" ? undefined : document.body
@@ -463,7 +465,14 @@ function newLayout() {
 }
 
 function webSearchProviderLabel(provider: unknown, i18n: ReturnType<typeof useI18n>) {
-  const name = provider === "parallel" ? "Parallel" : provider === "exa" ? "Exa" : undefined
+  const name =
+    provider === "local-browser"
+      ? "Research Browser"
+      : provider === "parallel"
+        ? "Parallel"
+        : provider === "exa"
+          ? "Exa"
+          : undefined
   if (name) return i18n.t("ui.tool.websearch.provider", { provider: name })
   return i18n.t("ui.tool.websearch")
 }
@@ -1656,7 +1665,6 @@ PART_MAPPING["compaction"] = function CompactionPartDisplay() {
 PART_MAPPING["text"] = function TextPartDisplay(props) {
   const data = useData()
   const i18n = useI18n()
-  const numfmt = createMemo(() => new Intl.NumberFormat(i18n.locale()))
   const part = () => props.part as TextPart
   const interrupted = createMemo(
     () =>
@@ -1680,15 +1688,7 @@ PART_MAPPING["text"] = function TextPartDisplay(props) {
         : typeof completed === "number"
           ? completed - message.time.created
           : -1
-    if (!(ms >= 0)) return ""
-    const total = Math.round(ms / 1000)
-    if (total < 60) return i18n.t("ui.message.duration.seconds", { count: numfmt().format(total) })
-    const minutes = Math.floor(total / 60)
-    const seconds = total % 60
-    return i18n.t("ui.message.duration.minutesSeconds", {
-      minutes: numfmt().format(minutes),
-      seconds: numfmt().format(seconds),
-    })
+    return formatCompactDuration(i18n, ms)
   })
 
   const meta = createMemo(() => {
@@ -1785,16 +1785,14 @@ PART_MAPPING["text"] = function TextPartDisplay(props) {
 PART_MAPPING["reasoning"] = function ReasoningPartDisplay(props) {
   const data = useData()
   const part = () => props.part as ReasoningPart
-  const streaming = createMemo(
-    () => props.message.role === "assistant" && typeof (props.message as AssistantMessage).time.completed !== "number",
-  )
+  const streaming = createMemo(() => part().time.end === undefined)
   const text = () => readPartText(data.store.part_text_accum_delta, part())
 
   return (
     <Show when={text()}>
-      <div data-component="reasoning-part" data-timeline-part-id={part().id}>
+      <ReasoningPartDisclosure start={part().time.start} end={part().time.end} partID={part().id}>
         <PacedMarkdown text={text()} cacheKey={part().id} streaming={streaming()} />
-      </div>
+      </ReasoningPartDisclosure>
     </Show>
   )
 }
@@ -1842,6 +1840,7 @@ ToolRegistry.register({
 ToolRegistry.register({
   name: "list",
   render(props) {
+    const data = useData()
     const i18n = useI18n()
     return (
       <BasicTool
@@ -1977,13 +1976,31 @@ ToolRegistry.register({
 ToolRegistry.register({
   name: "websearch",
   render(props) {
+    const data = useData()
     const i18n = useI18n()
     const query = createMemo(() => {
       const value = props.input.query
       if (typeof value !== "string") return ""
       return value
     })
-    const title = createMemo(() => webSearchProviderLabel(props.metadata.provider, i18n))
+    const pending = createMemo(() => props.status === "pending" || props.status === "running")
+    const title = createMemo(() => {
+      if (props.metadata.provider !== "local-browser") return webSearchProviderLabel(props.metadata.provider, i18n)
+      if (props.metadata.stage === "reading") return i18n.t("ui.tool.websearch.reading")
+      if (props.metadata.status === "requires_user") return i18n.t("ui.tool.websearch.waitingUser")
+      if (pending()) return i18n.t("ui.tool.websearch.searching")
+      return webSearchProviderLabel(props.metadata.provider, i18n)
+    })
+    const subtitle = createMemo(() => {
+      const details = [
+        query(),
+        typeof props.metadata.engine === "string" ? props.metadata.engine : undefined,
+        typeof props.metadata.sources === "number"
+          ? i18n.t("ui.tool.websearch.sources", { count: props.metadata.sources })
+          : undefined,
+      ].filter(Boolean)
+      return details.join(" · ")
+    })
 
     return (
       <BasicTool
@@ -1991,10 +2008,17 @@ ToolRegistry.register({
         icon="window-cursor"
         trigger={{
           title: title(),
-          subtitle: query(),
+          subtitle: subtitle(),
           subtitleClass: "exa-tool-query",
         }}
       >
+        <Show when={props.metadata.provider === "local-browser" && data.openResearchBrowser}>
+          <div class="pb-2">
+            <ButtonV2 size="small" variant="neutral" onClick={() => data.openResearchBrowser?.()}>
+              {i18n.t("ui.tool.websearch.openBrowser")}
+            </ButtonV2>
+          </div>
+        </Show>
         <ExaOutput output={props.output} />
       </BasicTool>
     )

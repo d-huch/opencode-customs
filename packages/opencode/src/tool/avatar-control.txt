@@ -1,0 +1,5 @@
+Control a connected Unity or VR character through the local OpenCode Customs Avatar Bridge.
+
+Use only actions supported by the connected character. Prefer subtle, relevant actions and do not repeat an action that already succeeded. This tool can trigger an animation or gesture, set an emotion, look at a target, move to a position, or stop character speech. It cannot execute arbitrary Unity methods or code.
+
+Ask before actions with meaningful physical or user-experience impact. Never claim an action happened unless the tool confirms success.

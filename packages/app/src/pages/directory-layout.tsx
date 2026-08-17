@@ -9,10 +9,11 @@ import { SDKProvider } from "@/context/sdk"
 import { useSync } from "@/context/sync"
 import { decode64 } from "@/utils/base64"
 import { Schema } from "effect"
-import type { ServerConnection } from "@/context/server"
+import { useServer, type ServerConnection } from "@/context/server"
 import { sessionHref } from "@/utils/session-route"
 import { useServerSync } from "@/context/server-sync"
 import { RepositoryDiagnosticsProvider } from "@/context/repository-diagnostics"
+import { usePlatform } from "@/context/platform"
 
 export function DirectoryDataProvider(
   props: ParentProps<{
@@ -26,6 +27,8 @@ export function DirectoryDataProvider(
   const params = useParams()
   const sync = useSync()
   const serverSync = useServerSync()
+  const platform = usePlatform()
+  const connections = useServer()
   const directory = () => (typeof props.directory === "function" ? props.directory() : props.directory)
   const slug = createMemo(() => base64Encode(directory()))
   const href = (sessionID: string) => {
@@ -67,6 +70,11 @@ export function DirectoryDataProvider(
           sessionID={params.id}
           onNavigateToSession={(sessionID: string) => navigate(href(sessionID))}
           onSessionHref={href}
+          onOpenResearchBrowser={
+            connections.isLocal() && platform.showResearchBrowser
+              ? () => void platform.showResearchBrowser?.()
+              : undefined
+          }
         >
           <RepositoryDiagnosticsProvider>
             <LocalProvider>{props.children}</LocalProvider>

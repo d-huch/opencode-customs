@@ -32,6 +32,7 @@ import { LLMNativeRuntime } from "./llm/native-runtime"
 import { LLMRequestPrep } from "./llm/request"
 import { ToolCallRepair } from "./tool-call-repair"
 import { SessionLog } from "@/local-agent-runtime/session-log"
+import { SessionChatMode } from "./chat-mode"
 
 export const OUTPUT_TOKEN_MAX = ProviderTransform.OUTPUT_TOKEN_MAX
 
@@ -50,6 +51,8 @@ export type StreamInput = {
   toolChoice?: "auto" | "required" | "none"
   statefulResponses?: boolean
   previousResponseID?: string
+  previousSystemFingerprint?: string
+  lmStudioReplayMessages?: ModelMessage[]
   providerChainContext?: number
 }
 
@@ -141,6 +144,7 @@ const live: Layer.Layer<
       const isWorkflow = language instanceof GitLabWorkflowLanguageModel
       const prepared = yield* LLMRequestPrep.prepare({
         ...input,
+        messages: input.lmStudioReplayMessages ?? input.messages,
         provider: item,
         auth: info,
         plugin,
@@ -266,6 +270,9 @@ const live: Layer.Layer<
           auth: info,
           llmClient,
           messages: prepared.messages,
+          continuationMessages: input.statefulResponses
+            ? SessionChatMode.messages(input.messages, true)
+            : input.messages,
           tools: prepared.tools,
           toolChoice: input.toolChoice,
           temperature: prepared.params.temperature,
@@ -277,6 +284,9 @@ const live: Layer.Layer<
           abort: input.abort,
           statefulResponses: input.statefulResponses,
           previousResponseID: input.previousResponseID,
+          previousSystemFingerprint: input.previousSystemFingerprint,
+          systemFingerprint: SessionChatMode.systemFingerprint(prepared.system),
+          sessionID: input.sessionID,
         })
         if (native.type === "supported") {
           yield* Effect.logInfo("llm runtime selected", {
@@ -290,9 +300,7 @@ const live: Layer.Layer<
           }
         }
         if (input.statefulResponses)
-          return yield* Effect.fail(
-            new Error(`Stateful Chat requires LM Studio Responses support: ${native.reason}`),
-          )
+          return yield* Effect.fail(new Error(`Stateful Chat requires LM Studio Responses support: ${native.reason}`))
         yield* Effect.logInfo("llm runtime selected", {
           "llm.runtime": "ai-sdk",
           "llm.provider": input.model.providerID,

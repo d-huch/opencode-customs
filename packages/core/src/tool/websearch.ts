@@ -14,6 +14,7 @@ import { Tools } from "./tools"
 import { collectBoundedResponseBody } from "./http-body"
 import { checksum } from "../util/encode"
 import { ToolRegistry } from "./registry"
+import { ResearchBrowser } from "./research-browser"
 
 export const name = "websearch"
 export const NO_RESULTS = "No search results found. Please try a different query."
@@ -23,22 +24,26 @@ export const MAX_NUM_RESULTS = 20
 export const MAX_CONTEXT_CHARACTERS = 50_000
 export const MAX_RESPONSE_BYTES = 256 * 1024
 
-/**
- * Provider-independent local web search retained in V2 core for launch parity.
- * This invokes the legacy Exa/Parallel product backends itself. It is distinct
- * from provider-hosted web search tools, which remain route-owned and execute
- * at the model provider. Ownership of this compromise can be revisited later.
- */
 export const description = `Search the web using the session's local web search provider. Use this for current information beyond knowledge cutoff.
 
-This is a provider-independent local tool backed by Exa or Parallel. Provider-hosted web search tools are separate and execute at the model provider.
+Native Desktop uses an isolated local Research Browser first. It searches, reads relevant sources, and returns untrusted evidence with exact URLs. Exa or Parallel may be used once only when the user explicitly enabled external fallback. Remote and WSL servers retain their configured server-side provider.
 
-Optional controls support result count, live crawling ('fallback' or 'preferred'), search type ('auto', 'fast', or 'deep'), and maximum context characters.
+Use fast for a quick current fact and deep for comparisons, recommendations, high-risk topics, disputed claims, and explicit source verification. Related queries, language, recency, source count, and maximum context characters are optional.
 
 The current year is ${new Date().getFullYear()}. Use this year when searching for recent information or current events.`
 
 export const Input = Schema.Struct({
   query: Schema.String.annotate({ description: "Websearch query" }),
+  queries: Schema.optional(Schema.Array(Schema.String)).annotate({
+    description: "Optional related queries for a deeper research pass (maximum 4 total queries)",
+  }),
+  language: Schema.optional(Schema.String).annotate({ description: "Preferred search language or locale" }),
+  timeRange: Schema.optional(Schema.Literals(["day", "week", "month", "year"])).annotate({
+    description: "Optional recency filter",
+  }),
+  maxSources: Schema.optional(PositiveInt.check(Schema.isLessThanOrEqualTo(8))).annotate({
+    description: "Maximum sources to read (default: 3 for fast search, 6 for deep research; maximum: 8)",
+  }),
   numResults: Schema.optional(PositiveInt.check(Schema.isLessThanOrEqualTo(MAX_NUM_RESULTS))).annotate({
     description: `Number of search results to return (default: 8, maximum: ${MAX_NUM_RESULTS})`,
   }),
@@ -51,16 +56,18 @@ export const Input = Schema.Struct({
   }),
   contextMaxCharacters: Schema.optional(PositiveInt.check(Schema.isLessThanOrEqualTo(MAX_CONTEXT_CHARACTERS))).annotate(
     {
-      description: `Maximum characters for context string optimized for models (default: 10000, maximum: ${MAX_CONTEXT_CHARACTERS})`,
+      description: `Maximum evidence characters (default: 12000 for fast, 40000 for deep, maximum: ${MAX_CONTEXT_CHARACTERS})`,
     },
   ),
 })
 
-export const Provider = Schema.Literals(["exa", "parallel"])
+export const ExternalProvider = Schema.Literals(["exa", "parallel"])
+export type ExternalProvider = typeof ExternalProvider.Type
+export const Provider = Schema.Literals(["local-browser", "exa", "parallel"])
 export type Provider = typeof Provider.Type
 
 export interface Config {
-  readonly provider?: Provider
+  readonly provider?: ExternalProvider
   readonly enableExa: boolean
   readonly enableParallel: boolean
   readonly exaApiKey?: string
@@ -88,8 +95,8 @@ export const configNode = makeLocationNode({ service: ConfigService, layer: defa
 export function selectProvider(
   sessionID: string,
   flags: Pick<Config, "enableExa" | "enableParallel"> = { enableExa: false, enableParallel: false },
-  override?: Provider,
-): Provider {
+  override?: ExternalProvider,
+): ExternalProvider {
   if (override) return override
   if (flags.enableParallel) return "parallel"
   if (flags.enableExa) return "exa"
@@ -206,15 +213,104 @@ const layer = Layer.effectDiscard(
           execute: (input, context) => {
             const provider = selectProvider(context.sessionID, config, config.provider)
             return Effect.gen(function* () {
+              const local = ResearchBrowser.available()
               yield* permission.assert({
                 action: name,
-                resources: [input.query],
+                resources: [input.query, ...(input.queries ?? [])],
                 save: ["*"],
-                metadata: { ...input, provider },
+                metadata: { ...input, provider: local ? "local-browser" : provider },
                 sessionID: context.sessionID,
                 agent: context.agent,
                 source: { type: "tool", messageID: context.assistantMessageID, callID: context.toolCallID },
               })
+
+              if (local) {
+                const depth = ResearchBrowser.inferDepth(input.query, input.type)
+                const queries = ResearchBrowser.expandQueries(input.query, input.queries ?? [], depth)
+                const maxSources = input.maxSources ?? (depth === "deep" ? 6 : 3)
+                const search = yield* Effect.tryPromise({
+                  try: () =>
+                    ResearchBrowser.search({
+                      queries,
+                      language: input.language,
+                      timeRange: input.timeRange,
+                      maxResults: Math.max(maxSources, input.numResults ?? 8),
+                      depth,
+                    }),
+                  catch: (error) => error,
+                }).pipe(
+                  Effect.catch(() =>
+                    Effect.succeed({
+                      status: "failed" as const,
+                      engine: "duckduckgo" as const,
+                      results: [],
+                      externalFallback: false,
+                      message: "Local Research Browser is unavailable. External fallback was not used.",
+                    }),
+                  ),
+                )
+                const results = ResearchBrowser.normalizeResults(search.results, maxSources)
+                if (search.status === "ready" && results.length) {
+                  yield* permission.assert({
+                    action: "webfetch",
+                    resources: results.map((item) => item.url),
+                    save: ["*"],
+                    metadata: { provider: "local-browser", query: input.query },
+                    sessionID: context.sessionID,
+                    agent: context.agent,
+                    source: { type: "tool", messageID: context.assistantMessageID, callID: context.toolCallID },
+                  })
+                  const sources = yield* Effect.forEach(
+                    results,
+                    (result) =>
+                      Effect.tryPromise({
+                        try: () => ResearchBrowser.read({ url: result.url, allowAuthenticated: true }),
+                        catch: () => undefined,
+                      }).pipe(
+                        Effect.map((read) => ({
+                          ...result,
+                          byline: read?.byline,
+                          publishedTime: read?.publishedTime,
+                          text: read?.status === "ready" && read.text ? read.text : result.snippet,
+                          fetchMode: read?.status === "ready" && read.text ? read.fetchMode : ("snippet" as const),
+                          requiresUser: read?.status === "requires_user",
+                        })),
+                        Effect.catch(() =>
+                          Effect.succeed({
+                            ...result,
+                            text: result.snippet,
+                            fetchMode: "snippet" as const,
+                            requiresUser: false,
+                          }),
+                        ),
+                      ),
+                    { concurrency: 3 },
+                  )
+                  if (sources.some((source) => source.requiresUser))
+                    return {
+                      provider: "local-browser" as const,
+                      text: "Research Browser requires user attention. Complete the sign-in or challenge in the opened browser, then retry the search.",
+                    }
+                  return {
+                    provider: "local-browser" as const,
+                    text: ResearchBrowser.evidencePacket({
+                      query: input.query,
+                      depth,
+                      engine: search.engine,
+                      sources,
+                      maxCharacters: input.contextMaxCharacters,
+                    }),
+                  }
+                }
+                if (!search.externalFallback)
+                  return {
+                    provider: "local-browser" as const,
+                    text:
+                      search.status === "requires_user"
+                        ? (search.message ?? "Research Browser requires user attention. Open it and retry.")
+                        : (search.message ?? NO_RESULTS),
+                  }
+              }
 
               const text =
                 provider === "exa"

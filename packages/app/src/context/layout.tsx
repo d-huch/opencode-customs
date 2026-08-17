@@ -83,7 +83,7 @@ type TabHandoff = {
 }
 
 export type LocalProject = Partial<Project> & { worktree: string; expanded: boolean }
-export type HomeProjectSelection = { server: ServerConnection.Key; directory?: string }
+export type HomeProjectSelection = { server: ServerConnection.Key; directory?: string; mode?: "project" | "chat" }
 
 export type ReviewDiffStyle = "unified" | "split"
 export type ReviewChangeMode = "git" | "branch" | "turn"

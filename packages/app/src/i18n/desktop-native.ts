@@ -294,6 +294,7 @@ export const DESKTOP_NATIVE_ENGLISH = {
   "desktop.dialog.saveFile": "Save file",
   "desktop.dialog.files": "Files",
   "desktop.server.local": "Local Server",
+  "desktop.researchBrowser.title": "OpenCode Research Browser",
 
   "desktop.wsl.error.windowsOnly": "WSL is only available on Windows",
   "desktop.wsl.error.unavailable": "WSL is unavailable",

@@ -6,7 +6,13 @@ import type { IpcMainEvent, IpcMainInvokeEvent } from "electron"
 import type { DesktopMenuAction } from "@opencode-ai/app/desktop-menu"
 import { parseDesktopNativeBundle, type DesktopNativeBundle } from "@opencode-ai/app/i18n/desktop-native"
 
-import type { FatalRendererError, ServerReadyData, TitlebarTheme } from "../preload/types"
+import type {
+  AvatarBridgeStatus,
+  FatalRendererError,
+  ResearchBrowserStatus,
+  ServerReadyData,
+  TitlebarTheme,
+} from "../preload/types"
 import { runDesktopMenuAction } from "./desktop-menu-actions"
 import { setForceFocus } from "./debug"
 import { assertAttachmentBudget, createPickedFileAuthorizations } from "./attachment-picker"
@@ -65,7 +71,6 @@ type Deps = {
   setDefaultServerUrl: (url: string | null) => Promise<void> | void
   isFirstLaunchOnboardingPending: () => Promise<boolean> | boolean
   finishFirstLaunchOnboarding: (createDefaultProject: boolean) => Promise<string | null> | string | null
-  ensureChatWorkspace: () => Promise<string> | string
   isOldLayoutEligible: () => Promise<boolean> | boolean
   getDisplayBackend: () => Promise<string | null>
   setDisplayBackend: (backend: string | null) => Promise<void> | void
@@ -78,6 +83,10 @@ type Deps = {
   clearDebugLogs: () => Promise<{ files: number; bytes: number }>
   recordFatalRendererError: (error: FatalRendererError) => Promise<void> | void
   setNativeTranslations: (bundle: DesktopNativeBundle) => void
+  getResearchBrowserStatus: () => ResearchBrowserStatus
+  showResearchBrowser: () => Promise<void>
+  clearResearchBrowserData: () => Promise<void>
+  getAvatarBridgeStatus: () => AvatarBridgeStatus
 }
 
 export function registerIpcHandlers(deps: Deps) {
@@ -103,7 +112,6 @@ export function registerIpcHandlers(deps: Deps) {
   ipcMain.handle("finish-first-launch-onboarding", (_event: IpcMainInvokeEvent, createDefaultProject: boolean) =>
     deps.finishFirstLaunchOnboarding(createDefaultProject),
   )
-  ipcMain.handle("ensure-chat-workspace", () => deps.ensureChatWorkspace())
   ipcMain.handle("is-old-layout-eligible", () => deps.isOldLayoutEligible())
   ipcMain.handle("get-display-backend", () => deps.getDisplayBackend())
   ipcMain.handle("set-display-backend", (_event: IpcMainInvokeEvent, backend: string | null) =>
@@ -128,6 +136,10 @@ export function registerIpcHandlers(deps: Deps) {
   ipcMain.handle("set-background-color", (_event: IpcMainInvokeEvent, color: string) => deps.setBackgroundColor(color))
   ipcMain.handle("export-debug-logs", () => deps.exportDebugLogs())
   ipcMain.handle("clear-debug-logs", () => deps.clearDebugLogs())
+  ipcMain.handle("get-research-browser-status", () => deps.getResearchBrowserStatus())
+  ipcMain.handle("show-research-browser", () => deps.showResearchBrowser())
+  ipcMain.handle("clear-research-browser-data", () => deps.clearResearchBrowserData())
+  ipcMain.handle("get-avatar-bridge-status", () => deps.getAvatarBridgeStatus())
   ipcMain.handle("set-force-focus", (event: IpcMainInvokeEvent, enabled: boolean) =>
     setForceFocus(event.sender, enabled),
   )

@@ -39,6 +39,8 @@ export function NewHome() {
           <HomeSessions sessions={sessions} search={search} scroll={scroll} />
           <HomeUtilityNav
             class="flex lg:hidden"
+            onOpenChat={projects.utility.chat}
+            chatSelected={projects.utility.chatSelected}
             onOpenSettings={projects.utility.settings}
             onOpenHelp={projects.utility.help}
             language={projects.copy.language}

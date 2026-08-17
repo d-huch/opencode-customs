@@ -41,6 +41,7 @@ export function SettingsPersonalizationV2() {
   const settings = useSettings()
 
   const emptyValues = (): AgentPersonalizationValues => ({
+    archetype: "natural",
     assistantName: settings.personalization.assistantName(),
     userName: settings.personalization.userName(),
     addressAs: settings.personalization.addressAs(),
@@ -71,6 +72,7 @@ export function SettingsPersonalizationV2() {
   let initialized = false
 
   const values = (): AgentPersonalizationValues => ({
+    archetype: form.archetype,
     assistantName: form.assistantName,
     userName: form.userName,
     addressAs: form.addressAs,
@@ -382,6 +384,7 @@ export function SettingsPersonalizationV2() {
                     <span class="truncate text-13-medium">{preset.name}</span>
                     <span class="truncate text-11-regular text-v2-text-text-muted">
                       {preset.assistantName || language.t("personalization.presets.unnamed")} ·{" "}
+                      {language.t(`personalization.archetype.${preset.archetype ?? "natural"}`)} ·{" "}
                       {preset.voice
                         ? language.t("personalization.chat.voice")
                         : language.t("personalization.chat.silent")}
@@ -473,6 +476,18 @@ export function SettingsPersonalizationV2() {
             </div>
 
             <div class="grid min-w-0 grid-cols-1 gap-4 md:grid-cols-2">
+              <EnumSelect
+                label={language.t("personalization.archetype")}
+                description={language.t(`personalization.archetype.${form.archetype}.description`)}
+                value={form.archetype}
+                options={["natural", "military", "depressive", "clown", "jarvis", "mentor", "sarcastic"].map(
+                  (value) => ({
+                    value,
+                    label: language.t(`personalization.archetype.${value}`),
+                  }),
+                )}
+                onChange={(value) => setForm("archetype", value as typeof form.archetype)}
+              />
               <EnumSelect
                 label={language.t("personalization.tone")}
                 value={form.tone}
@@ -648,6 +663,7 @@ export function SettingsPersonalizationV2() {
 
 function presetValues(preset: AgentPersonalizationPreset): AgentPersonalizationValues {
   return {
+    archetype: preset.archetype ?? "natural",
     assistantName: preset.assistantName,
     userName: preset.userName,
     addressAs: preset.addressAs,
@@ -682,6 +698,7 @@ function fishContentType(file: File) {
 
 function EnumSelect(props: {
   label: string
+  description?: string
   value: string
   options: { value: string; label: string }[]
   onChange: (value: string) => void
@@ -698,6 +715,9 @@ function EnumSelect(props: {
           <option value={option.value}>{option.label}</option>
         ))}
       </select>
+      <Show when={props.description}>
+        <span class="text-11-regular text-v2-text-text-muted">{props.description}</span>
+      </Show>
     </label>
   )
 }

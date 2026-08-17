@@ -44,6 +44,7 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { SessionMessage } from "@opencode-ai/schema/session-message"
+import { SessionMode } from "./mode"
 
 const parentTitlePrefix = "New session - "
 const childTitlePrefix = "Child session - "
@@ -81,6 +82,7 @@ export function fromRow(row: SessionRow): Info {
     projectID: row.project_id,
     workspaceID: row.workspace_id ?? undefined,
     directory: row.directory,
+    mode: SessionMode.resolve({ metadata: row.metadata ?? undefined, directory: row.directory }),
     path: row.path ?? undefined,
     parentID: row.parent_id ?? undefined,
     title: row.title,
@@ -227,6 +229,7 @@ export const Info = Schema.Struct({
   projectID: ProjectV2.ID,
   workspaceID: optional(WorkspaceV2.ID),
   directory: Schema.String,
+  mode: Schema.optional(Schema.Literals(["project", "chat"])),
   path: optional(Schema.String),
   parentID: optional(SessionID),
   summary: optional(Summary),
@@ -266,6 +269,7 @@ export const CreateInput = Schema.optional(
     metadata: Schema.optional(Metadata),
     permission: Schema.optional(PermissionV1.Ruleset),
     workspaceID: Schema.optional(WorkspaceV2.ID),
+    mode: Schema.optional(Schema.Literals(["project", "chat"])),
   }),
 )
 export type CreateInput = Types.DeepMutable<Schema.Schema.Type<typeof CreateInput>>
@@ -423,6 +427,7 @@ export interface Interface {
     metadata?: typeof Metadata.Type
     permission?: PermissionV1.Ruleset
     workspaceID?: WorkspaceV2.ID
+    mode?: SessionMode.Value
   }) => Effect.Effect<Info>
   readonly fork: (input: { sessionID: SessionID; messageID?: MessageID }) => Effect.Effect<Info, NotFound>
   readonly touch: (sessionID: SessionID) => Effect.Effect<void>
@@ -517,6 +522,7 @@ const layer: Layer.Layer<
         version: InstallationVersion,
         projectID: ctx.project.id,
         directory: input.directory,
+        mode: SessionMode.resolve({ metadata: input.metadata, directory: input.directory }),
         path: input.path,
         workspaceID: input.workspaceID,
         parentID: input.parentID,
@@ -674,6 +680,7 @@ const layer: Layer.Layer<
       metadata?: typeof Metadata.Type
       permission?: PermissionV1.Ruleset
       workspaceID?: WorkspaceV2.ID
+      mode?: SessionMode.Value
     }) {
       const ctx = yield* InstanceState.context
       const workspace = yield* InstanceState.workspaceID
@@ -684,7 +691,7 @@ const layer: Layer.Layer<
         title: input?.title,
         agent: input?.agent,
         model: input?.model,
-        metadata: input?.metadata,
+        metadata: SessionMode.metadata(input?.metadata, input?.mode, ctx.directory),
         permission: input?.permission,
         workspaceID: input?.workspaceID ?? workspace,
       })

@@ -11,6 +11,7 @@ const sessionCreateInputs: Array<{
   agent?: string
   model?: { id: string; providerID: string; variant?: string }
   location?: { directory: string }
+  mode?: "project" | "chat"
 }> = []
 const enabledAutoAccept: Array<{ server: string; sessionID: string; directory: string }> = []
 const optimistic: Array<{
@@ -38,6 +39,7 @@ let params: { id?: string } = {}
 let search: { draftId?: string } = {}
 let selected = "/repo/worktree-a"
 let variant: string | undefined
+let draftMode: "project" | "chat" | undefined
 let permissionServer = "server-a"
 let createSessionGate: Promise<void> | undefined
 
@@ -90,6 +92,7 @@ const clientFor = (directory: string) => {
             time: { created: 1, updated: 1 },
             title: `New session ${createdSessions.length}`,
             location: { directory: location },
+            mode: input.mode,
           }
         },
         prompt: async (input: unknown) => {
@@ -137,6 +140,10 @@ beforeAll(async () => {
     showToast: () => 0,
   }))
 
+  mock.module("@/utils/toast", () => ({
+    showToast: () => 0,
+  }))
+
   mock.module("@opencode-ai/core/util/encode", () => ({
     base64Encode: (value: string) => value,
   }))
@@ -177,7 +184,7 @@ beforeAll(async () => {
 
   mock.module("@/context/tabs", () => ({
     useTabs: () => ({
-      draft: () => ({ server: "project-server" }),
+      draft: () => ({ server: "project-server", mode: draftMode }),
       promoteDraft: (draftID: string, session: { server: string; sessionId: string }) => {
         promotedDrafts.push({ draftID, ...session })
       },
@@ -302,6 +309,7 @@ beforeEach(() => {
   syncedDirectories.length = 0
   selected = "/repo/worktree-a"
   variant = undefined
+  draftMode = undefined
   permissionServer = "server-a"
   createSessionGate = undefined
   serverSessionSyncs = 0
@@ -449,6 +457,62 @@ describe("prompt submit worktree selection", () => {
     await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
 
     expect(promotedDrafts).toEqual([{ draftID: "draft-1", server: "project-server", sessionId: "session-1" }])
+  })
+
+  test("forces the chat agent when creating a projectless chat", async () => {
+    search = { draftId: "draft-chat" }
+    draftMode = "chat"
+    const submit = createPromptSubmit({
+      prompt,
+      info: () => undefined,
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      working: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+      newSessionWorktree: () => "main",
+      onNewSessionWorktreeReset: () => undefined,
+    })
+
+    await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+    await Bun.sleep(0)
+
+    expect(sessionCreateInputs[0]).toMatchObject({ agent: "chat", mode: "chat" })
+    expect(optimistic[0]?.message.agent).toBe("chat")
+    expect(promptInputs[0]).toMatchObject({ agent: "chat" })
+  })
+
+  test("forces the chat agent for an existing projectless chat", async () => {
+    params = { id: "session-chat" }
+    const submit = createPromptSubmit({
+      prompt,
+      info: () => ({ id: "session-chat", mode: "chat" }),
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      working: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+    })
+
+    await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+    await Bun.sleep(0)
+
+    expect(optimistic[0]?.message.agent).toBe("chat")
+    expect(promptInputs[0]).toMatchObject({ agent: "chat" })
   })
 
   test("includes the selected variant on optimistic prompts", async () => {

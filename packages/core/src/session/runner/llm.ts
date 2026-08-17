@@ -44,6 +44,14 @@ import { Snapshot } from "../../snapshot"
 import { makeLocationNode } from "../../effect/app-node"
 import { llmClient } from "../../effect/app-node-platform"
 
+const CHAT_TOOLS = new Set(["websearch", "webfetch"])
+const CHAT_SYSTEM_PROMPT = [
+  "You are in projectless Chat mode.",
+  "Answer general questions naturally without assuming that the user is asking about a repository.",
+  "You may use web search, web fetch, and explicitly connected MCP capabilities when available.",
+  "Do not inspect, modify, summarize, or reason from local project files, Git state, repository indexes, memories, or verification pipelines.",
+].join("\n")
+
 /**
  * Runs one durable coding-agent Session until it settles.
  *
@@ -186,8 +194,8 @@ const layer = Layer.effect(
     const continueAfterOverflowCompaction = (step: number) =>
       new TurnTransitionError({ _tag: "ContinueAfterOverflowCompaction", step })
 
-    const loadSystemContext = (agent: AgentV2.Selection) =>
-      Effect.all([systemContext.load(), skillGuidance.load(agent), referenceGuidance.load()], {
+    const loadSystemContext = (agent: AgentV2.Selection, chat: boolean) =>
+      Effect.all([systemContext.load(), ...(chat ? [] : [skillGuidance.load(agent), referenceGuidance.load()])], {
         concurrency: "unbounded",
       }).pipe(Effect.map(SystemContext.combine))
 
@@ -202,7 +210,8 @@ const layer = Layer.effect(
       if (session.location.directory !== location.directory || session.location.workspaceID !== location.workspaceID)
         return yield* Effect.interrupt
       const agent = yield* agents.select(session.agent)
-      const initialized = yield* SessionContextEpoch.initialize(db, loadSystemContext(agent), session.id)
+      const chat = session.mode === "chat"
+      const initialized = yield* SessionContextEpoch.initialize(db, loadSystemContext(agent, chat), session.id)
       const toolFibers = yield* FiberSet.make<void, ToolOutputStore.Error>()
       let needsContinuation = false
       let currentStep = step
@@ -217,7 +226,7 @@ const layer = Layer.effect(
         if (promoted > 0) currentStep = 1
       }
       const system =
-        initialized ?? (yield* SessionContextEpoch.prepare(db, events, loadSystemContext(agent), session.id))
+        initialized ?? (yield* SessionContextEpoch.prepare(db, events, loadSystemContext(agent, chat), session.id))
       const model = yield* models.resolve(session)
       const entries = yield* SessionHistory.entriesForRunner(db, session.id, system.baselineSeq)
       const context = entries.map((entry) => entry.message)
@@ -229,12 +238,12 @@ const layer = Layer.effect(
       const responseControl = [
         responseLanguageInstruction,
         ResponseRepetition.instruction,
-        RepositoryContextRouter.searchScopeInstruction,
+        chat ? undefined : RepositoryContextRouter.searchScopeInstruction,
       ]
         .filter((part): part is string => part !== undefined)
         .join("\n")
       const routed =
-        latestUser?.type === "user"
+        !chat && latestUser?.type === "user"
           ? yield* repositoryContextRouter
               .route({
                 query: latestUser.text,
@@ -254,12 +263,17 @@ const layer = Layer.effect(
               )
           : undefined
       const isLastStep = agent.info?.steps !== undefined && currentStep >= agent.info.steps
-      const toolMaterialization = isLastStep ? undefined : yield* tools.materialize(agent.info?.permissions)
+      const toolMaterialization = isLastStep
+        ? undefined
+        : yield* tools.materialize(
+            agent.info?.permissions,
+            chat ? { include: (name) => CHAT_TOOLS.has(name) } : undefined,
+          )
       const promptCacheKey = /^ses_[0-9a-f]{64}$/.test(session.id) ? session.id.slice(4) : session.id
       const request = LLM.request({
         model,
         providerOptions: { openai: { promptCacheKey } },
-        system: [responseControl, agent.info?.system, system.baseline, routed?.text]
+        system: [responseControl, chat ? CHAT_SYSTEM_PROMPT : agent.info?.system, system.baseline, routed?.text]
           .filter((part): part is string => part !== undefined && part.length > 0)
           .map(SystemPart.make),
         messages: [...toLLMMessages(context, model), ...(isLastStep ? [Message.assistant(MAX_STEPS_PROMPT)] : [])],

@@ -8,9 +8,26 @@ import {
   newLayoutDesignsDefault,
   nextSunsetCheckDelay,
   resolveNewLayoutDesigns,
+  showReasoningSummariesDefault,
   shouldDisplayTabsToast,
   shouldEnableNewLayout,
+  webSearchDefaults,
 } from "./settings"
+
+test("agent thoughts are visible by default", () => {
+  expect(showReasoningSummariesDefault).toBe(true)
+})
+
+test("local Research Browser uses privacy-preserving defaults", () => {
+  expect(webSearchDefaults).toEqual({
+    enabled: true,
+    engine: "duckduckgo",
+    visibility: "background",
+    authenticatedPages: true,
+    privateNetwork: false,
+    externalFallback: false,
+  })
+})
 
 describe("agent visibility", () => {
   test("shows the picker for existing profiles and hides it for first-time installs", () => {

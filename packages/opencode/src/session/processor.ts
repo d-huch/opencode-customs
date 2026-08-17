@@ -954,11 +954,7 @@ const layer = Layer.effect(
                     Effect.forkChild,
                   )
                 : undefined
-            const request =
-              streamInput.agent.name === "chat"
-                ? { ...streamInput, tools: {}, toolChoice: "none" as const }
-                : streamInput
-            const stream = llm.stream(request)
+            const stream = llm.stream(streamInput)
 
             yield* stream.pipe(
               Stream.tap((event) => handleEvent(event)),

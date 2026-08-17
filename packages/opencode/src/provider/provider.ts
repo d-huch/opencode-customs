@@ -38,6 +38,12 @@ import {
   lmStudioReasoningVariants,
   probeLmStudio,
 } from "./lmstudio"
+import {
+  findLlamaServerModel,
+  llamaServerContextLimits,
+  llamaServerDiscoveredChatModels,
+  probeLlamaServer,
+} from "./llama-server"
 import { RepositoryEmbeddings } from "@opencode-ai/core/repository-embeddings"
 import { lmStudioEmbeddingProvider } from "@/local-agent-runtime/embeddings"
 
@@ -1111,9 +1117,10 @@ export function defaultModelIDs<T extends { models: Record<string, { id: string 
   return mapValues(providers, (item) => sort(Object.values(item.models))[0].id)
 }
 
-export function loadedLmStudioDefaultModelID<
-  T extends { models: Record<string, { id: string; api: { id: string } }> },
->(provider: T, probe: Awaited<ReturnType<typeof probeLmStudio>>) {
+export function loadedLmStudioDefaultModelID<T extends { models: Record<string, { id: string; api: { id: string } }> }>(
+  provider: T,
+  probe: Awaited<ReturnType<typeof probeLmStudio>>,
+) {
   return Object.values(provider.models).find((item) => {
     const local = findLmStudioModel(probe, item.api.id) ?? findLmStudioModel(probe, item.id)
     return local?.loaded === true && local.type === "llm"
@@ -1122,16 +1129,29 @@ export function loadedLmStudioDefaultModelID<
 
 export async function runtimeDefaultModelIDs(
   providers: Record<string, Info>,
-  input: { baseURL: unknown; apiKey: unknown },
+  input: {
+    baseURL: unknown
+    apiKey: unknown
+    llamaServer?: { baseURL: unknown; apiKey: unknown }
+  },
 ) {
   const defaults = defaultModelIDs(providers)
   const provider = providers.lmstudio
-  if (!provider) return defaults
-
-  delete defaults.lmstudio
-  const probe = await probeLmStudio(input)
-  const modelID = loadedLmStudioDefaultModelID(provider, probe)
-  if (modelID) defaults.lmstudio = modelID
+  if (provider) {
+    delete defaults.lmstudio
+    const probe = await probeLmStudio(input)
+    const modelID = loadedLmStudioDefaultModelID(provider, probe)
+    if (modelID) defaults.lmstudio = modelID
+  }
+  const llama = providers["llama-server"]
+  if (llama && input.llamaServer) {
+    const probe = await probeLlamaServer(input.llamaServer)
+    const loaded = probe.models.find((model) => model.status === "loaded")
+    const modelID = Object.values(llama.models).find(
+      (model) => model.api.id === loaded?.id || model.id === loaded?.id,
+    )?.id
+    if (modelID) defaults["llama-server"] = modelID
+  }
   return defaults
 }
 
@@ -1482,7 +1502,19 @@ const layer = Layer.effect(
                   }),
                 )
               : undefined
-          const discoveredContextLimits = lmStudioContextLimits(lmStudioProbe)
+          const llamaServerProbe =
+            providerID === "llama-server"
+              ? yield* Effect.promise(() =>
+                  probeLlamaServer({
+                    baseURL: parsed.options.baseURL,
+                    apiKey: parsed.options.apiKey,
+                  }),
+                )
+              : undefined
+          const discoveredContextLimits = {
+            ...lmStudioContextLimits(lmStudioProbe),
+            ...llamaServerContextLimits(llamaServerProbe),
+          }
           const configuredModels = provider.models ?? {}
           const providerModels =
             providerID === "lmstudio"
@@ -1490,12 +1522,19 @@ const layer = Layer.effect(
                   ...lmStudioDiscoveredChatModels(lmStudioProbe, configuredModels),
                   ...configuredModels,
                 }
-              : configuredModels
+              : providerID === "llama-server"
+                ? {
+                    ...llamaServerDiscoveredChatModels(llamaServerProbe, configuredModels),
+                    ...configuredModels,
+                  }
+                : configuredModels
 
           for (const [modelID, model] of Object.entries(providerModels)) {
             const existingModel = parsed.models[model.id ?? modelID]
             const apiID = model.id ?? existingModel?.api.id ?? modelID
             const localModel = findLmStudioModel(lmStudioProbe, apiID) ?? findLmStudioModel(lmStudioProbe, modelID)
+            const llamaModel =
+              findLlamaServerModel(llamaServerProbe, apiID) ?? findLlamaServerModel(llamaServerProbe, modelID)
             const apiNpm =
               model.provider?.npm ??
               provider.npm ??
@@ -1517,10 +1556,7 @@ const layer = Layer.effect(
               providerID === "lmstudio" && model.preserve_context !== true
                 ? Math.max(
                     discoveredContextLimit,
-                    Math.min(
-                      UNKNOWN_CONTEXT_LIMIT,
-                      localModel?.context.supported ?? UNKNOWN_CONTEXT_LIMIT,
-                    ),
+                    Math.min(UNKNOWN_CONTEXT_LIMIT, localModel?.context.supported ?? UNKNOWN_CONTEXT_LIMIT),
                   )
                 : discoveredContextLimit
             const outputLimit =
@@ -1550,16 +1586,22 @@ const layer = Layer.effect(
                 attachment:
                   model.attachment ??
                   localModel?.capabilities.vision ??
+                  llamaModel?.modalities.input.includes("image") ??
                   existingModel?.capabilities.attachment ??
                   false,
                 toolcall:
-                  model.tool_call ?? localModel?.capabilities.tools ?? existingModel?.capabilities.toolcall ?? true,
+                  model.tool_call ??
+                  localModel?.capabilities.tools ??
+                  llamaModel?.capabilities.tools ??
+                  existingModel?.capabilities.toolcall ??
+                  true,
                 input: {
                   text: model.modalities?.input?.includes("text") ?? existingModel?.capabilities.input.text ?? true,
                   audio: model.modalities?.input?.includes("audio") ?? existingModel?.capabilities.input.audio ?? false,
                   image:
                     model.modalities?.input?.includes("image") ??
                     localModel?.capabilities.vision ??
+                    llamaModel?.modalities.input.includes("image") ??
                     existingModel?.capabilities.input.image ??
                     false,
                   video: model.modalities?.input?.includes("video") ?? existingModel?.capabilities.input.video ?? false,

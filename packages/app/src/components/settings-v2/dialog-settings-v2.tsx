@@ -15,6 +15,8 @@ import { SettingsPersonalizationV2 } from "./personalization"
 import { useLayout } from "@/context/layout"
 import { useTabs } from "@/context/tabs"
 import { useServerSync } from "@/context/server-sync"
+import { SettingsWebSearchV2 } from "./web-search"
+import { SettingsAvatarBridgeV2 } from "./avatar-bridge"
 
 export const DialogSettings: Component<{
   sessionID?: string
@@ -70,6 +72,14 @@ export const DialogSettings: Component<{
                       <Icon name="speaker" />
                       {language.t("settings.tab.voice")}
                     </TabsV2.Trigger>
+                    <TabsV2.Trigger value="web-search" data-action="settings-web-search-tab">
+                      <Icon name="glasses" />
+                      {language.t("settings.tab.webSearch")}
+                    </TabsV2.Trigger>
+                    <TabsV2.Trigger value="avatar-bridge" data-action="settings-avatar-bridge-tab">
+                      <Icon name="status" />
+                      {language.t("settings.tab.avatarBridge")}
+                    </TabsV2.Trigger>
                     <TabsV2.Trigger value="shortcuts">
                       <Icon name="keyboard" />
                       {language.t("settings.tab.shortcuts")}
@@ -110,6 +120,12 @@ export const DialogSettings: Component<{
         </TabsV2.Content>
         <TabsV2.Content value="voice" class="settings-v2-panel">
           <SettingsVoiceV2 sessionID={props.sessionID} />
+        </TabsV2.Content>
+        <TabsV2.Content value="web-search" class="settings-v2-panel">
+          <SettingsWebSearchV2 />
+        </TabsV2.Content>
+        <TabsV2.Content value="avatar-bridge" class="settings-v2-panel">
+          <SettingsAvatarBridgeV2 />
         </TabsV2.Content>
         <TabsV2.Content value="shortcuts" class="settings-v2-panel">
           <SettingsKeybinds v2 />

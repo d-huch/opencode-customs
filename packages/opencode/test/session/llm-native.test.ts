@@ -629,6 +629,246 @@ describe("session.llm-native.request", () => {
     }),
   )
 
+  it.effect("falls back immediately when LM Studio rejects a stateful Qwen continuation", () =>
+    Effect.gen(function* () {
+      const captures: Array<{
+        route: string
+        system: readonly unknown[]
+        messages: readonly unknown[]
+        providerOptions: unknown
+      }> = []
+      const remembered: string[] = []
+      const llmClient = {
+        prepare: () => Effect.die("unused"),
+        stream: (request: Parameters<LLMClientShape["stream"]>[0]) => {
+          captures.push({
+            route: request.model.route.id,
+            system: request.system,
+            messages: request.messages,
+            providerOptions: request.providerOptions,
+          })
+          if (request.model.route.id === "openai-responses")
+            return Stream.fail(new Error("Jinja Exception: System message must be at the beginning."))
+          return Stream.make(LLMEvent.finish({ reason: "stop" }))
+        },
+        generate: () => Effect.die("unused"),
+      } as LLMClientShape
+      const model = {
+        ...baseModel,
+        id: ModelV2.ID.make("qwen-27b"),
+        providerID: ProviderV2.ID.make("lmstudio"),
+        api: {
+          ...baseModel.api,
+          id: "qwen/qwen3.8-27b",
+          url: "http://127.0.0.1:1234/v1",
+          npm: "@ai-sdk/openai-compatible",
+        },
+      } satisfies Provider.Model
+      const runtimeInput = {
+        model,
+        provider: {
+          ...providerInfo,
+          id: ProviderV2.ID.make("lmstudio"),
+          options: { baseURL: "http://127.0.0.1:1234/v1" },
+        },
+        auth: undefined,
+        llmClient,
+        messages: [
+          { role: "system", content: "You are OpenCode Customs in Chat mode." },
+          { role: "user", content: "Як тебе звати?" },
+          { role: "assistant", content: "Віталік." },
+          { role: "user", content: "Скільки мені років?" },
+        ],
+        continuationMessages: [{ role: "user", content: "Скільки мені років?" }],
+        tools: {},
+        headers: {},
+        abort: new AbortController().signal,
+        statefulResponses: true,
+        previousResponseID: "resp_1",
+        previousSystemFingerprint: "system_1",
+        systemFingerprint: "system_1",
+      } satisfies Parameters<typeof LLMNativeRuntime.stream>[0]
+      const native = LLMNativeRuntime.stream({
+        ...runtimeInput,
+        resolveChatTransport: async () => ({ transport: "responses" as const }),
+        rememberChatFallback: async (_identity, reason) => {
+          remembered.push(reason)
+        },
+      })
+      expect(native.type).toBe("supported")
+      if (native.type === "unsupported") throw new Error(native.reason)
+
+      const events = Array.from(yield* native.stream.pipe(Stream.runCollect))
+
+      expect(captures).toHaveLength(2)
+      expect(captures[0]).toMatchObject({
+        route: "openai-responses",
+        system: [],
+        messages: [{ role: "user", content: [{ type: "text", text: "Скільки мені років?" }] }],
+        providerOptions: { openai: { store: true, previousResponseId: "resp_1" } },
+      })
+      expect(captures[1]).toMatchObject({
+        route: "openai-compatible-chat",
+        system: [{ type: "text", text: "You are OpenCode Customs in Chat mode." }],
+      })
+      expect(remembered).toEqual(["system_message_position"])
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: "finish",
+          providerMetadata: {
+            opencode: {
+              chatTransport: "chat_completions",
+              chatSystemFingerprint: "system_1",
+              chatFallbackReason: "system_message_position",
+            },
+          },
+        }),
+      )
+
+      captures.length = 0
+      const cached = LLMNativeRuntime.stream({
+        ...runtimeInput,
+        resolveChatTransport: async () => ({
+          transport: "chat_completions" as const,
+          reason: "system_message_position" as const,
+          expiresAt: Date.now() + 1_000,
+        }),
+      })
+      expect(cached.type).toBe("supported")
+      if (cached.type === "unsupported") throw new Error(cached.reason)
+      yield* cached.stream.pipe(Stream.runDrain)
+
+      expect(captures).toHaveLength(1)
+      expect(captures[0]?.route).toBe("openai-compatible-chat")
+    }),
+  )
+
+  it.effect("falls back after lifecycle events when LM Studio emits a deterministic provider error", () =>
+    Effect.gen(function* () {
+      const routes: string[] = []
+      const remembered: string[] = []
+      const llmClient = {
+        prepare: () => Effect.die("unused"),
+        stream: (request: Parameters<LLMClientShape["stream"]>[0]) => {
+          routes.push(request.model.route.id)
+          if (request.model.route.id === "openai-responses")
+            return Stream.fromIterable([
+              LLMEvent.stepStart({ index: 0 }),
+              LLMEvent.providerError({ message: "invalid_union: Invalid type for 'input'." }),
+            ])
+          return Stream.make(LLMEvent.finish({ reason: "stop" }))
+        },
+        generate: () => Effect.die("unused"),
+      } as LLMClientShape
+      const native = LLMNativeRuntime.stream({
+        model: {
+          ...baseModel,
+          id: ModelV2.ID.make("qwen-27b"),
+          providerID: ProviderV2.ID.make("lmstudio"),
+          api: {
+            ...baseModel.api,
+            id: "qwen/qwen3.8-27b",
+            url: "http://127.0.0.1:1234/v1",
+            npm: "@ai-sdk/openai-compatible",
+          },
+        },
+        provider: {
+          ...providerInfo,
+          id: ProviderV2.ID.make("lmstudio"),
+          options: { baseURL: "http://127.0.0.1:1234/v1" },
+        },
+        auth: undefined,
+        llmClient,
+        messages: [{ role: "user", content: "Скільки мені років?" }],
+        tools: {},
+        headers: {},
+        abort: new AbortController().signal,
+        statefulResponses: true,
+        resolveChatTransport: async () => ({ transport: "responses" as const }),
+        rememberChatFallback: async (_identity, reason) => {
+          remembered.push(reason)
+        },
+      })
+      expect(native.type).toBe("supported")
+      if (native.type === "unsupported") throw new Error(native.reason)
+
+      const events = Array.from(yield* native.stream.pipe(Stream.runCollect))
+
+      expect(routes).toEqual(["openai-responses", "openai-compatible-chat"])
+      expect(remembered).toEqual(["invalid_responses_input"])
+      expect(events.at(-1)?.type).toBe("finish")
+    }),
+  )
+
+  it.effect("does not retry LM Studio after visible output or a tool call", () =>
+    Effect.gen(function* () {
+      const committed = [
+        LLMEvent.textDelta({ id: "text_1", text: "часткова відповідь" }),
+        LLMEvent.toolCall({ id: "call_1", name: "lookup", input: {}, providerExecuted: true }),
+      ]
+
+      yield* Effect.forEach(
+        committed,
+        (output) =>
+          Effect.gen(function* () {
+            const routes: string[] = []
+            const remembered: string[] = []
+            const llmClient = {
+              prepare: () => Effect.die("unused"),
+              stream: (request: Parameters<LLMClientShape["stream"]>[0]) => {
+                routes.push(request.model.route.id)
+                return Stream.fromIterable([
+                  output,
+                  LLMEvent.providerError({ message: "invalid_union: Invalid type for 'input'." }),
+                ])
+              },
+              generate: () => Effect.die("unused"),
+            } as LLMClientShape
+            const native = LLMNativeRuntime.stream({
+              model: {
+                ...baseModel,
+                id: ModelV2.ID.make("qwen-27b"),
+                providerID: ProviderV2.ID.make("lmstudio"),
+                api: {
+                  ...baseModel.api,
+                  id: "qwen/qwen3.8-27b",
+                  url: "http://127.0.0.1:1234/v1",
+                  npm: "@ai-sdk/openai-compatible",
+                },
+              },
+              provider: {
+                ...providerInfo,
+                id: ProviderV2.ID.make("lmstudio"),
+                options: { baseURL: "http://127.0.0.1:1234/v1" },
+              },
+              auth: undefined,
+              llmClient,
+              messages: [{ role: "user", content: "test" }],
+              tools: {},
+              headers: {},
+              abort: new AbortController().signal,
+              statefulResponses: true,
+              resolveChatTransport: async () => ({ transport: "responses" as const }),
+              rememberChatFallback: async (_identity, reason) => {
+                remembered.push(reason)
+              },
+            })
+            expect(native.type).toBe("supported")
+            if (native.type === "unsupported") throw new Error(native.reason)
+
+            const events = Array.from(yield* native.stream.pipe(Stream.runCollect))
+
+            expect(routes).toEqual(["openai-responses"])
+            expect(remembered).toEqual([])
+            expect(events.at(-1)).toEqual(
+              LLMEvent.providerError({ message: "invalid_union: Invalid type for 'input'." }),
+            )
+          }),
+        { discard: true },
+      )
+    }),
+  )
+
   it.effect("compiles through the native OpenAI Responses route", () =>
     expectOpenAIResponsesRequest({
       history: [storedSession.user("hello")],

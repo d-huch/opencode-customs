@@ -39,6 +39,30 @@ export type VoiceDiagnosticInput = {
   diagnostics?: Record<string, string | number | boolean | null | undefined>
 }
 export type VoiceDiagnosticEntry = VoiceDiagnosticInput & { timestamp: string }
+export type ResearchBrowserStatus = {
+  available: boolean
+  phase: "idle" | "searching" | "reading" | "waiting_user" | "requires_user" | "failed"
+  engine: "duckduckgo" | "google" | "bing"
+  visible: boolean
+  query?: string
+  url?: string
+  domain?: string
+  resultCount?: number
+  message?: string
+}
+export type AvatarBridgeStatus = {
+  available: boolean
+  protocol: number
+  url?: string
+  token?: string
+  message?: string
+  connectedClients: Array<{
+    clientID: string
+    characterID: string
+    sessionID?: string
+    actions: string[]
+  }>
+}
 
 export type FatalRendererErrorLog = {
   error: string
@@ -102,9 +126,6 @@ type PlatformBase = {
 
   /** Set the default server URL to use on app startup (platform-specific) */
   setDefaultServer?(url: ServerConnection.Key | null): Promise<void> | void
-
-  /** Create and return the dedicated repository-free chat workspace (desktop only) */
-  ensureChatWorkspace?(): Promise<string>
 
   /** Manage WSL sidecar servers (Electron on Windows only) */
   wslServers?: WslServersPlatform
@@ -275,6 +296,18 @@ type PlatformBase = {
     sessionID: string,
     turnID: string,
   ): Promise<{ path: string; contentType: string; audio: ArrayBuffer } | undefined>
+
+  /** Inspect the local read-only Research Browser. */
+  getResearchBrowserStatus?(): Promise<ResearchBrowserStatus>
+
+  /** Show and focus the local Research Browser window. */
+  showResearchBrowser?(): Promise<void>
+
+  /** Clear cookies, storage, and cache in the dedicated Research Browser profile. */
+  clearResearchBrowserData?(): Promise<void>
+
+  /** Inspect the loopback-only Unity/VR Avatar Bridge and retrieve its pairing data. */
+  getAvatarBridgeStatus?(): Promise<AvatarBridgeStatus>
 
   /** Export collected diagnostic logs (desktop only) */
   exportDebugLogs?(): Promise<string>

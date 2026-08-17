@@ -18,10 +18,13 @@ import type {
 
 type LegacyClient = OpencodeClient
 type LegacyFor = (directory?: string) => LegacyClient
+type SessionMode = "project" | "chat"
+type CompatibleSessionCreateInput = Parameters<SessionApi["create"]>[0] & { mode?: SessionMode }
 type CompatibleSessionApi = Omit<
   SessionApi,
-  "prompt" | "command" | "shell" | "compact" | "rename" | "archive" | "remove"
+  "create" | "prompt" | "command" | "shell" | "compact" | "rename" | "archive" | "remove"
 > & {
+  create: (input?: CompatibleSessionCreateInput) => ReturnType<SessionApi["create"]>
   prompt: (input: SessionPromptInput & LegacyPrompt) => Promise<SessionPromptOutput>
   command: (input: SessionCommandInput) => Promise<SessionCommandOutput>
   shell: (input: SessionShellInput & LegacyPrompt) => Promise<SessionShellOutput>
@@ -58,7 +61,7 @@ function mime(uri: string) {
   return match?.[1] ?? "application/octet-stream"
 }
 
-function sessionInfo(session: Session): SessionInfo {
+function sessionInfo(session: Session): SessionInfo & { mode?: SessionMode } {
   return {
     id: session.id,
     parentID: session.parentID,
@@ -74,6 +77,7 @@ function sessionInfo(session: Session): SessionInfo {
     time: session.time,
     title: session.title,
     location: { directory: session.directory, workspaceID: session.workspaceID },
+    mode: session.mode,
     subpath: session.path,
     revert: session.revert && {
       messageID: session.revert.messageID,
@@ -160,9 +164,10 @@ function createV1Api(input: CompatibleInput): CompatibleApi {
         })
         return { data: (result.data ?? []).map(sessionInfo), cursor: {} }
       },
-      async create(value?: Parameters<ServerApi["session"]["create"]>[0]) {
+      async create(value?: CompatibleSessionCreateInput) {
         const result = await legacy(value?.location ?? undefined).session.create({
           directory: directory(value?.location ?? undefined),
+          mode: value?.mode,
         })
         if (!result.data) throw new Error("Failed to create session")
         return sessionInfo(result.data)

@@ -1670,7 +1670,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                 </Button>
               </div>
               <div class="flex items-center gap-1.5 min-w-0 flex-1 h-7">
-                <Show when={!agentsLoading()}>
+                <Show when={props.controls.agents.visible && !agentsLoading()}>
                   <div
                     data-component="prompt-agent-control"
                     classList={{ "animate-in fade-in duration-300": agentsShouldFadeIn() }}

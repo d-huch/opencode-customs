@@ -93,6 +93,17 @@ describe("SessionV2.create", () => {
     }),
   )
 
+  it.effect("stores and reopens the projectless Chat mode in existing metadata", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionV2.Service
+      const created = yield* session.create({ location, mode: "chat" })
+
+      expect(created.mode).toBe("chat")
+      expect((yield* session.get(created.id)).mode).toBe("chat")
+      expect((yield* session.list()).find((item) => item.id === created.id)?.mode).toBe("chat")
+    }),
+  )
+
   it.effect("returns the existing Session when one ID is reused with different create arguments", () =>
     Effect.gen(function* () {
       const session = yield* SessionV2.Service

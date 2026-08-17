@@ -3,6 +3,7 @@ export * as SessionFreshness from "./freshness"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { Hash } from "@opencode-ai/core/util/hash"
 import { generateText } from "ai"
+import { ResearchBrowser } from "@opencode-ai/core/tool/research-browser"
 
 const CLASSIFIER_PROMPT = `You are an epistemic routing and durable-memory classifier. Route the latest genuine user request to exactly one execution scope.
 
@@ -23,14 +24,15 @@ Choose GLOBAL for personal identity, language, and general preferences. Choose C
 Do not answer the request. Do not infer a domain, language, framework, product, or project type. Output exactly:
 line 1: EXTERNAL, REPOSITORY, or LOCAL
 line 2: one short routing reason
-line 3: MEMORY or NO_MEMORY
+line 3: RESEARCH_DEPTH: quick or deep
+line 4: MEMORY or NO_MEMORY
 after MEMORY only:
-line 4: CATEGORY: identity, preference, constraint, decision, or context
-line 5: SCOPE: global, cross-project, project, session, or pattern
-line 6: TOPIC: a short stable semantic key
-line 7: CORRECTION: yes or no
-line 8: CONFIDENCE: a number from 0 to 1
-line 9: TEXT: one concise standalone memory in the user's language.`
+line 5: CATEGORY: identity, preference, constraint, decision, or context
+line 6: SCOPE: global, cross-project, project, session, or pattern
+line 7: TOPIC: a short stable semantic key
+line 8: CORRECTION: yes or no
+line 9: CONFIDENCE: a number from 0 to 1
+line 10: TEXT: one concise standalone memory in the user's language.`
 
 export type Scope = "external" | "repository" | "local"
 export type MemoryCategory = "identity" | "preference" | "constraint" | "decision" | "context"
@@ -41,6 +43,7 @@ export type Decision = {
   readonly required: boolean
   readonly reason: string
   readonly query: string
+  readonly researchDepth?: ResearchBrowser.Depth
   readonly source: "model" | "conservative"
   readonly memory?: string
   readonly memoryCategory?: MemoryCategory
@@ -56,10 +59,7 @@ export function classifierModel<T extends { readonly providerID: string; readonl
   readonly primary: T
   readonly utility: T | undefined
 }) {
-  if (
-    input.utility &&
-    (input.utility.providerID !== input.primary.providerID || input.utility.id !== input.primary.id)
-  )
+  if (input.utility && (input.utility.providerID !== input.primary.providerID || input.utility.id !== input.primary.id))
     return input.utility
   if (input.primary.providerID === "lmstudio") return
   return input.primary
@@ -71,7 +71,7 @@ const classifierCache = new Map<string, { readonly expires: number; readonly dec
 const CLASSIFIER_CACHE_MS = 2 * 60 * 1_000
 const CLASSIFIER_CACHE_SIZE = 64
 
-export function read(request: SessionV1.WithParts | undefined) {
+export function read(request: SessionV1.WithParts | undefined): Decision | undefined {
   const part = request?.parts.find(
     (item): item is SessionV1.TextPart =>
       item.type === "text" && (item.synthetic !== true || item.metadata?.compaction_continue === true),
@@ -89,6 +89,7 @@ export function read(request: SessionV1.WithParts | undefined) {
   if (stored.memoryConfidence !== undefined && typeof stored.memoryConfidence !== "number") return
   if (stored.memoryScope !== undefined && !memoryScopes.has(stored.memoryScope as MemoryScope)) return
   if (stored.memoryCorrection !== undefined && typeof stored.memoryCorrection !== "boolean") return
+  if (stored.researchDepth !== undefined && stored.researchDepth !== "quick" && stored.researchDepth !== "deep") return
   return stored as Decision
 }
 
@@ -204,6 +205,7 @@ export function parse(value: string, query: string): Decision {
   if (labelIndex < 0) return conservative(query)
   const label = lines[labelIndex]!.toUpperCase()
   const scope: Scope = label === "EXTERNAL" ? "external" : label === "REPOSITORY" ? "repository" : "local"
+  const depth = field(lines.slice(labelIndex + 1), "RESEARCH_DEPTH")?.toLocaleLowerCase()
   const memoryIndex = lines.findIndex((line, index) => index > labelIndex && /^(MEMORY|NO_MEMORY)$/i.test(line))
   const memoryLines = memoryIndex >= 0 ? lines.slice(memoryIndex + 1) : []
   const categoryValue = field(memoryLines, "CATEGORY")?.toLocaleLowerCase()
@@ -229,6 +231,7 @@ export function parse(value: string, query: string): Decision {
       : undefined
   const reason = lines
     .slice(labelIndex + 1, memoryIndex < 0 ? labelIndex + 2 : memoryIndex)
+    .filter((line) => !line.toUpperCase().startsWith("RESEARCH_DEPTH:"))
     .join(" ")
     .slice(0, 300)
   return {
@@ -242,6 +245,7 @@ export function parse(value: string, query: string): Decision {
           ? "Workspace evidence required"
           : "Request is locally answerable"),
     query: query.trim().slice(0, 1_000),
+    researchDepth: depth === "deep" ? "deep" : ResearchBrowser.inferDepth(query),
     source: "model",
     ...(memory
       ? {
@@ -269,6 +273,7 @@ export function conservative(request: string): Decision {
     required: false,
     reason: "Freshness classification was unavailable; no external tools were forced",
     query: request.trim().slice(0, 1_000),
+    researchDepth: ResearchBrowser.inferDepth(request),
     source: "conservative",
   }
 }
@@ -279,6 +284,23 @@ export function repository(request: string): Decision {
     required: false,
     reason: "The request includes an explicit workspace file",
     query: request.trim().slice(0, 1_000),
+    researchDepth: "quick",
+    source: "conservative",
+  }
+}
+
+export function heuristic(request: string): Decision | undefined {
+  const query = request.trim().slice(0, 1_000)
+  if (!query) return
+  // URLs are structural, language-independent evidence. Natural-language intent is
+  // deliberately left to the utility classifier or the primary model with web tools.
+  if (!/https?:\/\/[^\s]+/iu.test(query)) return
+  return {
+    scope: "external",
+    required: true,
+    reason: "The request includes an external source URL",
+    query,
+    researchDepth: ResearchBrowser.inferDepth(query),
     source: "conservative",
   }
 }
@@ -372,9 +394,9 @@ export function route<T>(input: {
 export function systemPrompt(decision: Decision | undefined, evidence: EvidenceState, unavailable: boolean) {
   if (!decision?.required) return
   if (unavailable)
-    return `External verification was required for this request but is unavailable or failed. Do not retry automatically. Do not provide exact or current factual claims from memory. Explain in the user's language that the facts could not be verified and state what source access is needed.`
+    return "External verification was required for this request but is unavailable or failed. Do not retry automatically. Do not provide exact or current factual claims from memory. Explain in the user's language that the facts could not be verified and state what source access is needed."
   if (evidence === "missing")
-    return `External evidence is required before answering this request. Call the websearch tool now, including in planning mode. Search for the user's actual subject, prefer current primary or authoritative sources, and never invent a source or URL. Do not inspect the workspace, print or propose shell commands, simulate a search in prose, or answer from model memory before the tool completes.`
+    return `External evidence is required before answering this request. Call the websearch tool now with type: "${decision.researchDepth === "deep" ? "deep" : "fast"}", including in planning mode. Search for the user's actual subject, prefer current primary or authoritative sources, and never invent a source or URL. Do not inspect the workspace, print or propose shell commands, simulate a search in prose, or answer from model memory before the tool completes.`
   return `External evidence was obtained for this request. Base concrete factual claims on the retrieved sources, prefer primary or authoritative sources, distinguish source-backed facts from inference, include direct source links in the user's language, and explicitly disclose anything the sources did not verify.`
 }
 

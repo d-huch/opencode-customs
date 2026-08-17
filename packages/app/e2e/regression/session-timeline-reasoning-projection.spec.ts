@@ -70,9 +70,17 @@ for (const profile of profiles) {
     await timeline.send(status("busy"), 150)
 
     await expect(page.locator('[data-timeline-row="Thinking"]')).toHaveCount(profile.thinking ? 1 : 0)
-    await expect(page.locator(`[data-timeline-part-id="${reasoningID}"]`)).toHaveCount(profile.body ? 1 : 0)
-    if (!profile.summaries && profile.reasoning.trim()) {
-      await expect(page.getByText("Inspecting stability", { exact: true })).toBeVisible()
+    const reasoning = page.locator(`[data-timeline-part-id="${reasoningID}"]`)
+    await expect(reasoning).toHaveCount(profile.body ? 1 : 0)
+    if (profile.body) {
+      const trigger = reasoning.locator('[data-slot="collapsible-trigger"]')
+      const content = reasoning.locator('[data-slot="reasoning-part-content"]')
+      await expect(trigger).toHaveAttribute("aria-expanded", "false")
+      await expect(content).toBeHidden()
+      await trigger.click()
+      await expect(trigger).toHaveAttribute("aria-expanded", "true")
+      await expect(content).toBeVisible()
+      await expect(content).toContainText("Inspecting stability")
     }
   })
 }

@@ -26,7 +26,7 @@ export type TimelineRowMap = {
     group: PartGroup
     previousAssistantPart: boolean
   }
-  Thinking: { userMessageID: string; reasoningHeading?: string; status: SessionStatus }
+  Thinking: { userMessageID: string; status: SessionStatus }
   Retry: { userMessageID: string }
   DiffSummary: { userMessageID: string; diffs: SummaryDiff[] }
   Error: { userMessageID: string; text: string }
@@ -195,15 +195,9 @@ export namespace Timeline {
     const activeStatus = ["busy", "provider_wait", "verifying", "repairing", "verified"].includes(status.type)
     const showThinking = status.type !== "busy" || (showReasoning ? assistantPartRefs.length === 0 : true)
     if (isActive && activeStatus && showThinking && !error) {
-      const heading = assistantMessages
-        .flatMap((message) => getMessageParts(message.id))
-        .map((part) => (part.type === "reasoning" && part.text ? reasoningHeading(part.text) : undefined))
-        .find((value): value is string => !!value)
-
       rows.push(
         new TimelineRow.Thinking({
           userMessageID: userMessage.id,
-          reasoningHeading: heading,
           status,
         }),
       )
@@ -234,41 +228,6 @@ export namespace Timeline {
     }
 
     return rows
-  }
-
-  function reasoningHeading(text: string) {
-    const markdown = text.replace(/\r\n?/g, "\n")
-    const html = markdown.match(/<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>/i)
-    if (html?.[1]) {
-      const value = cleanHeading(html[1].replace(/<[^>]+>/g, " "))
-      if (value) return value
-    }
-
-    const atx = markdown.match(/^\s{0,3}#{1,6}[ \t]+(.+?)(?:[ \t]+#+[ \t]*)?$/m)
-    if (atx?.[1]) {
-      const value = cleanHeading(atx[1])
-      if (value) return value
-    }
-
-    const setext = markdown.match(/^([^\n]+)\n(?:=+|-+)\s*$/m)
-    if (setext?.[1]) {
-      const value = cleanHeading(setext[1])
-      if (value) return value
-    }
-
-    const strong = markdown.match(/^\s*(?:\*\*|__)(.+?)(?:\*\*|__)\s*$/m)
-    if (strong?.[1]) {
-      const value = cleanHeading(strong[1])
-      if (value) return value
-    }
-  }
-
-  function cleanHeading(value: string) {
-    return value
-      .replace(/`([^`]+)`/g, "$1")
-      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
-      .replace(/[*_~]+/g, "")
-      .trim()
   }
 
   function unwrapErrorMessage(message: string) {

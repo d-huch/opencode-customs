@@ -94,6 +94,33 @@ describe("session freshness", () => {
     expect(SessionFreshness.classifierModel({ primary, utility: undefined })).toBe(primary)
   })
 
+  test("uses only structural, language-independent deterministic routing", () => {
+    expect(SessionFreshness.heuristic("Summarize https://example.com/current")).toMatchObject({
+      scope: "external",
+      required: true,
+      researchDepth: "quick",
+      source: "conservative",
+    })
+    expect(SessionFreshness.heuristic("Compare current options and verify sources")).toBeUndefined()
+    expect(SessionFreshness.heuristic("Перепиши це речення коротше")).toBeUndefined()
+  })
+
+  test("does not encode language phrases into the fallback router", () => {
+    expect(SessionFreshness.heuristic("По чому в Одесі рубероїд?")).toBeUndefined()
+    expect(SessionFreshness.heuristic("¿Cuánto cuesta hoy?")).toBeUndefined()
+    expect(SessionFreshness.heuristic("ราคาเท่าไหร่วันนี้")).toBeUndefined()
+  })
+
+  test("parses research depth and defaults old decisions to quick at prompt time", () => {
+    expect(SessionFreshness.parse("EXTERNAL\nCurrent facts\nRESEARCH_DEPTH: deep\nNO_MEMORY", "compare")).toMatchObject(
+      {
+        scope: "external",
+        researchDepth: "deep",
+      },
+    )
+    expect(SessionFreshness.systemPrompt(decision, "missing", false)).toContain('type: "fast"')
+  })
+
   test("persists and restores a decision on the genuine user text", () => {
     const part: SessionV1.TextPart = {
       id: PartID.make("prt_user"),

@@ -8,7 +8,6 @@ import type {
   Message,
   Part,
   Session,
-  SessionStatus,
   ToolPart,
   ToolState,
   UserMessage,
@@ -342,7 +341,7 @@ export function messageUpdated(info: Message) {
   return event("message.updated", { sessionID, info })
 }
 
-export function status(type: SessionStatus["type"], attempt = 1) {
+export function status(type: "idle" | "busy" | "retry", attempt = 1) {
   return event("session.status", {
     sessionID,
     status: type === "retry" ? { type, attempt, message: "Rate limited", next: 1700000010000 } : { type },

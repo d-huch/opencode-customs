@@ -20,6 +20,7 @@ import { pathKey } from "@/utils/path-key"
 export function createPromptInputController(input: {
   sessionKey: Accessor<string>
   sessionID: Accessor<string | undefined>
+  mode: Accessor<"project" | "chat">
   queryOptions: Pick<QueryOptionsApi, "agents" | "providers">
   model?: ModelSelection
 }) {
@@ -34,14 +35,15 @@ export function createPromptInputController(input: {
   const providersQuery = createQuery(() => input.queryOptions.providers(pathKey(sdk().directory)))
 
   return createMemo<PromptInputControls>(() => {
+    const chat = input.mode() === "chat"
     return {
       agents: {
-        available: sync().data.agent,
-        options: local.agent.list().map((agent) => agent.name),
-        current: local.agent.current()?.name ?? "",
-        loading: agentsQuery.isLoading,
-        visible: local.agent.visible(),
-        select: local.agent.set,
+        available: chat ? [] : sync().data.agent,
+        options: chat ? [] : local.agent.list().map((agent) => agent.name),
+        current: chat ? "chat" : (local.agent.current()?.name ?? ""),
+        loading: chat ? false : agentsQuery.isLoading,
+        visible: !chat && local.agent.visible(),
+        select: chat ? () => undefined : local.agent.set,
       },
       personalities: {
         options: local.personality.list().map((preset) => ({
@@ -56,7 +58,7 @@ export function createPromptInputController(input: {
         selection: input.model ?? local.model,
         paid: providers.paid().length > 0,
         loading:
-          (local.agent.visible() && agentsQuery.isLoading) ||
+          (!chat && local.agent.visible() && agentsQuery.isLoading) ||
           providersQuery.isLoading ||
           globalProvidersQuery.isLoading,
       },

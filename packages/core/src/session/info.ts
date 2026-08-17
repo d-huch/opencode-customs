@@ -10,8 +10,10 @@ import { SessionSchema } from "./schema"
 import { SessionTable } from "./sql"
 import { SessionMessage } from "./message"
 import { Snapshot } from "../snapshot"
+import path from "path"
 
 export function fromRow(row: typeof SessionTable.$inferSelect): SessionSchema.Info {
+  const legacyChat = new Set(["Default Project", "OpenCode Customs Chat"])
   return SessionSchema.Info.make({
     id: SessionSchema.ID.make(row.id),
     projectID: ProjectV2.ID.make(row.project_id),
@@ -39,6 +41,10 @@ export function fromRow(row: typeof SessionTable.$inferSelect): SessionSchema.In
       directory: AbsolutePath.make(row.directory),
       workspaceID: row.workspace_id ? WorkspaceV2.ID.make(row.workspace_id) : undefined,
     }),
+    mode:
+      row.metadata?.mode === "chat" || legacyChat.has(path.basename(path.normalize(row.directory)))
+        ? "chat"
+        : "project",
     subpath: row.path ? RelativePath.make(row.path) : undefined,
     revert: row.revert ? { ...row.revert, messageID: SessionMessage.ID.make(row.revert.messageID) } : undefined,
     time: {

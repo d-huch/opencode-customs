@@ -174,6 +174,7 @@ export type Session = {
   projectID: string
   workspaceID?: string
   directory: string
+  mode?: "project" | "chat"
   path?: string
   parentID?: string
   summary?: {
@@ -2232,6 +2233,7 @@ export type GlobalSession = {
   projectID: string
   workspaceID?: string
   directory: string
+  mode?: "project" | "chat"
   path?: string
   parentID?: string
   summary?: {
@@ -2340,6 +2342,7 @@ export type Path = {
   config: string
   worktree: string
   directory: string
+  chat?: string
 }
 
 export type VcsInfo = {
@@ -2578,6 +2581,41 @@ export type LmStudioProbe = {
       embeddings: boolean
     }
     visionCapabilitySource?: "native_capability" | "native_input" | "native_type"
+  }>
+  error?: string
+}
+
+export type LlamaServerProbe = {
+  provider: "llama-server"
+  status: "unconfigured" | "loading" | "ready" | "degraded" | "offline" | "unauthorized"
+  serverMode: "single" | "router" | "unknown"
+  baseURL: string
+  checkedAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  latencyMs: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  api: {
+    health: boolean
+    openai: boolean
+    chatCompletions: boolean
+    router: boolean
+    props: boolean
+  }
+  models: Array<{
+    id: string
+    name: string
+    status: "loaded" | "loading" | "unloaded" | "sleeping" | "failed" | "unknown"
+    context: {
+      active?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      supported?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    }
+    sizeBytes?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    parameters?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    modalities: {
+      input: Array<string>
+      output: Array<string>
+    }
+    capabilities: {
+      tools: boolean
+    }
   }>
   error?: string
 }
@@ -4181,6 +4219,7 @@ export type SessionV2Info = {
   }
   title: string
   location: LocationRef
+  mode?: "project" | "chat"
   subpath?: string
   revert?: RevertState
 }
@@ -9913,6 +9952,35 @@ export type ProviderLmstudioProbeResponses = {
 
 export type ProviderLmstudioProbeResponse = ProviderLmstudioProbeResponses[keyof ProviderLmstudioProbeResponses]
 
+export type ProviderLlamaServerProbeData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/provider/llama-server/probe"
+}
+
+export type ProviderLlamaServerProbeErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type ProviderLlamaServerProbeError = ProviderLlamaServerProbeErrors[keyof ProviderLlamaServerProbeErrors]
+
+export type ProviderLlamaServerProbeResponses = {
+  /**
+   * llama-server capability snapshot
+   */
+  200: LlamaServerProbe
+}
+
+export type ProviderLlamaServerProbeResponse =
+  ProviderLlamaServerProbeResponses[keyof ProviderLlamaServerProbeResponses]
+
 export type ProviderRuntimeResourcesData = {
   body?: never
   path?: never
@@ -10205,6 +10273,7 @@ export type SessionCreateData = {
     }
     permission?: PermissionRuleset
     workspaceID?: string
+    mode?: "project" | "chat"
   }
   path?: never
   query?: {
@@ -12316,6 +12385,7 @@ export type V2SessionCreateData = {
     agent?: string
     model?: ModelRef
     location?: LocationRef
+    mode?: "project" | "chat"
   }
   path?: never
   query?: never

@@ -1,8 +1,9 @@
-import path from "path"
 import type { ModelMessage } from "ai"
+import { Hash } from "@opencode-ai/core/util/hash"
 import { isRecord } from "@/util/record"
 import PROMPT_CHAT from "@/agent/prompt/chat.txt"
 import { providerContextBudget } from "@/local-agent-runtime/resource-governor"
+import { SessionMode } from "./mode"
 
 export namespace SessionChatMode {
   export const DIRECTORY = "OpenCode Customs Chat"
@@ -11,8 +12,8 @@ export namespace SessionChatMode {
 
   export const systemPrompt = PROMPT_CHAT
 
-  export function enabled(directory: string) {
-    return path.basename(path.normalize(directory)) === DIRECTORY
+  export function enabled(directory: string, mode?: SessionMode.Value, metadata?: Record<string, unknown>) {
+    return SessionMode.resolve({ mode, metadata, directory }) === "chat"
   }
 
   export function contextLimit(input: {
@@ -31,16 +32,28 @@ export namespace SessionChatMode {
     return Math.min(maximum, Math.max(minimum, Math.floor(configured ?? DEFAULT_CONTEXT_LIMIT)))
   }
 
-  export function tools<T>(_available: Record<string, T>) {
-    return {} as Record<string, T>
+  export function tools<T>(available: Record<string, T>) {
+    return Object.fromEntries(
+      Object.entries(available).filter(
+        ([id]) =>
+          id === "websearch" ||
+          id === "webfetch" ||
+          id === "avatar_control" ||
+          id === "list_mcp_resources" ||
+          id === "list_mcp_resource_templates" ||
+          id === "read_mcp_resource" ||
+          id.startsWith("mcp_"),
+      ),
+    ) as Record<string, T>
   }
 
   export function messages(messages: ModelMessage[], continued: boolean, summary?: string) {
+    const sanitized = sanitize(messages)
     if (continued) {
-      const current = messages.findLast((message) => message.role === "user")
+      const current = sanitized.findLast((message) => message.role === "user")
       return current ? [current] : []
     }
-    const tail = messages.slice(-8)
+    const tail = sanitized.slice(-8)
     const firstUser = tail.findIndex((message) => message.role === "user")
     const recent = firstUser < 0 ? tail : tail.slice(firstUser)
     if (!summary?.trim()) return recent
@@ -59,6 +72,8 @@ export namespace SessionChatMode {
         readonly id: string
         readonly role: string
         readonly summary?: unknown
+        readonly finish?: unknown
+        readonly error?: unknown
         readonly providerID?: string
         readonly modelID?: string
         readonly tokens?: {
@@ -78,6 +93,8 @@ export namespace SessionChatMode {
       (message) =>
         message.info.role === "assistant" &&
         message.info.summary !== true &&
+        message.info.finish !== "error" &&
+        message.info.error === undefined &&
         message.info.providerID === model.providerID &&
         message.info.modelID === model.id,
     )
@@ -87,18 +104,35 @@ export namespace SessionChatMode {
     const providerTokens = tokens ? tokens.input + tokens.output + tokens.reasoning + cachedTokens : 0
     const budget = providerContextBudget({ contextLimit, providerTokens, cachedTokens, currentTokens })
     if (!text || !isRecord(text.metadata))
-      return { messageID: assistant?.info.id, providerTokens, cachedTokens, reason: "missing_response_metadata" as const }
+      return {
+        messageID: assistant?.info.id,
+        providerTokens,
+        cachedTokens,
+        reason: "missing_response_metadata" as const,
+      }
     const openai = text.metadata.openai
     if (!isRecord(openai) || typeof openai.responseId !== "string")
       return { messageID: assistant?.info.id, providerTokens, cachedTokens, reason: "missing_response_id" as const }
     const opencode = text.metadata.opencode
     if (!isRecord(opencode) || typeof opencode.chatContextLimit !== "number")
       return { messageID: assistant?.info.id, providerTokens, cachedTokens, reason: "unversioned_chain" as const }
+    if (typeof opencode.chatSystemFingerprint !== "string")
+      return { messageID: assistant?.info.id, providerTokens, cachedTokens, reason: "unversioned_chain" as const }
     if (opencode.chatContextLimit !== contextLimit)
       return { messageID: assistant?.info.id, providerTokens, cachedTokens, reason: "context_changed" as const }
     if (!budget.allowed)
       return { messageID: assistant?.info.id, providerTokens, cachedTokens, reason: "context_exhausted" as const }
-    return { messageID: assistant?.info.id, previousResponseID: openai.responseId, providerTokens, cachedTokens }
+    return {
+      messageID: assistant?.info.id,
+      previousResponseID: openai.responseId,
+      systemFingerprint: opencode.chatSystemFingerprint,
+      providerTokens,
+      cachedTokens,
+    }
+  }
+
+  export function systemFingerprint(system: readonly string[]) {
+    return Hash.fast(JSON.stringify(system))
   }
 
   export function requiresCompaction(
@@ -113,4 +147,26 @@ export namespace SessionChatMode {
         (!summaryMessageID || summaryMessageID.localeCompare(chain.messageID) <= 0),
     )
   }
+}
+
+function sanitize(messages: ModelMessage[]) {
+  return messages.flatMap((message): ModelMessage[] => {
+    if (message.role === "system") return []
+    if (!Array.isArray(message.content)) return [stripProviderState(message)]
+    const content = message.content.filter(
+      (part) => part.type !== "reasoning" && (!("providerExecuted" in part) || part.providerExecuted !== true),
+    )
+    if (content.length === 0) return []
+    return [stripProviderState({ ...message, content } as ModelMessage)]
+  })
+}
+
+function stripProviderState<T>(value: T): T {
+  if (Array.isArray(value)) return value.map(stripProviderState) as T
+  if (!isRecord(value)) return value
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => key !== "providerMetadata" && key !== "providerOptions")
+      .map(([key, item]) => [key, stripProviderState(item)]),
+  ) as T
 }

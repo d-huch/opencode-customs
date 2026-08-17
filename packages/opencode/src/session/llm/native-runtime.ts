@@ -18,6 +18,8 @@ import {
 } from "@opencode-ai/llm"
 import type { LLMClientShape } from "@opencode-ai/llm/route"
 import { LLMNative } from "./native-request"
+import { LmStudioChatTransport } from "@/local-agent-runtime/lmstudio-chat-transport"
+import { SessionLog } from "@/local-agent-runtime/session-log"
 
 export type RuntimeStatus =
   | { readonly type: "supported"; readonly apiKey: string; readonly baseURL?: string }
@@ -32,6 +34,7 @@ type StreamInput = {
   readonly auth: Auth.Info | undefined
   readonly llmClient: LLMClientShape
   readonly messages: ModelMessage[]
+  readonly continuationMessages?: ModelMessage[]
   readonly tools: Record<string, Tool>
   readonly toolChoice?: "auto" | "required" | "none"
   readonly temperature?: number
@@ -43,6 +46,11 @@ type StreamInput = {
   readonly abort: AbortSignal
   readonly statefulResponses?: boolean
   readonly previousResponseID?: string
+  readonly previousSystemFingerprint?: string
+  readonly systemFingerprint?: string
+  readonly sessionID?: string
+  readonly resolveChatTransport?: typeof LmStudioChatTransport.resolve
+  readonly rememberChatFallback?: typeof LmStudioChatTransport.rememberFallback
 }
 
 export function status(
@@ -57,12 +65,7 @@ function statusWithFetch(
 ): RuntimeStatus {
   const providerID = input.model.providerID
   const lmStudioResponses = input.statefulResponses === true && providerID === "lmstudio"
-  if (
-    !lmStudioResponses &&
-    providerID !== "openai" &&
-    providerID !== "anthropic" &&
-    !providerID.startsWith("opencode")
-  )
+  if (!lmStudioResponses && providerID !== "openai" && providerID !== "anthropic" && !providerID.startsWith("opencode"))
     return { type: "unsupported", reason: "provider is not openai, opencode, or anthropic" }
   const npm = input.model.api.npm
   if (npm !== "@ai-sdk/openai" && npm !== "@ai-sdk/openai-compatible" && npm !== "@ai-sdk/anthropic")
@@ -101,67 +104,174 @@ export function stream(input: StreamInput): StreamResult {
   // translation belongs here, not split across both packages.
   const tools = nativeTools(input.tools, input)
   const openai = isRecord(input.providerOptions?.openai) ? input.providerOptions.openai : {}
-  const request = LLMNative.request({
-    model: input.model,
-    apiKey: current.apiKey,
-    baseURL: current.baseURL,
-    messages: ProviderTransform.message(input.messages, input.model, input.providerOptions ?? {}),
-    toolChoice: input.toolChoice,
-    temperature: input.temperature,
-    topP: input.topP,
-    topK: input.topK,
-    maxOutputTokens: input.maxOutputTokens,
-    providerOptions: input.statefulResponses
-      ? {
-          ...ProviderTransform.providerOptions(input.model, input.providerOptions ?? {}),
-          openai: {
-            ...openai,
-            store: true,
-            ...(input.previousResponseID ? { previousResponseId: input.previousResponseID } : {}),
-          },
-        }
-      : ProviderTransform.providerOptions(input.model, input.providerOptions ?? {}),
-    headers: { ...providerHeaders(input.provider.options.headers), ...input.headers },
-    responses: input.statefulResponses,
-  })
-  const stream = Stream.scoped(
-    Stream.unwrap(
-      Effect.gen(function* () {
-        const settlements = yield* FiberSet.make<void>()
-        const results = yield* Queue.unbounded<LLMEvent, Cause.Done>()
-        const provider = input.llmClient
-          .stream(
-            LLMRequest.update(request, {
-              tools: [...request.tools, ...toDefinitions(tools)],
-            }),
-          )
-          .pipe(
-            Stream.flatMap((event) =>
-              event.type !== "tool-call" || event.providerExecuted
-                ? Stream.make(event)
-                : Stream.make(event).pipe(
-                    Stream.concat(
-                      Stream.fromEffectDrain(
-                        ToolRuntime.dispatch(tools, event).pipe(
-                          Effect.flatMap((dispatched) => Queue.offerAll(results, dispatched.events)),
-                          Effect.catchCause((cause) => Queue.failCause(results, cause)),
-                          Effect.asVoid,
-                          FiberSet.run(settlements, { startImmediately: true }),
+  const providerOptions = ProviderTransform.providerOptions(input.model, input.providerOptions ?? {})
+  const makeRequest = (messages: ModelMessage[], responses: boolean, previousResponseID?: string) =>
+    LLMNative.request({
+      model: input.model,
+      apiKey: current.apiKey,
+      baseURL: current.baseURL,
+      messages: ProviderTransform.message(messages, input.model, input.providerOptions ?? {}),
+      toolChoice: input.toolChoice,
+      temperature: input.temperature,
+      topP: input.topP,
+      topK: input.topK,
+      maxOutputTokens: input.maxOutputTokens,
+      providerOptions: responses
+        ? {
+            ...providerOptions,
+            openai: {
+              ...openai,
+              store: true,
+              ...(previousResponseID ? { previousResponseId: previousResponseID } : {}),
+            },
+          }
+        : providerOptions,
+      headers: { ...providerHeaders(input.provider.options.headers), ...input.headers },
+      responses,
+    })
+  const execute = (request: LLMRequest) =>
+    Stream.scoped(
+      Stream.unwrap(
+        Effect.gen(function* () {
+          const settlements = yield* FiberSet.make<void>()
+          const results = yield* Queue.unbounded<LLMEvent, Cause.Done>()
+          const provider = input.llmClient
+            .stream(
+              LLMRequest.update(request, {
+                tools: [...request.tools, ...toDefinitions(tools)],
+              }),
+            )
+            .pipe(
+              Stream.flatMap((event) =>
+                event.type !== "tool-call" || event.providerExecuted
+                  ? Stream.make(event)
+                  : Stream.make(event).pipe(
+                      Stream.concat(
+                        Stream.fromEffectDrain(
+                          ToolRuntime.dispatch(tools, event).pipe(
+                            Effect.flatMap((dispatched) => Queue.offerAll(results, dispatched.events)),
+                            Effect.catchCause((cause) => Queue.failCause(results, cause)),
+                            Effect.asVoid,
+                            FiberSet.run(settlements, { startImmediately: true }),
+                          ),
                         ),
                       ),
                     ),
-                  ),
-            ),
-            Stream.concat(
-              Stream.fromEffectDrain(
-                FiberSet.awaitEmpty(settlements).pipe(Effect.andThen(Queue.end(results)), Effect.asVoid),
               ),
-            ),
-          )
-        return provider.pipe(Stream.concat(Stream.fromQueue(results)))
+              Stream.concat(
+                Stream.fromEffectDrain(
+                  FiberSet.awaitEmpty(settlements).pipe(Effect.andThen(Queue.end(results)), Effect.asVoid),
+                ),
+              ),
+            )
+          return provider.pipe(Stream.concat(Stream.fromQueue(results)))
+        }),
+      ),
+    )
+  const annotate = (
+    source: Stream.Stream<LLMEvent, unknown>,
+    transport: "responses" | "chat_completions",
+    reason?: LmStudioChatTransport.FallbackReason,
+  ) =>
+    source.pipe(
+      Stream.map((event) => {
+        if (event.type !== "finish") return event
+        const metadata = event.providerMetadata?.opencode
+        return {
+          ...event,
+          providerMetadata: {
+            ...event.providerMetadata,
+            opencode: {
+              ...(isRecord(metadata) ? metadata : {}),
+              chatTransport: transport,
+              ...(input.systemFingerprint ? { chatSystemFingerprint: input.systemFingerprint } : {}),
+              ...(reason ? { chatFallbackReason: reason } : {}),
+            },
+          },
+        }
       }),
-    ),
-  )
+    )
+  const identity = LmStudioChatTransport.identity({
+    baseURL: current.baseURL ?? input.model.api.url,
+    modelID: input.model.id,
+    instanceID: input.model.api.id,
+  })
+  const chatRequest = makeRequest(input.messages, false)
+  const stream = input.statefulResponses
+    ? Stream.unwrap(
+        Effect.promise(() => (input.resolveChatTransport ?? LmStudioChatTransport.resolve)(identity)).pipe(
+          Effect.map((selected) => {
+            if (selected.transport === "chat_completions") {
+              if (input.sessionID)
+                void SessionLog.write({
+                  sessionID: input.sessionID,
+                  type: "provider.transport.cached_fallback",
+                  data: { ...identity, reason: selected.reason },
+                })
+              return annotate(execute(chatRequest), "chat_completions", selected.reason)
+            }
+
+            const continued =
+              Boolean(input.previousResponseID) &&
+              Boolean(input.systemFingerprint) &&
+              input.previousSystemFingerprint === input.systemFingerprint
+            const responsesRequest = makeRequest(
+              continued ? (input.continuationMessages ?? input.messages) : input.messages,
+              true,
+              continued ? input.previousResponseID : undefined,
+            )
+            if (input.sessionID)
+              void SessionLog.write({
+                sessionID: input.sessionID,
+                type: continued ? "provider.chain.continued" : "provider.chain.rebased",
+                data: { ...identity, systemFingerprint: input.systemFingerprint },
+              })
+
+            let committed = false
+            const primary = annotate(execute(responsesRequest), "responses").pipe(
+              Stream.tap((event) => {
+                if (
+                  event.type === "text-delta" ||
+                  event.type === "reasoning-delta" ||
+                  event.type === "tool-call" ||
+                  event.type === "tool-result" ||
+                  event.type === "tool-error"
+                ) {
+                  committed = true
+                  return Effect.void
+                }
+                if (event.type !== "provider-error") return Effect.void
+                const reason = LmStudioChatTransport.fallbackReason(event.message)
+                if (reason && !committed) return Effect.fail(new Error(`${reason}: ${event.message}`))
+                return Effect.void
+              }),
+            )
+            return primary.pipe(
+              Stream.catchCause((cause) => {
+                const reason = LmStudioChatTransport.fallbackReason(Cause.squash(cause))
+                if (!reason || committed) return Stream.failCause(cause)
+                let recorded = false
+                return annotate(execute(chatRequest), "chat_completions", reason).pipe(
+                  Stream.tap((event) => {
+                    if (recorded || event.type !== "finish") return Effect.void
+                    recorded = true
+                    return Effect.promise(async () => {
+                      await (input.rememberChatFallback ?? LmStudioChatTransport.rememberFallback)(identity, reason)
+                      if (!input.sessionID) return
+                      await SessionLog.write({
+                        sessionID: input.sessionID,
+                        type: "provider.transport.fallback",
+                        data: { ...identity, reason },
+                      })
+                    }).pipe(Effect.catchCause(() => Effect.void))
+                  }),
+                )
+              }),
+            )
+          }),
+        ),
+      )
+    : execute(chatRequest)
 
   return {
     ...current,

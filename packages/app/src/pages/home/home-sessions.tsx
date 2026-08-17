@@ -13,6 +13,7 @@ export function HomeSessions(props: {
       language={props.sessions.copy.language}
       groups={props.sessions.data.groups}
       showProjectName={props.sessions.session.showProjectName}
+      chat={props.sessions.session.chat}
       server={props.sessions.session.server}
       canCreateSession={props.sessions.session.canCreate}
       searchValue={props.search.query.value}

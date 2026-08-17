@@ -181,6 +181,7 @@ const layer = Layer.effect(
                 "*": "deny",
                 websearch: "allow",
                 webfetch: "allow",
+                avatar_control: "ask",
               }),
               user,
             ),

@@ -151,13 +151,15 @@ export function SessionHeader() {
   const { params, view } = useSessionLayout()
 
   const projectDirectory = createMemo(() => decode64(params.dir) ?? "")
-  const nonRepository = createMemo(() => isNonRepositoryDirectory(projectDirectory()))
+  const chat = createMemo(() => (params.id ? sync().session.get(params.id)?.mode === "chat" : false))
+  const nonRepository = createMemo(() => chat() || isNonRepositoryDirectory(projectDirectory()))
   const project = createMemo(() => {
     const directory = projectDirectory()
     if (!directory) return
     return layout.projects.list().find((p) => p.worktree === directory || p.sandboxes?.includes(directory))
   })
   const name = createMemo(() => {
+    if (chat()) return language.t("home.chat")
     const current = project()
     if (current) return current.name || getFilename(current.worktree)
     return getFilename(projectDirectory())

@@ -26,6 +26,7 @@ export type DraftTab = {
   server: ServerConnection.Key
   directory: string
   worktree?: string
+  mode?: "project" | "chat"
 }
 
 export type Tab = SessionTab | DraftTab

@@ -283,8 +283,6 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
       await window.api.setDefaultServerUrl(url)
     },
 
-    ensureChatWorkspace: () => window.api.ensureChatWorkspace(),
-
     wslServers: wslServersApi,
 
     getDisplayBackend: async () => {
@@ -342,6 +340,10 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
     exportVoiceDiagnostics: (sessionID) => window.api.exportVoiceDiagnostics(sessionID),
     storeVoiceTurnAudio: (input) => window.api.storeVoiceTurnAudio(input),
     getVoiceTurnAudio: (sessionID, turnID) => window.api.getVoiceTurnAudio(sessionID, turnID),
+    getResearchBrowserStatus: () => window.api.getResearchBrowserStatus(),
+    showResearchBrowser: () => window.api.showResearchBrowser(),
+    clearResearchBrowserData: () => window.api.clearResearchBrowserData(),
+    getAvatarBridgeStatus: () => window.api.getAvatarBridgeStatus(),
   }
 }
 
