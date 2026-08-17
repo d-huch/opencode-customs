@@ -1,0 +1,3 @@
+Create or update a bounded goal for the connected Unity/VR character. A goal may contain up to eight observable steps, stop conditions, a parent goal, and an explicit risk budget. It does not grant permission to bypass capability preconditions or the trusted autonomy profile.
+
+Observe before creating a goal. Mark steps as they start, complete, fail, or are skipped. Finish the goal with a machine-readable outcome and concise reason. Critical categories outside the game's trusted profile still require approval.

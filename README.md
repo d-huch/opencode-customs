@@ -152,6 +152,11 @@ model:
   baseline-versus-candidate reports.
 - A separate **Extensions** menu that discovers installed ChatGPT/Codex plugin bundles, exposes their skills to the
   agent, and starts enabled bundled MCP servers alongside native OpenCode plugins.
+- A Unity 6/PCVR/Quest Avatar Bridge v2.1 for a local embodied Jarvis. It streams bounded semantic world state,
+  exposes typed game capabilities instead of arbitrary Unity methods, maintains a nested goal stack and save-scoped
+  provenance-aware memory, routes conversational and planning turns to separate local models, and applies per-game
+  trusted autonomy profiles. The Jarvis Lab sample provides a vertical slice with NavMesh, inventory, crafting, a door,
+  NPC relationship, quest, training hazard, reconnect, and record/replay diagnostics.
 - Custom OpenCode Customs desktop branding and macOS application/Dock icons.
 - A desktop voice agent with push-to-talk dictation and a hands-free Jarvis conversation mode. A persistent local
   full-duplex stream uses WebRTC echo cancellation, a 1.5-second pre-roll buffer, VAD, and streaming Whisper STT. Tiny-model

@@ -1,0 +1,9 @@
+{
+  "name": "OpenCode.Customs.AvatarBridge",
+  "rootNamespace": "OpenCode.Customs.AvatarBridge",
+  "references": [
+    "Unity.AI.Navigation",
+    "Unity.Newtonsoft.Json"
+  ],
+  "autoReferenced": true
+}

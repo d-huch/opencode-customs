@@ -1,0 +1,9 @@
+{
+  "name": "OpenCode.Customs.AvatarBridge.PlayModeTests",
+  "rootNamespace": "OpenCode.Customs.AvatarBridge.Tests",
+  "references": [
+    "OpenCode.Customs.AvatarBridge"
+  ],
+  "precompiledReferences": ["Newtonsoft.Json.dll"],
+  "optionalUnityReferences": ["TestAssemblies"]
+}

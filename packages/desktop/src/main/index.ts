@@ -58,6 +58,7 @@ import { startBackgroundCli } from "./background-cli"
 import { setNativeTranslations } from "./native-translations"
 import { startResearchBrowser, type ResearchBrowserController } from "./research-browser"
 import { startAvatarBridge, type AvatarBridgeController } from "./avatar-bridge"
+import { synthesizeLocalSpeech } from "./local-tts"
 
 const APP_NAMES: Record<string, string> = {
   dev: "OpenCode Dev",
@@ -282,7 +283,13 @@ const main = Effect.gen(function* () {
     process.env.OPENCODE_RESEARCH_BROWSER_URL = researchBrowser.url
     process.env.OPENCODE_RESEARCH_BROWSER_TOKEN = researchBrowser.token
   }
-  avatarBridge = yield* Effect.promise(() => startAvatarBridge()).pipe(
+  avatarBridge = yield* Effect.promise(() =>
+    startAvatarBridge({
+      stateDirectory: join(app.getPath("userData"), "avatar-bridge"),
+      log: writeLog,
+      synthesize: synthesizeLocalSpeech,
+    }),
+  ).pipe(
     Effect.catch((error) =>
       Effect.sync(() => {
         logger.warn("failed to start Unity Avatar Bridge", error)
@@ -361,10 +368,25 @@ const main = Effect.gen(function* () {
     getAvatarBridgeStatus: () =>
       avatarBridge?.status() ?? {
         available: false,
-        protocol: 1,
+        protocol: 2,
         connectedClients: [],
         message: "Unity Avatar Bridge is unavailable",
       },
+    updateAvatarBridgeConfig: (input) =>
+      avatarBridge?.updateConfig(input) ?? Promise.reject(new Error("Unity Avatar Bridge is unavailable")),
+    startAvatarBridgePairing: () => {
+      if (!avatarBridge) throw new Error("Unity Avatar Bridge is unavailable")
+      return avatarBridge.startPairing()
+    },
+    revokeAvatarBridgeDevice: (id) =>
+      avatarBridge?.revokeDevice(id) ?? Promise.reject(new Error("Unity Avatar Bridge is unavailable")),
+    resolveAvatarBridgeApproval: (id, approved) => avatarBridge?.resolveApproval(id, approved) ?? false,
+    deleteAvatarBridgeMemory: (id) =>
+      avatarBridge?.deleteMemory(id) ?? Promise.reject(new Error("Unity Avatar Bridge is unavailable")),
+    updateAvatarBridgeMemory: (id, text) =>
+      avatarBridge?.updateMemory(id, text) ?? Promise.reject(new Error("Unity Avatar Bridge is unavailable")),
+    clearAvatarBridgeMemories: (filter) =>
+      avatarBridge?.clearMemories(filter) ?? Promise.reject(new Error("Unity Avatar Bridge is unavailable")),
     recordFatalRendererError: (error) => writeLog("renderer", "fatal renderer error", { ...error }, "error"),
     setNativeTranslations: (bundle) => {
       if (setNativeTranslations(bundle)) createMenu(menuDeps)

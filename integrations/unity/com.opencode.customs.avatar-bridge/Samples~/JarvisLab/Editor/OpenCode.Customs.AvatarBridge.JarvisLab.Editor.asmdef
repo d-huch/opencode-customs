@@ -1,0 +1,10 @@
+{
+  "name": "OpenCode.Customs.AvatarBridge.JarvisLab.Editor",
+  "rootNamespace": "OpenCode.Customs.AvatarBridge.JarvisLab.Editor",
+  "references": [
+    "OpenCode.Customs.AvatarBridge",
+    "OpenCode.Customs.AvatarBridge.JarvisLab",
+    "Unity.AI.Navigation"
+  ],
+  "includePlatforms": ["Editor"]
+}

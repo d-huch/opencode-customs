@@ -344,6 +344,13 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
     showResearchBrowser: () => window.api.showResearchBrowser(),
     clearResearchBrowserData: () => window.api.clearResearchBrowserData(),
     getAvatarBridgeStatus: () => window.api.getAvatarBridgeStatus(),
+    updateAvatarBridgeConfig: (input) => window.api.updateAvatarBridgeConfig(input),
+    startAvatarBridgePairing: () => window.api.startAvatarBridgePairing(),
+    revokeAvatarBridgeDevice: (id) => window.api.revokeAvatarBridgeDevice(id),
+    resolveAvatarBridgeApproval: (id, approved) => window.api.resolveAvatarBridgeApproval(id, approved),
+    deleteAvatarBridgeMemory: (id) => window.api.deleteAvatarBridgeMemory(id),
+    updateAvatarBridgeMemory: (id, text) => window.api.updateAvatarBridgeMemory(id, text),
+    clearAvatarBridgeMemories: (filter) => window.api.clearAvatarBridgeMemories(filter),
   }
 }
 

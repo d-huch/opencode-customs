@@ -43,7 +43,7 @@ const APP_IDS = {
 } as const
 
 const getBase = (appId: string): Configuration => ({
-  artifactName: "opencode-desktop-${os}-${arch}.${ext}",
+  artifactName: `${customIcons ? "opencode-customs" : "opencode-desktop"}-\${os}-\${arch}.\${ext}`,
   directories: {
     output: "dist",
     buildResources: "resources",

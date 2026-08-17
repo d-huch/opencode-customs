@@ -1,0 +1,3 @@
+Execute one typed capability exposed by the connected Unity/VR character.
+
+Use only an action ID and arguments from game_observe. Unity validates the schema, cooldown, preconditions, postconditions, side effects, cancellation, risk, cycle budget, and idempotency. Critical actions run automatically only when their permission category is trusted for this game. Re-observe when requested and replan instead of repeating the same failed action more than twice.

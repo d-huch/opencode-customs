@@ -35,6 +35,7 @@
     "drizzle-orm": "catalog:",
     "linkedom": "0.18.12",
     "msgpackr": "2.0.2",
+    "selfsigned": "5.5.0",
     "ws": "8.21.0"
   },
   "devDependencies": {

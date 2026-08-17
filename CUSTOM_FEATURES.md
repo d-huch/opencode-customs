@@ -1249,6 +1249,20 @@ a user-authored chat message. Automatic language mode follows the latest user re
 without unrequested language mixing. Personalization affects presentation and collaboration behavior only: it cannot
 override system or developer instructions, permissions, safety constraints, factual accuracy, or verification.
 
+## Local Jarvis and Unity/VR Avatar Bridge
+
+The Desktop main process hosts a loopback PCVR bridge and an optional pinned-WSS Quest bridge. Protocol v2.1 preserves
+v1/v2 compatibility while adding capability permission categories, postconditions, declared side effects, structured
+action outcomes, nested goals, repeated-failure replanning, and trusted critical categories scoped to a game. Unity owns
+NavMesh, physics, animation, preconditions, and persistent game effects; the model receives bounded semantic snapshots
+and can invoke only registered typed capabilities.
+
+Jarvis uses a configured fast dialogue model for conversation and single actions. Multi-step goals, explicit planning,
+story decisions, or repeated failures escalate to an optional planner model unless the Local Agent Runtime reports
+critical memory pressure. Game memory is isolated by game, save slot, and character, records provenance, confidence,
+importance, scope, pinning, and conflicts, and never stores raw audio. The imported Jarvis Lab sample is the reference
+vertical slice for PCVR, autonomy, voice interruption, reconnect, save recovery, and Quest readiness.
+
 ## Current limitations
 
 - Structural indexing is intentionally bounded; very large repositories may produce a partial map.

@@ -1,0 +1,26 @@
+{
+  "name": "com.opencode.customs.avatar-bridge",
+  "version": "2.1.0",
+  "displayName": "OpenCode Customs Avatar Bridge",
+  "description": "Protocol v2 SDK for autonomous Unity 6 and VR companions.",
+  "unity": "6000.0",
+  "author": {
+    "name": "OpenCode Customs"
+  },
+  "dependencies": {
+    "com.unity.ai.navigation": "2.0.0",
+    "com.unity.nuget.newtonsoft-json": "3.2.1"
+  },
+  "samples": [
+    {
+      "displayName": "Autonomous Companion",
+      "description": "A minimal v2 companion setup.",
+      "path": "Samples~/AutonomousCompanion"
+    },
+    {
+      "displayName": "Jarvis Lab",
+      "description": "A generated PCVR vertical slice with typed items, door, NPC, quest, crafting, and a training hazard.",
+      "path": "Samples~/JarvisLab"
+    }
+  ]
+}

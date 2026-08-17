@@ -2369,7 +2369,9 @@ const layer = Layer.effect(
             bypassAgentCheck,
             messages: msgs,
             promptOps,
-            toolIDs: chatMode ? ["websearch", "webfetch", "avatar_control"] : undefined,
+            toolIDs: chatMode
+              ? ["websearch", "webfetch", "avatar_control", "game_observe", "game_goal", "game_act"]
+              : undefined,
             includeMcp: chatMode,
           }).pipe(
             Effect.provideService(Plugin.Service, plugin),

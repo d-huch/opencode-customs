@@ -53,14 +53,125 @@ export type ResearchBrowserStatus = {
 export type AvatarBridgeStatus = {
   available: boolean
   protocol: number
+  version?: string
   url?: string
   token?: string
   message?: string
+  modelRuntime?: {
+    activeRole?: "dialogue" | "planner"
+    selectedModel?: { providerID: string; modelID: string }
+    reason?: string
+    lastPlannerAt?: number
+  }
+  config?: {
+    lanEnabled: boolean
+    interactionAutoApprove: boolean
+    maximumActionsPerCycle: number
+    cycleTimeoutMs: number
+    attentionThreshold: number
+    attentionCooldownMs: number
+    plannerEscalationMinWords: number
+    plannerIdleUnloadMs: number
+    dialogueModel?: { providerID: string; modelID: string }
+    plannerModel?: { providerID: string; modelID: string }
+    trustedProfiles: Array<{
+      gameID: string
+      allowInteraction: boolean
+      allowedCriticalCategories: string[]
+    }>
+  }
+  lan?: {
+    enabled: boolean
+    port?: number
+    certificateFingerprint: string
+    pairing?: {
+      pin: string
+      expiresAt: number
+      addresses: string[]
+      certificateFingerprint: string
+    }
+  }
+  pairedDevices?: Array<{
+    id: string
+    name: string
+    createdAt: number
+    lastSeenAt?: number
+    revokedAt?: number
+  }>
+  pendingApprovals?: Array<{
+    id: string
+    characterID: string
+    actionID: string
+    title: string
+    risk: "interaction" | "critical"
+    args: Record<string, unknown>
+    createdAt: number
+    expiresAt: number
+  }>
+  memories?: Array<{
+    id: string
+    gameID: string
+    saveSlotID: string
+    characterID: string
+    kind: "episodic" | "relationship" | "quest" | "promise" | "correction" | "world" | "personal"
+    scope: "save" | "game" | "personal"
+    source: string
+    confidence: number
+    text: string
+    importance: number
+    topic?: string
+    pinned: boolean
+    conflictWith?: string
+    createdAt: number
+    updatedAt: number
+  }>
+  goals?: Array<{
+    id: string
+    characterID: string
+    text: string
+    createdAt: number
+    expiresAt: number
+    status: "active" | "paused" | "completed" | "cancelled" | "failed"
+    parentID?: string
+    stopConditions: string[]
+    riskBudget: Array<"ambient" | "interaction" | "critical">
+    steps: Array<{
+      id: string
+      text: string
+      status: "pending" | "active" | "completed" | "failed" | "skipped"
+      attempts: number
+      failureReason?: string
+    }>
+    replanReason?: string
+  }>
   connectedClients: Array<{
     clientID: string
     characterID: string
     sessionID?: string
+    protocol?: 1 | 2
+    remote?: boolean
+    gameID?: string
+    saveSlotID?: string
     actions: string[]
+    capabilities?: Array<{
+      id: string
+      title: string
+      description: string
+      risk: "ambient" | "interaction" | "critical"
+      cooldownMs: number
+      timeoutMs: number
+      cancellable: boolean
+      preconditions: string[]
+      permissionCategory: string
+      postconditions: string[]
+      sideEffects: string[]
+    }>
+    world?: {
+      revision: number
+      timestamp: number
+      entities: Array<{ id: string; kind: string; label?: string }>
+    }
+    lastHeartbeatAt?: number
   }>
 }
 
@@ -308,6 +419,38 @@ type PlatformBase = {
 
   /** Inspect the loopback-only Unity/VR Avatar Bridge and retrieve its pairing data. */
   getAvatarBridgeStatus?(): Promise<AvatarBridgeStatus>
+
+  updateAvatarBridgeConfig?(input: {
+    lanEnabled?: boolean
+    interactionAutoApprove?: boolean
+    maximumActionsPerCycle?: number
+    cycleTimeoutMs?: number
+    attentionThreshold?: number
+    attentionCooldownMs?: number
+    plannerEscalationMinWords?: number
+    plannerIdleUnloadMs?: number
+    dialogueModel?: { providerID: string; modelID: string }
+    plannerModel?: { providerID: string; modelID: string }
+    trustedProfiles?: Array<{
+      gameID: string
+      allowInteraction: boolean
+      allowedCriticalCategories: string[]
+    }>
+  }): Promise<void>
+
+  startAvatarBridgePairing?(): Promise<NonNullable<NonNullable<AvatarBridgeStatus["lan"]>["pairing"]>>
+  revokeAvatarBridgeDevice?(id: string): Promise<void>
+  resolveAvatarBridgeApproval?(id: string, approved: boolean): Promise<boolean>
+  deleteAvatarBridgeMemory?(id: string): Promise<void>
+  updateAvatarBridgeMemory?(
+    id: string,
+    input: string | { text?: string; pinned?: boolean; confidence?: number; importance?: number },
+  ): Promise<void>
+  clearAvatarBridgeMemories?(filter?: {
+    gameID?: string
+    saveSlotID?: string
+    characterID?: string
+  }): Promise<void>
 
   /** Export collected diagnostic logs (desktop only) */
   exportDebugLogs?(): Promise<string>

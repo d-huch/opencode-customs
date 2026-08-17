@@ -1,0 +1,9 @@
+{
+  "name": "OpenCode.Customs.AvatarBridge.JarvisLab",
+  "rootNamespace": "OpenCode.Customs.AvatarBridge.JarvisLab",
+  "references": [
+    "OpenCode.Customs.AvatarBridge",
+    "Unity.Newtonsoft.Json",
+    "Unity.AI.Navigation"
+  ]
+}

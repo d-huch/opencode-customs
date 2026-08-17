@@ -87,6 +87,32 @@ type Deps = {
   showResearchBrowser: () => Promise<void>
   clearResearchBrowserData: () => Promise<void>
   getAvatarBridgeStatus: () => AvatarBridgeStatus
+  updateAvatarBridgeConfig: (input: {
+    lanEnabled?: boolean
+    interactionAutoApprove?: boolean
+    maximumActionsPerCycle?: number
+    cycleTimeoutMs?: number
+    attentionThreshold?: number
+    attentionCooldownMs?: number
+    plannerEscalationMinWords?: number
+    plannerIdleUnloadMs?: number
+    dialogueModel?: { providerID: string; modelID: string }
+    plannerModel?: { providerID: string; modelID: string }
+    trustedProfiles?: Array<{
+      gameID: string
+      allowInteraction: boolean
+      allowedCriticalCategories: string[]
+    }>
+  }) => Promise<unknown>
+  startAvatarBridgePairing: () => unknown
+  revokeAvatarBridgeDevice: (id: string) => Promise<unknown>
+  resolveAvatarBridgeApproval: (id: string, approved: boolean) => boolean
+  deleteAvatarBridgeMemory: (id: string) => Promise<unknown>
+  updateAvatarBridgeMemory: (
+    id: string,
+    input: string | { text?: string; pinned?: boolean; confidence?: number; importance?: number },
+  ) => Promise<unknown>
+  clearAvatarBridgeMemories: (filter?: { gameID?: string; saveSlotID?: string; characterID?: string }) => Promise<unknown>
 }
 
 export function registerIpcHandlers(deps: Deps) {
@@ -140,6 +166,26 @@ export function registerIpcHandlers(deps: Deps) {
   ipcMain.handle("show-research-browser", () => deps.showResearchBrowser())
   ipcMain.handle("clear-research-browser-data", () => deps.clearResearchBrowserData())
   ipcMain.handle("get-avatar-bridge-status", () => deps.getAvatarBridgeStatus())
+  ipcMain.handle("update-avatar-bridge-config", (_event: IpcMainInvokeEvent, input) =>
+    deps.updateAvatarBridgeConfig(input),
+  )
+  ipcMain.handle("start-avatar-bridge-pairing", () => deps.startAvatarBridgePairing())
+  ipcMain.handle("revoke-avatar-bridge-device", (_event: IpcMainInvokeEvent, id: string) =>
+    deps.revokeAvatarBridgeDevice(id),
+  )
+  ipcMain.handle(
+    "resolve-avatar-bridge-approval",
+    (_event: IpcMainInvokeEvent, id: string, approved: boolean) => deps.resolveAvatarBridgeApproval(id, approved),
+  )
+  ipcMain.handle("delete-avatar-bridge-memory", (_event: IpcMainInvokeEvent, id: string) =>
+    deps.deleteAvatarBridgeMemory(id),
+  )
+  ipcMain.handle("update-avatar-bridge-memory", (_event: IpcMainInvokeEvent, id: string, input) =>
+    deps.updateAvatarBridgeMemory(id, input),
+  )
+  ipcMain.handle("clear-avatar-bridge-memories", (_event: IpcMainInvokeEvent, filter) =>
+    deps.clearAvatarBridgeMemories(filter),
+  )
   ipcMain.handle("set-force-focus", (event: IpcMainInvokeEvent, enabled: boolean) =>
     setForceFocus(event.sender, enabled),
   )

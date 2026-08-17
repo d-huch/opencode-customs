@@ -16,9 +16,10 @@ describe("session chat mode", () => {
   })
 
   test("keeps safe network tools without repository access", () => {
-    expect(SessionChatMode.tools({ read: 1, websearch: 2, avatar_control: 3 })).toEqual({
+    expect(SessionChatMode.tools({ read: 1, websearch: 2, avatar_control: 3, game_observe: 4 })).toEqual({
       websearch: 2,
       avatar_control: 3,
+      game_observe: 4,
     })
   })
 
@@ -45,11 +46,13 @@ describe("session chat mode", () => {
     ).toBe(32_768)
   })
 
-  test("exposes only web and MCP tool schemas in chat mode", () => {
-    expect(SessionChatMode.tools({ read: 1, grep: 2, websearch: 3, webfetch: 4, avatar_control: 6, bash: 5 })).toEqual({
+  test("exposes only web, game bridge, and MCP tool schemas in chat mode", () => {
+    expect(SessionChatMode.tools({ read: 1, grep: 2, websearch: 3, webfetch: 4, avatar_control: 6, game_goal: 7, game_act: 8, bash: 5 })).toEqual({
       websearch: 3,
       webfetch: 4,
       avatar_control: 6,
+      game_goal: 7,
+      game_act: 8,
     })
     expect(SessionChatMode.tools({ mcp_serviceman_search: 1, task: 2 })).toEqual({ mcp_serviceman_search: 1 })
   })

@@ -39,6 +39,9 @@ export namespace SessionChatMode {
           id === "websearch" ||
           id === "webfetch" ||
           id === "avatar_control" ||
+          id === "game_observe" ||
+          id === "game_goal" ||
+          id === "game_act" ||
           id === "list_mcp_resources" ||
           id === "list_mcp_resource_templates" ||
           id === "read_mcp_resource" ||

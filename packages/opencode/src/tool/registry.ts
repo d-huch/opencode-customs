@@ -58,6 +58,9 @@ import { VerificationTool } from "./verification"
 import { EvidenceTool } from "./evidence"
 import { CriticTool } from "./critic"
 import { AvatarControlTool } from "./avatar-control"
+import { GameObserveTool } from "./game-observe"
+import { GameGoalTool } from "./game-goal"
+import { GameActTool } from "./game-act"
 
 export function webSearchEnabled(providerID: ProviderV2.ID, flags = { exa: false, parallel: false }) {
   return (
@@ -124,6 +127,9 @@ const layer = Layer.effect(
     const evidence = yield* EvidenceTool
     const critic = yield* CriticTool
     const avatar = yield* AvatarControlTool
+    const gameObserve = yield* GameObserveTool
+    const gameGoal = yield* GameGoalTool
+    const gameAct = yield* GameActTool
     const agent = yield* Agent.Service
     const codeMode = flags.experimentalCodeMode ? yield* Effect.promise(() => import("./code-mode")) : undefined
     const codeModeTool = codeMode ? yield* codeMode.CodeModeTool : undefined
@@ -237,6 +243,9 @@ const layer = Layer.effect(
           evidence: Tool.init(evidence),
           critic: Tool.init(critic),
           avatar: Tool.init(avatar),
+          gameObserve: Tool.init(gameObserve),
+          gameGoal: Tool.init(gameGoal),
+          gameAct: Tool.init(gameAct),
           plan: Tool.init(plan),
           ...(codeModeTool ? { execute: Tool.init(codeModeTool) } : {}),
         })
@@ -262,7 +271,7 @@ const layer = Layer.effect(
             tool.evidence,
             tool.critic,
             ...(process.env.OPENCODE_AVATAR_BRIDGE_URL && process.env.OPENCODE_AVATAR_BRIDGE_TOKEN
-              ? [tool.avatar]
+              ? [tool.avatar, tool.gameObserve, tool.gameGoal, tool.gameAct]
               : []),
             ...(tool.execute ? [tool.execute] : []),
             ...(flags.experimentalLspTool ? [tool.lsp] : []),

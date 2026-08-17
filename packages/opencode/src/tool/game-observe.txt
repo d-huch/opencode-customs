@@ -1,0 +1,3 @@
+Observe the connected Unity/VR character's structured world state, dynamic capabilities, and relevant save-slot memory.
+
+Use this before acting and again after significant actions. Treat entity IDs, affordances, preconditions, and capability risk as authoritative. Do not infer arbitrary Unity methods or claim to see objects absent from the returned world snapshot. Camera images are not returned by default.

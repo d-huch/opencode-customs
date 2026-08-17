@@ -1,31 +1,54 @@
-# OpenCode Customs Unity/VR bridge
+# OpenCode Customs Unity/VR Avatar Bridge v2.1
 
-This integration connects a Unity character to the loopback-only Avatar Bridge in OpenCode Customs Desktop. It is intended for PCVR or a Unity player running on the same computer as OpenCode Customs. Standalone headsets need a separately secured LAN relay; the local token is intentionally not exposed to the network.
+The Unity 6 integration is a UPM package at `com.opencode.customs.avatar-bridge`. It turns one companion into a bounded autonomous agent driven by semantic world state, typed capabilities, a goal stack, trusted autonomy profiles, and save-scoped memory.
 
-## Setup
+## Install the v2 package
 
-1. Open **Settings → Avatar & VR** in OpenCode Customs and copy the Unity pairing JSON.
-2. Copy `OpenCodeAvatarBridge.cs` into `Assets/OpenCodeCustoms/` in the Unity project.
-3. Add `OpenCodeAvatarBridge` to the character GameObject and paste the pairing JSON.
-4. Assign its `Animator`, `AudioSource`, and character root.
-5. Connect the final transcript event from the project's VR speech-to-text component to `SubmitTranscript(string)`. The bridge deliberately accepts final text, so it can work with Whisper, platform dictation, or an existing VR voice SDK without locking the project to one microphone provider.
-6. Optionally enter the OpenCode provider/model IDs. With no session ID, the first utterance creates a projectless Chat session.
-7. To hear replies inside Unity, enable `Receive Voice` and configure the same local TTS/Fish S2 Pro endpoint and preset used by the personality.
+In Unity Package Manager choose **Add package from disk** and select:
 
-`ClientWebSocket` is used with one serialized send and one receive loop, matching the .NET concurrency contract. Unity JSON payloads use plain serializable classes compatible with `JsonUtility`.
+`integrations/unity/com.opencode.customs.avatar-bridge/package.json`
 
-## Protocol v1
+Add these components to the companion root:
 
-Unity connects to the copied `ws://127.0.0.1:<port>/avatar` URL and sends `hello` first. The token is carried in that first message and never placed in the URL.
+- `OpenCodeAvatarBridgeV2` — protocol, reconnect, heartbeat, resume, speech interruption, action execution, and binary reply audio;
+- `AvatarCapabilityRegistry` — discovers typed capabilities below the companion;
+- `AvatarWorldSensor` — bounded radius/FOV/raycast perception with snapshots, deltas, and attention events;
+- `AvatarDeveloperOverlay` — connection, goal, action latency, entity, capability, and approval diagnostics;
+- optional `AvatarScenarioRecorder` — JSONL record/replay without a headset.
 
-Client messages:
+The included standard capabilities cover NavMesh `move_to`, `follow`, `stay`, character expressions, and generic registered interactions. Add game-specific doors, seats, inventory, combat, or quest choices by deriving from `AvatarCapabilityBehaviour` and returning a JSON Schema manifest. The game owns preconditions and risk; the agent cannot lower them.
 
-- `user.transcript` — a final user utterance;
-- `character.action.result` — confirmation or failure for an agent-requested action.
+Every v2.1 manifest can also declare a permission category, expected postconditions, and side effects. Action results return a machine code, changed entity IDs, and whether the agent must observe again. Existing v2 clients remain compatible; absent v2.1 fields receive conservative defaults.
 
-Server messages:
+## Jarvis Lab vertical slice
 
-- `assistant.started`, `assistant.text`, `assistant.audio`, `assistant.done`, `assistant.error`;
-- `character.action` with one of `animation.trigger`, `emotion.set`, `gesture.play`, `look_at`, `move_to`, or `speech.stop`.
+Import the **Jarvis Lab** sample and choose **OpenCode Customs → Create Jarvis Lab Scene**. The generated Unity scene contains a baked NavMesh, typed item inspection/pickup/drop/use/crafting, a locked door, technician NPC, save-slot quest, relationship state, a critical training target, developer overlay, and record/replay fixture. It is the acceptance environment for the personal local Jarvis before broader SDK work.
 
-The agent cannot invoke arbitrary Unity methods. It sees only the character's declared capabilities, actions pass the normal OpenCode permission system, and each action must be acknowledged by Unity before the agent may report success.
+## PCVR
+
+Open **Settings → Avatar & VR** in OpenCode Customs, copy the loopback pairing JSON, and paste it into `OpenCodeAvatarBridgeV2.connectionJson`. The token is sent only in the initial WebSocket hello and is never put in a URL.
+
+## Meta Quest
+
+1. Enable secure LAN access in **Avatar & VR**. It is disabled by default.
+2. Generate a one-time QR/PIN and use the displayed WSS address, PIN, and certificate fingerprint in the Quest pairing screen.
+3. Call `QuestPairing.PairAsync(...)` (or POST `{ "pin": "123456", "name": "Quest 3" }` to `/pair`). Save the returned connection JSON in `OpenCodeAvatarBridgeV2.connectionJson`.
+4. Pin the SHA-256 fingerprint. Never replace the validation callback with an accept-all handler. If a Quest IL2CPP profile cannot use `ClientWebSocket` certificate callbacks, provide a native Android `IAvatarTransport` implementation with the same pin before enabling LAN play.
+
+OpenCode Customs stores only the token hash and allows each paired device to be revoked.
+
+## Voice and interruption
+
+Connect the VR microphone/VAD integration to `SubmitSpeechStart`, `SubmitSpeechPartial`, `SubmitSpeechFinal`, and `CancelSpeech`. A speech start stops local playback and cancels the running model turn. TTS arrives as bounded binary chunks with a JSON start/end envelope; the SDK reconstructs WAV playback. Idle animations and immediate local reactions should remain in Unity without an LLM call.
+
+## Protocol v1 compatibility
+
+`OpenCodeAvatarBridge.cs` remains the standalone v1 adapter for existing scenes. Desktop accepts v1, v2, and the backward-compatible v2.1 minor extension. New projects should use the UPM package: only v2 supports semantic perception, dynamic capabilities, bounded goals, save-slot memory, replay, approvals, reconnect/resume, Quest pairing, and binary audio.
+
+## Security boundaries
+
+- PCVR binds to loopback only.
+- Quest uses WSS, one-time pairing, per-device credentials, certificate pinning, and revocation.
+- LAN is off by default.
+- `ambient` actions run automatically; reversible `interaction` actions follow the autonomy setting; a `critical` action runs automatically only when its exact permission category is trusted for that game. Unknown and untrusted critical categories require a 30-second VR/Desktop approval and default to deny.
+- Capabilities invoke registered adapters only. No arbitrary Unity method, hierarchy, file, or shell access is exposed.
