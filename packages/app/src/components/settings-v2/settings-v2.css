@@ -51,12 +51,30 @@
   color: var(--v2-text-text-base);
 }
 
+.settings-v2-tab-description {
+  max-width: 720px;
+  margin-top: 8px;
+  font-size: 13px;
+  font-weight: 440;
+  line-height: 20px;
+  color: var(--v2-text-text-muted);
+}
+
 .settings-v2-tab-body {
   display: flex;
   flex-direction: column;
   gap: 36px;
   width: 100%;
   padding: 0 40px 40px;
+}
+
+.settings-v2-jarvis {
+  min-width: 0;
+  overflow-x: clip;
+}
+
+.settings-v2-jarvis :is([data-slot="settings-v2-row-title"], [data-slot="settings-v2-row-description"]) {
+  overflow-wrap: anywhere;
 }
 
 .settings-v2-personalization-body {

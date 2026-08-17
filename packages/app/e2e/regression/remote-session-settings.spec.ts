@@ -136,6 +136,88 @@ test("personalization is a separate draft-based settings tab", async ({ page }) 
   await expect(page.getByTitle("Choose personality")).toBeVisible()
 })
 
+for (const locale of [
+  {
+    id: "en",
+    degraded: "The dialogue model is not configured.",
+    primary: "Natural · Automatic · silent",
+    goals: "Goals",
+    inbox: "Jarvis Inbox",
+    settings: "Settings",
+  },
+  {
+    id: "uk",
+    degraded: "Діалогову модель не налаштовано.",
+    primary: "Природний · Автоматично · без голосу",
+    goals: "Цілі",
+    inbox: "Inbox Jarvis",
+    settings: "Налаштування",
+  },
+] as const) {
+  test(`Jarvis settings keep standard spacing and localized runtime state in ${locale.id}`, async ({ page }) => {
+    await page.addInitScript((id) => {
+      localStorage.setItem("opencode.global.dat:language", JSON.stringify({ locale: id }))
+    }, locale.id)
+    await mockServers(page, [])
+    await configureServers(page, [], {
+      version: 2,
+      defaultPresetID: "jarvis-primary",
+      presets: [personalityPreset("jarvis-primary", "Jarvis", "Jarvis")],
+    })
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await page.goto("/")
+    await page.getByRole("button", { name: locale.settings, exact: true }).click()
+
+    const dialog = page.locator(".settings-v2-dialog")
+    await dialog.getByRole("tab", { name: "Jarvis", exact: true }).click()
+    const header = dialog.locator(".settings-v2-tab-header[data-component='settings-jarvis-v2']")
+    const body = dialog.locator(".settings-v2-tab-body.settings-v2-jarvis")
+    const sections = body.locator(":scope > .settings-v2-section")
+    await expect(header).toBeVisible()
+    await expect(body).toBeVisible()
+    await expect(dialog).toContainText(locale.degraded)
+    await expect(dialog.getByText(locale.primary, { exact: true })).toBeVisible()
+    await expect(
+      dialog.getByText(
+        "Dialogue model is not configured. · Planner model is not configured; multi-step goals will be suspended.",
+      ),
+    ).toHaveCount(0)
+
+    const wide = await body.evaluate((element) => {
+      const style = getComputedStyle(element)
+      const children = [...element.querySelectorAll<HTMLElement>(":scope > .settings-v2-section")]
+      return {
+        paddingLeft: style.paddingLeft,
+        paddingRight: style.paddingRight,
+        gap: style.rowGap,
+        overflow: element.scrollWidth - element.clientWidth,
+        sectionGaps: children.slice(1).map((child, index) => {
+          const previous = children[index]!.getBoundingClientRect()
+          return Math.round(child.getBoundingClientRect().top - previous.bottom)
+        }),
+      }
+    })
+    expect(wide).toMatchObject({ paddingLeft: "40px", paddingRight: "40px", gap: "36px", overflow: 0 })
+    expect(wide.sectionGaps.every((gap) => gap >= 35)).toBe(true)
+    expect(await header.evaluate((element) => getComputedStyle(element).position)).toBe("sticky")
+
+    await dialog.getByRole("heading", { name: locale.inbox, exact: true }).scrollIntoViewIfNeeded()
+    await expect(dialog.getByRole("heading", { name: locale.goals, exact: true })).toHaveCount(1)
+    await expect(dialog.getByRole("heading", { name: locale.inbox, exact: true })).toBeVisible()
+
+    await page.setViewportSize({ width: 620, height: 700 })
+    await expect
+      .poll(() =>
+        body.evaluate((element) => ({
+          paddingLeft: getComputedStyle(element).paddingLeft,
+          paddingRight: getComputedStyle(element).paddingRight,
+          overflow: element.scrollWidth - element.clientWidth,
+        })),
+      )
+      .toEqual({ paddingLeft: "20px", paddingRight: "20px", overflow: 0 })
+  })
+}
+
 test("auto-accept responds for an unfocused server session", async ({ page }) => {
   const permissionRequests: string[] = []
   const permissionResponses: PermissionResponse[] = []
@@ -285,6 +367,7 @@ function personalityPreset(id: string, name: string, assistantName: string) {
     userName: "",
     addressAs: "",
     language: "auto",
+    archetype: "natural",
     tone: "natural",
     detail: "balanced",
     proactivity: "balanced",
@@ -326,6 +409,10 @@ async function mockServers(page: Page, permissionRequests: string[], permissionR
     if (url.pathname === "/api/provider" || url.pathname === "/api/model" || url.pathname === "/api/agent")
       return json(route, { data: [] })
     if (url.pathname === "/api/model/default") return json(route, { data: null })
+    if (url.pathname === "/api/jarvis/status") return json(route, jarvisStatus())
+    if (url.pathname === "/api/jarvis/goals" || url.pathname === "/api/jarvis/inbox") return json(route, [])
+    if (url.pathname === "/api/jarvis/memory/search") return json(route, [])
+    if (url.pathname === "/api/jarvis/profiles" && route.request().method() === "PUT") return json(route, [])
     if (["/api/command", "/api/reference", "/api/permission/request", "/api/question/request"].includes(url.pathname))
       return json(route, { location: { directory }, data: [] })
     if (url.pathname === "/api/mcp") return json(route, { location: { directory }, data: [] })
@@ -425,6 +512,50 @@ function provider(id: string) {
     ],
     connected: [id],
     default: { providerID: id, modelID: id },
+  }
+}
+
+function jarvisStatus() {
+  return {
+    state: "degraded",
+    primaryProfile: {
+      id: "jarvis-primary",
+      revision: 1,
+      name: "Jarvis",
+      language: "auto",
+      archetype: "natural",
+      tone: "natural",
+      detail: "balanced",
+      humor: "subtle",
+      proactivity: "balanced",
+      instructions: "",
+      catchphrases: [],
+      primary: true,
+      updatedAt: 1,
+    },
+    config: {
+      primaryProfileID: "jarvis-primary",
+      models: {},
+      plannerTimeoutMs: 8_000,
+      plannerIdleUnloadMs: 600_000,
+      initiative: {
+        enabled: true,
+        quietStart: "22:00",
+        quietEnd: "08:00",
+        reflectionLimit: 2,
+        eventLimit: 6,
+        topicCooldownMinutes: 30,
+      },
+      updatedAt: 1,
+    },
+    activeGoals: 0,
+    suspendedGoals: 0,
+    pendingInbox: 0,
+    memoryRecords: 0,
+    degradedReasons: [
+      "Dialogue model is not configured.",
+      "Planner model is not configured; multi-step goals will be suspended.",
+    ],
   }
 }
 
