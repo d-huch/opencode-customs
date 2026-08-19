@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 362f6b5ab3bb85f4d8b6cee7f16a29f3
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 11400000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 239141
+  packageName: Gamer Girl
+  packageVersion: 1.0
+  assetPath: Assets/GamerGirl/Render pipeline/URP/UniversalRenderPipelineAsset_Renderer.asset
+  uploadId: 543100

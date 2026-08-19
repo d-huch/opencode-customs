@@ -16,8 +16,11 @@ export function lmStudioEmbeddingProvider(
   admit: typeof acquireModel = acquireModel,
 ) {
   return {
+    supports: (model) => model.id.startsWith("lmstudio:"),
     model: (preferred?: string) =>
       Effect.gen(function* () {
+        if (preferred?.includes(":") && !preferred.startsWith("lmstudio:")) return undefined
+        const preferredModel = preferred?.startsWith("lmstudio:") ? preferred.slice("lmstudio:".length) : preferred
         const config = yield* getConfig()
         const provider = config.provider?.lmstudio
         const baseURL = provider?.options?.baseURL
@@ -28,7 +31,7 @@ export function lmStudioEmbeddingProvider(
           (model) =>
             model.type === "embedding" &&
             model.loaded &&
-            (preferred !== undefined || CapabilityRouter.allowsAutomaticRoute(config, model.id)),
+            (preferredModel !== undefined || CapabilityRouter.allowsAutomaticRoute(config, model.id)),
         )
         const plan = yield* Effect.promise(() =>
           CapabilityRouter.route({
@@ -40,8 +43,8 @@ export function lmStudioEmbeddingProvider(
           }),
         )
         const routed = CapabilityRouter.selection(plan, "embedding")
-        const selected = preferred
-          ? candidates.find((model) => model.id === preferred || model.instances.includes(preferred))
+        const selected = preferredModel
+          ? candidates.find((model) => model.id === preferredModel || model.instances.includes(preferredModel))
           : (candidates.find((model) => model.id === routed?.modelID) ?? candidates[0])
         if (!selected) return undefined
         return {
@@ -101,6 +104,48 @@ export function lmStudioEmbeddingProvider(
             ),
           { concurrency: 1 },
         ).pipe(Effect.map((vectors) => vectors.flat()))
+      }),
+  } satisfies RepositoryEmbeddings.Provider
+}
+
+export function llamaServerEmbeddingProvider(getConfig: () => Effect.Effect<ConfigV1.Info>, request: Request = fetch) {
+  return {
+    supports: (model) => model.id.startsWith("llama-server:"),
+    model: (preferred?: string) =>
+      Effect.gen(function* () {
+        if (!preferred?.startsWith("llama-server:")) return undefined
+        const config = yield* getConfig()
+        const provider = config.provider?.["llama-server"]
+        const baseURL = provider?.options?.baseURL
+        if (typeof baseURL !== "string" || !URL.canParse(baseURL)) return undefined
+        const name = preferred.slice("llama-server:".length)
+        if (!name) return undefined
+        return { id: `llama-server:${baseURL}:${name}`, name } satisfies RepositoryEmbeddings.Model
+      }),
+    embed: (input: { readonly model: RepositoryEmbeddings.Model; readonly texts: ReadonlyArray<string> }) =>
+      Effect.gen(function* () {
+        const config = yield* getConfig()
+        const provider = config.provider?.["llama-server"]
+        const baseURL = provider?.options?.baseURL
+        if (typeof baseURL !== "string" || !URL.canParse(baseURL)) return yield* Effect.fail(new Error("llama-server is not configured"))
+        const headers = new Headers({ "content-type": "application/json" })
+        if (typeof provider?.options?.apiKey === "string") headers.set("authorization", `Bearer ${provider.options.apiKey}`)
+        return yield* Effect.tryPromise({
+          try: async (signal) => {
+            const response = await request(embeddingEndpoint(baseURL), {
+              method: "POST",
+              headers,
+              body: JSON.stringify({ model: input.model.name ?? input.model.id, input: input.texts }),
+              signal: AbortSignal.any([signal, AbortSignal.timeout(REQUEST_TIMEOUT)]),
+            })
+            const body: unknown = await response.json().catch(() => undefined)
+            if (!response.ok) throw new Error(embeddingError(response.status, body))
+            const vectors = parseEmbeddings(body)
+            if (vectors.length !== input.texts.length) throw new Error("llama-server returned an invalid embedding batch")
+            return vectors
+          },
+          catch: (cause) => cause,
+        })
       }),
   } satisfies RepositoryEmbeddings.Provider
 }

@@ -1,0 +1,16 @@
+fileFormatVersion: 2
+guid: b4188f943dc43da4ebbab55a3b1d5302
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 2100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 239141
+  packageName: Gamer Girl
+  packageVersion: 1.0
+  assetPath: Assets/GamerGirl/Render pipeline/URP/Materials/MAT_GAMERGIRL_OUTFIT_03
+    Black.mat
+  uploadId: 543100

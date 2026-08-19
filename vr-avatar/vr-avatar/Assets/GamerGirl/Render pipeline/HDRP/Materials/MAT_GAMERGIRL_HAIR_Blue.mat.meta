@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 218360ffeddba58409b2e3307fa02ec7
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 2100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 239141
+  packageName: Gamer Girl
+  packageVersion: 1.0
+  assetPath: Assets/GamerGirl/Render pipeline/HDRP/Materials/MAT_GAMERGIRL_HAIR_Blue.mat
+  uploadId: 543100

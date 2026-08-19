@@ -20,6 +20,12 @@ export const JarvisHandler = HttpApiBuilder.group(Api, "server.jarvis", (handler
       .handle("jarvis.resumeGoal", (ctx) =>
         storage(JarvisRuntime.resumeGoal(db, ctx.params.goalID, ctx.payload).pipe(Effect.map((goal) => goal ?? null))),
       )
+      .handle("jarvis.replanGoal", (ctx) =>
+        storage(JarvisRuntime.replanGoal(db, ctx.params.goalID, ctx.payload).pipe(Effect.map((goal) => goal ?? null))),
+      )
+      .handle("jarvis.cancelGoal", (ctx) =>
+        storage(JarvisRuntime.cancelGoal(db, ctx.params.goalID, ctx.payload).pipe(Effect.map((outcome) => outcome ?? null))),
+      )
       .handle("jarvis.recordGoalStep", (ctx) =>
         storage(
           JarvisRuntime.recordStepResult(db, { goalID: ctx.params.goalID, ...ctx.payload }).pipe(
@@ -36,9 +42,28 @@ export const JarvisHandler = HttpApiBuilder.group(Api, "server.jarvis", (handler
       .handle("jarvis.removeMemory", (ctx) =>
         storage(JarvisRuntime.removeMemory(db, ctx.params.memoryID).pipe(Effect.map((changed) => ({ changed })))),
       )
+      .handle("jarvis.patchMemory", (ctx) =>
+        storage(JarvisRuntime.patchMemory(db, ctx.params.memoryID, ctx.payload).pipe(Effect.map((memory) => memory ?? null))),
+      )
+      .handle("jarvis.resolveMemoryConflict", (ctx) =>
+        storage(
+          JarvisRuntime.resolveMemoryConflict(db, ctx.params.memoryID, ctx.payload).pipe(
+            Effect.map((memory) => memory ?? null),
+          ),
+        ),
+      )
+      .handle("jarvis.reindexMemory", () =>
+        storage(JarvisRuntime.backfillMemory(db)),
+      )
       .handle("jarvis.inbox", () => storage(JarvisRuntime.inbox(db)))
       .handle("jarvis.wake", (ctx) =>
         storage(JarvisRuntime.enqueueWake(db, ctx.payload).pipe(Effect.map((wake) => wake ?? null))),
+      )
+      .handle("jarvis.dismissInbox", (ctx) =>
+        storage(JarvisRuntime.dismissWake(db, ctx.params.wakeID).pipe(Effect.map((wake) => wake ?? null))),
+      )
+      .handle("jarvis.retryInbox", (ctx) =>
+        storage(JarvisRuntime.retryWake(db, ctx.params.wakeID).pipe(Effect.map((wake) => wake ?? null))),
       )
   }),
 )

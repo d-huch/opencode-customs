@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 8add372ac703d4149a78144d4c4b0e3a
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 2100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 239141
+  packageName: Gamer Girl
+  packageVersion: 1.0
+  assetPath: Assets/GamerGirl/Render pipeline/URP/Stand/Materials/Cylinder001Mat.mat
+  uploadId: 543100

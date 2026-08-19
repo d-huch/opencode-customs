@@ -27,6 +27,7 @@ export type Model = {
 }
 
 export type Provider = {
+  readonly supports?: (model: Model) => boolean
   readonly model: (preferred?: string) => Effect.Effect<Model | undefined, unknown>
   readonly embed: (input: {
     readonly model: Model
@@ -50,14 +51,17 @@ export function available() {
 }
 
 export function model(preferred?: string) {
-  const provider = providers.at(-1)
-  return provider
-    ? provider.model(preferred).pipe(Effect.catch(() => Effect.succeed(undefined)))
-    : Effect.succeed(undefined)
+  return Effect.gen(function* () {
+    for (const provider of providers.toReversed()) {
+      const current = yield* provider.model(preferred).pipe(Effect.catch(() => Effect.succeed(undefined)))
+      if (current) return current
+    }
+    return undefined
+  })
 }
 
 export function embed(input: { readonly model: Model; readonly texts: ReadonlyArray<string> }) {
-  const provider = providers.at(-1)
+  const provider = providers.toReversed().find((candidate) => candidate.supports?.(input.model)) ?? providers.at(-1)
   if (!provider || input.texts.length === 0) return Effect.succeed(undefined)
   const keys = input.texts.map((text) => `${input.model.id}\0${Hash.fast(text)}`)
   const cached = keys.map((key) => {

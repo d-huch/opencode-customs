@@ -1,15 +1,23 @@
 using UnityEngine;
+using UnityEngine.InputSystem;
 
 namespace OpenCode.Customs.AvatarBridge
 {
     public sealed class AvatarDeveloperOverlay : MonoBehaviour
     {
         public OpenCodeAvatarBridgeV2 bridge;
+        public AvatarLocomotionController locomotion;
+        public AvatarMicroReactions reactions;
+        public AvatarRigTargets rigTargets;
+        public AvatarVRMPresentation presentation;
         public bool visible = true;
-        public KeyCode toggleKey = KeyCode.F8;
+        public Key toggleKey = Key.F8;
         GUIStyle style;
 
-        void Update() { if (Input.GetKeyDown(toggleKey)) visible = !visible; }
+        void Update()
+        {
+            if (Keyboard.current?[toggleKey].wasPressedThisFrame == true) visible = !visible;
+        }
 
         void OnGUI()
         {
@@ -26,9 +34,12 @@ namespace OpenCode.Customs.AvatarBridge
                 $"Goal: {bridge.CurrentGoal ?? "—"}\n" +
                 $"Step: {step}  Replan: {bridge.CurrentGoalState?.replanReason ?? "—"}\n" +
                 $"Last action: {bridge.LastAction ?? "—"} ({bridge.LastActionLatencyMs} ms)\n" +
+                $"Animation: {reactions?.CurrentState ?? "—"}  Gesture: {reactions?.CurrentGesture ?? rigTargets?.ActiveGesture ?? "—"}\n" +
+                $"Gaze: {rigTargets?.CurrentGazeTarget ?? "—"}  Speed: {(locomotion?.CurrentSpeed ?? 0f):F2} m/s\n" +
+                $"Emotion: {presentation?.CurrentEmotion ?? "—"}  Viseme: {presentation?.LastViseme ?? "—"}\n" +
                 $"Entities: {sensor?.Latest?.entities.Count ?? 0}  Capabilities: {capabilities?.All.Count ?? 0}\n" +
                 $"Approval: {(approval == null ? "—" : approval.title + " [" + approval.risk + "]")}";
-            GUI.Box(new Rect(20, 20, 560, 180), text, style);
+            GUI.Box(new Rect(20, 20, 620, 250), text, style);
         }
     }
 }

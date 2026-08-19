@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 3f3204feb8e9ece4ea248faf99142131
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 2100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 239141
+  packageName: Gamer Girl
+  packageVersion: 1.0
+  assetPath: Assets/GamerGirl/Render pipeline/URP/Materials/MAT_GAMERGIRL_CARUNCLE.mat
+  uploadId: 543100

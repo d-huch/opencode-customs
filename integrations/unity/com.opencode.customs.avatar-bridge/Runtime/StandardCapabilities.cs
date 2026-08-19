@@ -139,6 +139,8 @@ namespace OpenCode.Customs.AvatarBridge
     public sealed class CharacterExpressionCapability : AvatarCapabilityBehaviour
     {
         public Animator animator;
+        public AvatarMicroReactions reactions;
+        public AvatarVRMPresentation presentation;
         public Transform lookRoot;
         public AvatarRigTargets rigTargets;
         public override AvatarCapabilityManifest Manifest => new AvatarCapabilityManifest
@@ -147,13 +149,46 @@ namespace OpenCode.Customs.AvatarBridge
             permissionCategory = "expression.local", postconditions = new[] { "requested rig target or animation trigger is applied" },
             parameters = ObjectSchema(new Dictionary<string, JObject>
             {
-                ["kind"] = StringSchema("look_at, point_at, gesture, or emotion"),
-                ["name"] = StringSchema("Animator trigger or emotion name"),
+                ["kind"] = new JObject { ["type"] = "string", ["enum"] = new JArray("look_at", "point_at", "gesture", "emotion") },
+                ["name"] = StringSchema("For gestures: wave, point, nod, or thinking. For emotions: neutral, positive, concerned, or thoughtful."),
                 ["target"] = VectorSchema("Optional world-space target"),
                 ["intensity"] = NumberSchema("Expression intensity from 0 to 1"),
                 ["leftHand"] = BooleanSchema("Use the left hand for pointing"),
             }, "kind"),
         };
+
+        public override bool CheckPreconditions(JObject arguments, out string reason)
+        {
+            var kind = arguments.Value<string>("kind");
+            if ((kind == "look_at" || kind == "point_at") && !(arguments["target"] is JObject))
+            {
+                reason = kind + " requires a world-space target.";
+                return false;
+            }
+            if ((kind == "look_at" || kind == "point_at") && rigTargets == null && lookRoot == null)
+            {
+                reason = "Character rig targets are unavailable.";
+                return false;
+            }
+            if (kind == "gesture" && !AllowedGesture(arguments.Value<string>("name")))
+            {
+                reason = "Unsupported gesture. Use wave, point, nod, or thinking.";
+                return false;
+            }
+            if (kind == "emotion" && !AllowedEmotion(arguments.Value<string>("name")))
+            {
+                reason = "Unsupported emotion. Use neutral, positive, concerned, or thoughtful.";
+                return false;
+            }
+            if (kind == "look_at" || kind == "point_at" || kind == "gesture" || kind == "emotion")
+            {
+                reason = null;
+                return true;
+            }
+            reason = "Unsupported expression kind.";
+            return false;
+        }
+
         public override Task<AvatarActionResult> ExecuteAsync(JObject arguments, CancellationToken cancellation)
         {
             var kind = arguments.Value<string>("kind");
@@ -166,9 +201,33 @@ namespace OpenCode.Customs.AvatarBridge
                 else if (lookRoot != null) lookRoot.LookAt(position);
             }
             var name = arguments.Value<string>("name");
-            if (!string.IsNullOrWhiteSpace(name) && animator != null) animator.SetTrigger(name);
+            if (kind == "point_at") reactions?.TriggerGesture("point");
+            if (kind == "gesture")
+            {
+                if (reactions != null) reactions.TriggerGesture(name);
+                else if (animator != null) animator.SetTrigger(char.ToUpperInvariant(name[0]) + name.Substring(1).ToLowerInvariant());
+            }
+            if (kind == "emotion") presentation?.SetEmotion(name, Mathf.Clamp01(arguments.Value<float?>("intensity") ?? 0.6f));
             return Task.FromResult(AvatarActionResult.Success("Expression applied."));
         }
+
+        public override void Cancel()
+        {
+            rigTargets?.ResetOverrides();
+            reactions?.ClearGesture();
+        }
+
+        static bool AllowedGesture(string value) =>
+            string.Equals(value, "wave", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(value, "point", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(value, "nod", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(value, "thinking", StringComparison.OrdinalIgnoreCase);
+
+        static bool AllowedEmotion(string value) =>
+            string.Equals(value, "neutral", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(value, "positive", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(value, "concerned", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(value, "thoughtful", StringComparison.OrdinalIgnoreCase);
     }
 
     public sealed class InteractCapability : AvatarCapabilityBehaviour
@@ -206,7 +265,7 @@ namespace OpenCode.Customs.AvatarBridge
 
         static OpenCodeInteractable Find(string id)
         {
-            foreach (var candidate in FindObjectsByType<OpenCodeInteractable>(FindObjectsSortMode.None))
+            foreach (var candidate in FindObjectsByType<OpenCodeInteractable>())
                 if (candidate.StableID == id) return candidate;
             return null;
         }

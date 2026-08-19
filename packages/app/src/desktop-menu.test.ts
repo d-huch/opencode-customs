@@ -20,4 +20,23 @@ describe("desktop menu", () => {
     expect(windowMenu?.labelKey).toBe("desktop.menu.window")
     expect(roleItems.length).toBeGreaterThan(0)
   })
+
+  test("does not expose feedback, bug reporting, or Discord", () => {
+    const items = DESKTOP_MENU.flatMap((menu) => menu.items ?? [])
+    const forbidden = new Set([
+      "desktop.menu.supportForum",
+      "desktop.menu.shareFeedback",
+      "desktop.menu.reportBug",
+    ])
+
+    expect(items.some((item) => item.type === "item" && forbidden.has(item.labelKey ?? ""))).toBe(false)
+    expect(
+      items.some(
+        (item) =>
+          item.type === "item" &&
+          !!item.href &&
+          (item.href.includes("discord.com") || item.href.includes("desktop-feedback") || item.href.includes("issues/new")),
+      ),
+    ).toBe(false)
+  })
 })

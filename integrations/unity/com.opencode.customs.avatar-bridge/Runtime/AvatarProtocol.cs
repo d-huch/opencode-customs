@@ -10,7 +10,7 @@ namespace OpenCode.Customs.AvatarBridge
     public static class AvatarProtocol
     {
         public const int Version = 2;
-        public const int Minor = 2;
+        public const int Minor = 3;
         public const int MaxCapabilities = 128;
         public const int MaxEntities = 256;
         public const int MaxPayloadBytes = 64 * 1024;
@@ -157,6 +157,33 @@ namespace OpenCode.Customs.AvatarBridge
     {
         public int timeMs;
         public string shape;
+    }
+
+    [Serializable]
+    public sealed class AvatarPresentationFrame
+    {
+        public string characterID;
+        public string sessionID;
+        public string profileID;
+        public string surface;
+        public string state = "idle";
+        public string emotion = "neutral";
+        public float intensity = 0.4f;
+        public string subtitle;
+        public string goal;
+        public string requestID;
+        public long updatedAt;
+    }
+
+    [Serializable]
+    public sealed class AvatarSpeechFrame
+    {
+        public string requestID;
+        public string codec = "pcm_s16le";
+        public int sampleRate = 16000;
+        public int channels = 1;
+        public string locale = "uk-UA";
+        public string mode = "push_to_talk";
     }
 
     public static class AvatarJson

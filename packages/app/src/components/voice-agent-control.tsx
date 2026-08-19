@@ -500,6 +500,13 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
     speechBusy = true
     if (!speechPlaybackStarted) move("synthesizing", "tts_synthesis_started")
     recordVoice("tts", "synthesis_started", { text })
+    const sessionID = props.sessionID()
+    if (sessionID && (await platform.routeAvatarSpeech?.(sessionID, text).catch(() => false))) {
+      speechBusy = false
+      recordVoice("tts", "playback_completed", { diagnostics: { routedToQuest: true } })
+      void drainSpeech()
+      return
+    }
     const voice = personalityVoice()
     if (!voice) {
       speechBusy = false

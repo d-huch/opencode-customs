@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 64ff619cde8c4e74a841654c8a6b72f5
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 2100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 239141
+  packageName: Gamer Girl
+  packageVersion: 1.0
+  assetPath: Assets/GamerGirl/Render pipeline/URP/Materials/MAT_GAMERGIRL_Transparent.mat
+  uploadId: 543100

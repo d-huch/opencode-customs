@@ -54,6 +54,20 @@ export const JarvisGroup = HttpApiGroup.make("server.jarvis")
     }).annotateMerge(OpenApi.annotations({ identifier: "v2.jarvis.resumeGoal", summary: "Resume a revalidated Jarvis goal" })),
   )
   .add(
+    HttpApiEndpoint.post("jarvis.replanGoal", "/api/jarvis/goals/:goalID/replan", {
+      params: { goalID: Schema.String },
+      payload: Jarvis.GoalReplan,
+      success: Schema.NullOr(Jarvis.Goal),
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.jarvis.replanGoal", summary: "Discard and rebuild a Jarvis goal plan" })),
+  )
+  .add(
+    HttpApiEndpoint.post("jarvis.cancelGoal", "/api/jarvis/goals/:goalID/cancel", {
+      params: { goalID: Schema.String },
+      payload: Jarvis.GoalCancel,
+      success: Schema.NullOr(Jarvis.GoalOutcome),
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.jarvis.cancelGoal", summary: "Cancel a durable Jarvis goal" })),
+  )
+  .add(
     HttpApiEndpoint.post("jarvis.recordGoalStep", "/api/jarvis/goals/:goalID/steps/result", {
       params: { goalID: Schema.String },
       payload: Jarvis.GoalStepResult,
@@ -92,6 +106,25 @@ export const JarvisGroup = HttpApiGroup.make("server.jarvis")
     }).annotateMerge(OpenApi.annotations({ identifier: "v2.jarvis.removeMemory", summary: "Delete a Jarvis memory record" })),
   )
   .add(
+    HttpApiEndpoint.patch("jarvis.patchMemory", "/api/jarvis/memory/:memoryID", {
+      params: { memoryID: Schema.String },
+      payload: Jarvis.MemoryPatch,
+      success: Schema.NullOr(Jarvis.MemoryRecord),
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.jarvis.patchMemory", summary: "Edit or classify a Jarvis memory record" })),
+  )
+  .add(
+    HttpApiEndpoint.post("jarvis.resolveMemoryConflict", "/api/jarvis/memory/:memoryID/conflict", {
+      params: { memoryID: Schema.String },
+      payload: Jarvis.MemoryConflictResolution,
+      success: Schema.NullOr(Jarvis.MemoryRecord),
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.jarvis.resolveMemoryConflict", summary: "Resolve a Jarvis memory conflict" })),
+  )
+  .add(
+    HttpApiEndpoint.post("jarvis.reindexMemory", "/api/jarvis/memory/reindex", {
+      success: Jarvis.MemoryBackfillResult,
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.jarvis.reindexMemory", summary: "Schedule bounded Jarvis memory embedding backfill" })),
+  )
+  .add(
     HttpApiEndpoint.get("jarvis.inbox", "/api/jarvis/inbox", {
       success: Schema.Array(Jarvis.WakeCandidate),
     }).annotateMerge(OpenApi.annotations({ identifier: "v2.jarvis.inbox", summary: "List Primary Jarvis Inbox candidates" })),
@@ -101,6 +134,18 @@ export const JarvisGroup = HttpApiGroup.make("server.jarvis")
       payload: Jarvis.WakeCreate,
       success: Schema.NullOr(Jarvis.WakeCandidate),
     }).annotateMerge(OpenApi.annotations({ identifier: "v2.jarvis.wake", summary: "Queue a bounded Jarvis wake candidate" })),
+  )
+  .add(
+    HttpApiEndpoint.post("jarvis.dismissInbox", "/api/jarvis/inbox/:wakeID/dismiss", {
+      params: { wakeID: Schema.String },
+      success: Schema.NullOr(Jarvis.WakeCandidate),
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.jarvis.dismissInbox", summary: "Dismiss a Jarvis Inbox item" })),
+  )
+  .add(
+    HttpApiEndpoint.post("jarvis.retryInbox", "/api/jarvis/inbox/:wakeID/retry", {
+      params: { wakeID: Schema.String },
+      success: Schema.NullOr(Jarvis.WakeCandidate),
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.jarvis.retryInbox", summary: "Retry a blocked Jarvis Inbox item" })),
   )
   .annotateMerge(
     OpenApi.annotations({

@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 0428ffd4ebce2d74abf70c0ea5662553
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 2100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 239141
+  packageName: Gamer Girl
+  packageVersion: 1.0
+  assetPath: Assets/GamerGirl/Render pipeline/Built-in/Materials/MAT_GAMERGIRL_HAIR_Brown.mat
+  uploadId: 543100

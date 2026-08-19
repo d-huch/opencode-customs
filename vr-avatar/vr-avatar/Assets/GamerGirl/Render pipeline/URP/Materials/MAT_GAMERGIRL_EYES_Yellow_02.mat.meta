@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 957ebc1ce01a3a043a13ca7e4978978a
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 2100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 239141
+  packageName: Gamer Girl
+  packageVersion: 1.0
+  assetPath: Assets/GamerGirl/Render pipeline/URP/Materials/MAT_GAMERGIRL_EYES_Yellow_02.mat
+  uploadId: 543100

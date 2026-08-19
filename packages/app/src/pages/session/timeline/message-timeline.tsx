@@ -342,6 +342,7 @@ export function MessageTimeline(props: {
     }
     if (responseSpeech.state === "loading") void platform.cancelLocalSpeech?.()
     stopResponseSpeech()
+    if (params.id && (await platform.routeAvatarSpeech?.(params.id, input.text).catch(() => false))) return
     const generation = responseSpeechGeneration
     if (!platform.synthesizeLocalSpeech) {
       failResponseSpeech(generation, language.t("voice.error.unsupported.description"))

@@ -58,6 +58,7 @@ import { startBackgroundCli } from "./background-cli"
 import { setNativeTranslations } from "./native-translations"
 import { startResearchBrowser, type ResearchBrowserController } from "./research-browser"
 import { startAvatarBridge, type AvatarBridgeController } from "./avatar-bridge"
+import { startPCMRecognition } from "./native-voice"
 import { synthesizeLocalSpeech } from "./local-tts"
 
 const APP_NAMES: Record<string, string> = {
@@ -288,6 +289,7 @@ const main = Effect.gen(function* () {
       stateDirectory: join(app.getPath("userData"), "avatar-bridge"),
       log: writeLog,
       synthesize: synthesizeLocalSpeech,
+      startRecognition: startPCMRecognition,
     }),
   ).pipe(
     Effect.catch((error) =>
@@ -372,12 +374,19 @@ const main = Effect.gen(function* () {
         connectedClients: [],
         message: "Unity Avatar Bridge is unavailable",
       },
+    routeAvatarSpeech: (sessionID, text) => avatarBridge?.speakSession(sessionID, text) ?? Promise.resolve(false),
     updateAvatarBridgeConfig: (input) =>
       avatarBridge?.updateConfig(input) ?? Promise.reject(new Error("Unity Avatar Bridge is unavailable")),
     startAvatarBridgePairing: () => {
       if (!avatarBridge) throw new Error("Unity Avatar Bridge is unavailable")
       return avatarBridge.startPairing()
     },
+    cancelAvatarBridgePairing: () => {
+      if (!avatarBridge) throw new Error("Unity Avatar Bridge is unavailable")
+      avatarBridge.cancelPairing()
+    },
+    retryAvatarBridgeSync: () =>
+      avatarBridge?.retrySync() ?? Promise.reject(new Error("Unity Avatar Bridge is unavailable")),
     revokeAvatarBridgeDevice: (id) =>
       avatarBridge?.revokeDevice(id) ?? Promise.reject(new Error("Unity Avatar Bridge is unavailable")),
     resolveAvatarBridgeApproval: (id, approved) => avatarBridge?.resolveApproval(id, approved) ?? false,

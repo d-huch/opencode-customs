@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process"
-import { stat } from "node:fs/promises"
+import { copyFile, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
 import { basename, join } from "node:path"
 import { app, BrowserWindow, Notification, clipboard, dialog, ipcMain, shell, systemPreferences } from "electron"
 import type { IpcMainEvent, IpcMainInvokeEvent } from "electron"
@@ -62,6 +62,10 @@ const pickerFilters = (ext?: string[]) => {
 
 const pickedFiles = createPickedFileAuthorizations()
 
+const avatarModelDirectory = () => join(app.getPath("userData"), "avatar")
+const avatarModelPath = () => join(avatarModelDirectory(), "jarvis.vrm")
+const avatarModelMetadataPath = () => join(avatarModelDirectory(), "jarvis.json")
+
 type Deps = {
   killSidecar: () => Promise<void> | void
   relaunch: () => void
@@ -87,6 +91,7 @@ type Deps = {
   showResearchBrowser: () => Promise<void>
   clearResearchBrowserData: () => Promise<void>
   getAvatarBridgeStatus: () => AvatarBridgeStatus
+  routeAvatarSpeech: (sessionID: string, text: string) => Promise<boolean>
   updateAvatarBridgeConfig: (input: {
     lanEnabled?: boolean
     interactionAutoApprove?: boolean
@@ -105,6 +110,8 @@ type Deps = {
     }>
   }) => Promise<unknown>
   startAvatarBridgePairing: () => unknown
+  cancelAvatarBridgePairing: () => unknown
+  retryAvatarBridgeSync: () => unknown
   revokeAvatarBridgeDevice: (id: string) => Promise<unknown>
   resolveAvatarBridgeApproval: (id: string, approved: boolean) => boolean
   deleteAvatarBridgeMemory: (id: string) => Promise<unknown>
@@ -166,10 +173,56 @@ export function registerIpcHandlers(deps: Deps) {
   ipcMain.handle("show-research-browser", () => deps.showResearchBrowser())
   ipcMain.handle("clear-research-browser-data", () => deps.clearResearchBrowserData())
   ipcMain.handle("get-avatar-bridge-status", () => deps.getAvatarBridgeStatus())
+  ipcMain.handle("route-avatar-speech", (_event: IpcMainInvokeEvent, sessionID: string, text: string) => {
+    if (!sessionID || !text || text.length > 100_000) throw new Error("Invalid avatar speech request")
+    return deps.routeAvatarSpeech(sessionID, text)
+  })
+  ipcMain.handle("select-avatar-model", async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ["openFile"],
+      title: "Choose Jarvis VRM model",
+      filters: [{ name: "VRM avatar", extensions: ["vrm"] }],
+    })
+    if (result.canceled) return null
+    const source = result.filePaths[0]
+    if (!source) return null
+    const info = await stat(source)
+    if (info.size > 100 * 1024 * 1024) throw new Error("VRM model exceeds the 100 MB limit")
+    await mkdir(avatarModelDirectory(), { recursive: true })
+    const temporary = `${avatarModelPath()}.tmp`
+    await copyFile(source, temporary)
+    await rename(temporary, avatarModelPath())
+    const updatedAt = Date.now()
+    await writeFile(
+      avatarModelMetadataPath(),
+      JSON.stringify({ name: basename(source), bytes: info.size, updatedAt }),
+    )
+    return { name: basename(source), bytes: info.size, updatedAt }
+  })
+  ipcMain.handle("get-avatar-model", async () => {
+    const [data, metadata] = await Promise.all([
+      readFile(avatarModelPath()).catch(() => undefined),
+      readFile(avatarModelMetadataPath(), "utf8")
+        .then((value) => JSON.parse(value) as { name: string; bytes: number; updatedAt: number })
+        .catch(() => undefined),
+    ])
+    if (!data) return null
+    return {
+      data: data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength),
+      name: metadata?.name ?? "Jarvis.vrm",
+      bytes: metadata?.bytes ?? data.byteLength,
+      updatedAt: metadata?.updatedAt ?? 0,
+    }
+  })
+  ipcMain.handle("clear-avatar-model", async () => {
+    await Promise.all([rm(avatarModelPath(), { force: true }), rm(avatarModelMetadataPath(), { force: true })])
+  })
   ipcMain.handle("update-avatar-bridge-config", (_event: IpcMainInvokeEvent, input) =>
     deps.updateAvatarBridgeConfig(input),
   )
   ipcMain.handle("start-avatar-bridge-pairing", () => deps.startAvatarBridgePairing())
+  ipcMain.handle("cancel-avatar-bridge-pairing", () => deps.cancelAvatarBridgePairing())
+  ipcMain.handle("retry-avatar-bridge-sync", () => deps.retryAvatarBridgeSync())
   ipcMain.handle("revoke-avatar-bridge-device", (_event: IpcMainInvokeEvent, id: string) =>
     deps.revokeAvatarBridgeDevice(id),
   )

@@ -151,6 +151,10 @@ import type {
   ServerJarvisCreateGoalOutput,
   ServerJarvisResumeGoalInput,
   ServerJarvisResumeGoalOutput,
+  ServerJarvisReplanGoalInput,
+  ServerJarvisReplanGoalOutput,
+  ServerJarvisCancelGoalInput,
+  ServerJarvisCancelGoalOutput,
   ServerJarvisRecordGoalStepInput,
   ServerJarvisRecordGoalStepOutput,
   ServerJarvisOutcomesInput,
@@ -163,9 +167,18 @@ import type {
   ServerJarvisRememberOutput,
   ServerJarvisRemoveMemoryInput,
   ServerJarvisRemoveMemoryOutput,
+  ServerJarvisPatchMemoryInput,
+  ServerJarvisPatchMemoryOutput,
+  ServerJarvisResolveMemoryConflictInput,
+  ServerJarvisResolveMemoryConflictOutput,
+  ServerJarvisReindexMemoryOutput,
   ServerJarvisInboxOutput,
   ServerJarvisWakeInput,
   ServerJarvisWakeOutput,
+  ServerJarvisDismissInboxInput,
+  ServerJarvisDismissInboxOutput,
+  ServerJarvisRetryInboxInput,
+  ServerJarvisRetryInboxOutput,
 } from "./types"
 import { ClientError } from "./client-error"
 
@@ -1240,6 +1253,7 @@ export function make(options: ClientOptions) {
               models: input["models"],
               plannerTimeoutMs: input["plannerTimeoutMs"],
               plannerIdleUnloadMs: input["plannerIdleUnloadMs"],
+              plannerEscalationMinWords: input["plannerEscalationMinWords"],
               initiative: input["initiative"],
               updatedAt: input["updatedAt"],
             },
@@ -1324,6 +1338,30 @@ export function make(options: ClientOptions) {
           },
           requestOptions,
         ),
+      replanGoal: (input: ServerJarvisReplanGoalInput, requestOptions?: RequestOptions) =>
+        request<ServerJarvisReplanGoalOutput>(
+          {
+            method: "POST",
+            path: `/api/jarvis/goals/${encodeURIComponent(input.goalID)}/replan`,
+            body: { reason: input["reason"] },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      cancelGoal: (input: ServerJarvisCancelGoalInput, requestOptions?: RequestOptions) =>
+        request<ServerJarvisCancelGoalOutput>(
+          {
+            method: "POST",
+            path: `/api/jarvis/goals/${encodeURIComponent(input.goalID)}/cancel`,
+            body: { summary: input["summary"], changedEntityIDs: input["changedEntityIDs"] },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
       recordGoalStep: (input: ServerJarvisRecordGoalStepInput, requestOptions?: RequestOptions) =>
         request<ServerJarvisRecordGoalStepOutput>(
           {
@@ -1401,6 +1439,7 @@ export function make(options: ClientOptions) {
               pinned: input["pinned"],
               conflictsWith: input["conflictsWith"],
               embedding: input["embedding"],
+              embeddingModel: input["embeddingModel"],
               createdAt: input["createdAt"],
               updatedAt: input["updatedAt"],
               lastUsedAt: input["lastUsedAt"],
@@ -1416,6 +1455,47 @@ export function make(options: ClientOptions) {
           {
             method: "DELETE",
             path: `/api/jarvis/memory/${encodeURIComponent(input.memoryID)}`,
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      patchMemory: (input: ServerJarvisPatchMemoryInput, requestOptions?: RequestOptions) =>
+        request<ServerJarvisPatchMemoryOutput>(
+          {
+            method: "PATCH",
+            path: `/api/jarvis/memory/${encodeURIComponent(input.memoryID)}`,
+            body: {
+              text: input["text"],
+              confidence: input["confidence"],
+              importance: input["importance"],
+              lifecycle: input["lifecycle"],
+              pinned: input["pinned"],
+            },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      resolveMemoryConflict: (input: ServerJarvisResolveMemoryConflictInput, requestOptions?: RequestOptions) =>
+        request<ServerJarvisResolveMemoryConflictOutput>(
+          {
+            method: "POST",
+            path: `/api/jarvis/memory/${encodeURIComponent(input.memoryID)}/conflict`,
+            body: { action: input["action"], otherMemoryID: input["otherMemoryID"] },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      reindexMemory: (requestOptions?: RequestOptions) =>
+        request<ServerJarvisReindexMemoryOutput>(
+          {
+            method: "POST",
+            path: `/api/jarvis/memory/reindex`,
             successStatus: 200,
             declaredStatuses: [401, 400],
             empty: false,
@@ -1440,6 +1520,28 @@ export function make(options: ClientOptions) {
               priority: input["priority"],
               notBefore: input["notBefore"],
             },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      dismissInbox: (input: ServerJarvisDismissInboxInput, requestOptions?: RequestOptions) =>
+        request<ServerJarvisDismissInboxOutput>(
+          {
+            method: "POST",
+            path: `/api/jarvis/inbox/${encodeURIComponent(input.wakeID)}/dismiss`,
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      retryInbox: (input: ServerJarvisRetryInboxInput, requestOptions?: RequestOptions) =>
+        request<ServerJarvisRetryInboxOutput>(
+          {
+            method: "POST",
+            path: `/api/jarvis/inbox/${encodeURIComponent(input.wakeID)}/retry`,
             successStatus: 200,
             declaredStatuses: [401, 400],
             empty: false,

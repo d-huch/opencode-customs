@@ -1,9 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "33c92ed2-236e-4a2c-96ae-4500d15f82b7",
+  "id": "96a6a284-459c-4731-85cd-0449faadcf92",
   "prevIds": [
-    "cb8ea7b5-6186-43b2-8834-ec73636b8fc0"
+    "33c92ed2-236e-4a2c-96ae-4500d15f82b7"
   ],
   "ddl": [
     {
@@ -625,6 +625,16 @@
       "table": "jarvis_memory"
     },
     {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "embedding_model",
+      "entityType": "columns",
+      "table": "jarvis_memory"
+    },
+    {
       "type": "integer",
       "notNull": false,
       "autoincrement": false,
@@ -925,12 +935,32 @@
       "table": "jarvis_wake"
     },
     {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "blocked_reason",
+      "entityType": "columns",
+      "table": "jarvis_wake"
+    },
+    {
       "type": "integer",
       "notNull": true,
       "autoincrement": false,
       "default": null,
       "generated": null,
       "name": "time_created",
+      "entityType": "columns",
+      "table": "jarvis_wake"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_updated",
       "entityType": "columns",
       "table": "jarvis_wake"
     },

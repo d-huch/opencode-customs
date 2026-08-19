@@ -8,7 +8,7 @@ import { base64Encode } from "@opencode-ai/core/util/encode"
 import { Button } from "@opencode-ai/ui/button"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { Icon } from "@opencode-ai/ui/icon"
-import { Logo } from "@opencode-ai/ui/logo"
+import { ProductWordmark } from "@/components/product-wordmark"
 import { useNavigate } from "@solidjs/router"
 import { DateTime } from "luxon"
 import { createMemo, For, Match, Switch } from "solid-js"
@@ -67,7 +67,7 @@ export function LegacyHome() {
 
   return (
     <div class="mx-auto mt-55 w-full md:w-auto px-4">
-      <Logo class="md:w-xl opacity-12" />
+      <ProductWordmark class="text-[clamp(2.5rem,8vw,5.5rem)] text-text-strong opacity-12" />
       <Button
         size="large"
         variant="ghost"

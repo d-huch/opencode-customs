@@ -59,7 +59,6 @@ export type HomeProjectsViewProps = {
   onOpenChat: () => void
   chatSelected: Accessor<boolean>
   onOpenSettings: () => void
-  onOpenHelp: () => void
 }
 
 export function HomeProjectsView(props: HomeProjectsViewProps) {
@@ -155,7 +154,6 @@ export function HomeProjectsView(props: HomeProjectsViewProps) {
         onOpenChat={props.onOpenChat}
         chatSelected={props.chatSelected}
         onOpenSettings={props.onOpenSettings}
-        onOpenHelp={props.onOpenHelp}
         language={props.language}
       />
     </aside>
@@ -167,7 +165,6 @@ export function HomeUtilityNav(props: {
   onOpenChat: () => void
   chatSelected: Accessor<boolean>
   onOpenSettings: () => void
-  onOpenHelp: () => void
   language: ReturnType<typeof useLanguage>
 }) {
   return (
@@ -188,14 +185,6 @@ export function HomeUtilityNav(props: {
       >
         <IconV2 name="settings-gear" size="small" />
         <span class={HOME_PROJECT_NAV_LABEL}>{props.language.t("sidebar.settings")}</span>
-      </HomeProjectNavButton>
-      <HomeProjectNavButton
-        type="button"
-        class="text-v2-text-text-faint [&>[data-slot=icon-svg]]:text-v2-icon-icon-muted"
-        onClick={props.onOpenHelp}
-      >
-        <IconV2 name="help" size="small" />
-        <span class={HOME_PROJECT_NAV_LABEL}>{props.language.t("sidebar.help")}</span>
       </HomeProjectNavButton>
     </div>
   )

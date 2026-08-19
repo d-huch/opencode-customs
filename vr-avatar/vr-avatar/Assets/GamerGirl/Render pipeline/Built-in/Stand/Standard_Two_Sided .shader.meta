@@ -1,0 +1,16 @@
+fileFormatVersion: 2
+guid: 9a05f5e278d7e794b861aa0979ece425
+ShaderImporter:
+  externalObjects: {}
+  defaultTextures: []
+  nonModifiableTextures: []
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 239141
+  packageName: Gamer Girl
+  packageVersion: 1.0
+  assetPath: Assets/GamerGirl/Render pipeline/Built-in/Stand/Standard_Two_Sided .shader
+  uploadId: 543100

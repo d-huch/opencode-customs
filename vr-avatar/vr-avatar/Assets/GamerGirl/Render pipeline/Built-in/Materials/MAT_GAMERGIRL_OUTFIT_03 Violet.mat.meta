@@ -1,0 +1,16 @@
+fileFormatVersion: 2
+guid: 10042b6b587726440a70ed1a9cdccfb4
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 2100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 239141
+  packageName: Gamer Girl
+  packageVersion: 1.0
+  assetPath: Assets/GamerGirl/Render pipeline/Built-in/Materials/MAT_GAMERGIRL_OUTFIT_03
+    Violet.mat
+  uploadId: 543100

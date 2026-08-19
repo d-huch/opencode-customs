@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: fe79d7ac6a615ef479a5b6b2dfd694fe
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 2100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 239141
+  packageName: Gamer Girl
+  packageVersion: 1.0
+  assetPath: Assets/GamerGirl/Render pipeline/URP/Materials/MAT_GAMERGIRL_EYES_Cosmic_04.mat
+  uploadId: 543100

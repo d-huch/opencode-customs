@@ -192,4 +192,18 @@ describe("Avatar Bridge v2 state", () => {
       id: "old", kind: "episodic", scope: "save", source: "avatar-bridge-v2-migration", confidence: 0.75,
     })
   })
+
+  test("persists v4 migration markers and coalesces durable outbox operations", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "avatar-bridge-v4-outbox-"))
+    directories.push(directory)
+    const path = join(directory, "state.json")
+    const store = await AvatarPersistentStore.open(path)
+    await store.markMigration("http://localhost:4096/", { legacyMemoryImportedAt: 10 })
+    await store.enqueueOutbox({ sourceID: "memory:1", operation: "upsert", payload: { text: "first" } })
+    await store.enqueueOutbox({ sourceID: "memory:1", operation: "delete", payload: { memoryID: "memory-1" } })
+    const reopened = await AvatarPersistentStore.open(path)
+    expect(reopened.migration("http://localhost:4096/").legacyMemoryImportedAt).toBe(10)
+    expect(reopened.outbox()).toHaveLength(1)
+    expect(reopened.outbox()[0]).toMatchObject({ sourceID: "memory:1", operation: "delete" })
+  })
 })

@@ -124,7 +124,7 @@ export const DialogSettings: Component<{
           <SettingsPersonalizationV2 />
         </TabsV2.Content>
         <TabsV2.Content value="jarvis" class="settings-v2-panel">
-          <SettingsJarvisV2 />
+          <SettingsJarvisV2 onNavigate={(value) => setTab(value)} />
         </TabsV2.Content>
         <TabsV2.Content value="voice" class="settings-v2-panel">
           <SettingsVoiceV2 sessionID={props.sessionID} />
@@ -133,7 +133,7 @@ export const DialogSettings: Component<{
           <SettingsWebSearchV2 />
         </TabsV2.Content>
         <TabsV2.Content value="avatar-bridge" class="settings-v2-panel">
-          <SettingsAvatarBridgeV2 />
+          <SettingsAvatarBridgeV2 onNavigate={(value) => setTab(value)} />
         </TabsV2.Content>
         <TabsV2.Content value="shortcuts" class="settings-v2-panel">
           <SettingsKeybinds v2 />

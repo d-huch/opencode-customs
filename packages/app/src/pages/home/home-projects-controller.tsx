@@ -122,7 +122,6 @@ export function createHomeProjectsController(home: HomeController) {
       chat: home.chat.open,
       chatSelected: home.chat.selected,
       settings: openSettings,
-      help: () => platform.openExternal("https://opencode.ai/desktop-feedback"),
     },
   }
 }

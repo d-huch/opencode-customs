@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: b8b214797ee13bf4297a9541cefcf718
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 11400000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 239141
+  packageName: Gamer Girl
+  packageVersion: 1.0
+  assetPath: Assets/GamerGirl/Render pipeline/HDRP/HDRPDefaultResources/HDRenderPipelineAsset.asset
+  uploadId: 543100

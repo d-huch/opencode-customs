@@ -3,7 +3,7 @@ import { dict as en } from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
-  "desktop.menu.app": "OpenCode",
+  "desktop.menu.app": "OpenCode Customs",
   "desktop.menu.file": "Dosya",
   "desktop.menu.edit": "Düzen",
   "desktop.menu.view": "Görünüm",
@@ -43,11 +43,11 @@ export const dict = {
   "desktop.menu.nextProject": "Sonraki proje",
   "desktop.menu.minimize": "Simge durumuna küçült",
   "desktop.menu.maximize": "Ekranı kapla",
-  "desktop.menu.documentation": "OpenCode belgeleri",
+  "desktop.menu.documentation": "OpenCode Customs belgeleri",
   "desktop.menu.supportForum": "Destek forumu",
   "desktop.menu.shareFeedback": "Geri bildirim paylaş",
   "desktop.menu.reportBug": "Hata bildir",
-  "desktop.menu.ariaLabel": "OpenCode menüsü",
+  "desktop.menu.ariaLabel": "OpenCode Customs menüsü",
 
   "desktop.updater.dialog.checkFailed.message": "Güncellemeler kontrol edilemedi.",
   "desktop.updater.dialog.checkFailed.title": "Güncelleme hatası",
@@ -62,9 +62,9 @@ export const dict = {
   "desktop.recovery.action.exportLogs": "Günlükleri dışa aktar",
   "desktop.recovery.action.keepWaiting": "Beklemeye devam et",
   "desktop.recovery.action.quit": "Çık",
-  "desktop.recovery.loadFailed": "OpenCode yüklenemedi",
-  "desktop.recovery.terminated": "OpenCode penceresi beklenmedik şekilde sonlandırıldı",
-  "desktop.recovery.unresponsive": "OpenCode yanıt vermiyor",
+  "desktop.recovery.loadFailed": "OpenCode Customs yüklenemedi",
+  "desktop.recovery.terminated": "OpenCode Customs penceresi beklenmedik şekilde sonlandırıldı",
+  "desktop.recovery.unresponsive": "OpenCode Customs yanıt vermiyor",
   "desktop.recovery.unresponsive.detail":
     "Uygulamayı yeniden başlatabilir, günlükleri açabilir veya beklemeye devam edebilirsiniz.",
   "desktop.recovery.loadFailed.detail": "Pencere: {{window}}\nURL: {{url}}\nHata: {{code}} {{description}}",
@@ -245,7 +245,7 @@ export const dict = {
   "provider.connect.status.waiting": "Yetkilendirme bekleniyor...",
   "provider.connect.status.failed": "Yetkilendirme başarısız: {{error}}",
   "provider.connect.apiKey.description":
-    "{{provider}} hesabınızı bağlamak ve OpenCode'da {{provider}} modellerini kullanmak için API anahtarınızı girin.",
+    "{{provider}} hesabınızı bağlamak ve OpenCode Customs'da {{provider}} modellerini kullanmak için API anahtarınızı girin.",
   "provider.connect.apiKey.label": "{{provider}} API anahtarı",
   "provider.connect.apiKey.placeholder": "API anahtarı",
   "provider.connect.apiKey.required": "API anahtarı gerekli",
@@ -259,7 +259,7 @@ export const dict = {
   "provider.connect.oauth.code.visit.prefix": "Yetkilendirme kodunuzu almak için ",
   "provider.connect.oauth.code.visit.link": "bu bağlantıya",
   "provider.connect.oauth.code.visit.suffix":
-    " gidin; ardından hesabınızı bağlayarak OpenCode'da {{provider}} modellerini kullanın.",
+    " gidin; ardından hesabınızı bağlayarak OpenCode Customs'da {{provider}} modellerini kullanın.",
   "provider.connect.oauth.code.label": "{{method}} yetkilendirme kodu",
   "provider.connect.oauth.code.placeholder": "Yetkilendirme kodu",
   "provider.connect.oauth.code.required": "Yetkilendirme kodu gerekli",
@@ -267,7 +267,7 @@ export const dict = {
   "provider.connect.oauth.auto.visit.prefix": "",
   "provider.connect.oauth.auto.visit.link": "Bu bağlantıya",
   "provider.connect.oauth.auto.visit.suffix":
-    " tıklayarak aşağıdaki kodu girin ve hesabınızı bağlayarak OpenCode'da {{provider}} modellerini kullanın.",
+    " tıklayarak aşağıdaki kodu girin ve hesabınızı bağlayarak OpenCode Customs'da {{provider}} modellerini kullanın.",
   "provider.connect.oauth.auto.confirmationCode": "Onay kodu",
   "provider.connect.toast.connected.title": "{{provider}} bağlandı",
   "provider.connect.toast.connected.description": "{{provider}} modelleri artık kullanımda.",
@@ -519,12 +519,12 @@ export const dict = {
   "wsl.onboarding.needAnotherDistroHint": "WSL kataloğundan bir Linux dağıtımı kurun",
   "wsl.onboarding.wslNotInstalled.title": "WSL kurulu değil",
   "wsl.onboarding.wslNotInstalled.description":
-    "OpenCode'un WSL sunucusu ekleyebilmesi için önce WSL (Linux için Windows Alt Sistemi) kurulmalıdır",
+    "OpenCode Customs'un WSL sunucusu ekleyebilmesi için önce WSL (Linux için Windows Alt Sistemi) kurulmalıdır",
   "wsl.onboarding.wslUnavailable.title": "WSL kullanılamıyor",
-  "wsl.onboarding.wslUnavailable.description": "OpenCode bu makinede WSL'yi doğrulayamadı.",
+  "wsl.onboarding.wslUnavailable.description": "OpenCode Customs bu makinede WSL'yi doğrulayamadı.",
   "wsl.onboarding.installWsl": "WSL'yi kur",
   "wsl.onboarding.windowsRestartRequired":
-    "WSL kurulumunu tamamlamak için Windows'u yeniden başlatın, ardından OpenCode'u tekrar açın.",
+    "WSL kurulumunu tamamlamak için Windows'u yeniden başlatın, ardından OpenCode Customs'u tekrar açın.",
   "wsl.onboarding.next": "İleri",
   "wsl.onboarding.refresh": "Yenile",
   "wsl.onboarding.allDistrosAdded": "Kurulu tüm dağıtımlar zaten eklenmiş.",
@@ -549,7 +549,7 @@ export const dict = {
   "help.tabs.title": "Sekmelerle tanışın",
   "help.tabs.description": "Çalışmalarınızı ve etkin oturumlarınızı sekmelerle düzenleyin",
   "help.tabs.date": "14 Temmuz",
-  "help.tabs.introduction": "OpenCode Desktop artık sekmeler üzerine kurulu.",
+  "help.tabs.introduction": "OpenCode Customs Desktop artık sekmeler üzerine kurulu.",
   "help.tabs.sessions":
     "Bir sekmede yeni oturum başlatın veya projelerinizden mevcut bir oturumu açın. Yeni bir işe başlarken yeni sekme açın, işiniz bittiğinde sekmeyi kapatın.",
   "help.tabs.organize":
@@ -673,7 +673,7 @@ export const dict = {
   "toast.session.listFailed.title": "{{project}} için oturumlar yüklenemedi",
 
   "toast.update.title": "Güncelleme mevcut",
-  "toast.update.description": "OpenCode'un yeni bir sürümü ({{version}}) yüklemeye hazır.",
+  "toast.update.description": "OpenCode Customs'un yeni bir sürümü ({{version}}) yüklemeye hazır.",
   "toast.update.action.installRestart": "Yükle ve yeniden başlat",
   "toast.update.action.notYet": "Şimdi değil",
 
@@ -708,7 +708,7 @@ export const dict = {
   "error.chain.modelNotFound": "Model bulunamadı: {{provider}}/{{model}}",
   "error.chain.checkConfig": "Yapılandırma dosyanızdaki (opencode.json) sağlayıcı/model adlarını kontrol edin",
   "error.chain.mcpFailed":
-    'MCP sunucusu "{{name}}" çalıştırılamadı. Not: OpenCode henüz MCP kimlik doğrulamasını desteklemiyor.',
+    'MCP sunucusu "{{name}}" çalıştırılamadı. Not: OpenCode Customs henüz MCP kimlik doğrulamasını desteklemiyor.',
   "error.chain.providerAuthFailed": "Sağlayıcı kimlik doğrulaması başarısız ({{provider}}): {{message}}",
   "error.chain.providerInitFailed":
     '"{{provider}}" sağlayıcısı başlatılamadı. Kimlik bilgilerini ve yapılandırmayı kontrol edin.',
@@ -926,7 +926,7 @@ export const dict = {
   "sidebar.workspaces.enable": "Çalışma alanlarını etkinleştir",
   "sidebar.workspaces.disable": "Çalışma alanlarını devre dışı bırak",
   "sidebar.gettingStarted.title": "Başlarken",
-  "sidebar.gettingStarted.line1": "OpenCode ücretsiz modeller içerir, böylece hemen başlayabilirsiniz.",
+  "sidebar.gettingStarted.line1": "OpenCode Customs ücretsiz modeller içerir, böylece hemen başlayabilirsiniz.",
   "sidebar.gettingStarted.line2": "Claude, GPT, Gemini vb. modelleri kullanmak için herhangi bir sağlayıcı bağlayın.",
   "sidebar.project.recentSessions": "Son oturumlar",
   "sidebar.project.viewAllSessions": "Tüm oturumları görüntüle",
@@ -953,19 +953,19 @@ export const dict = {
   "settings.general.section.display": "Ekran",
 
   "settings.general.row.language.title": "Dil",
-  "settings.general.row.language.description": "OpenCode'un görünüm dilini değiştirin",
+  "settings.general.row.language.description": "OpenCode Customs'un görünüm dilini değiştirin",
   "settings.general.row.shell.title": "Terminal Kabuğu",
   "settings.general.row.shell.description":
     "Terminalinizde kullanılacak kabuğu seçin. Uyumlu kabuklar, ajan araç çağrılarında da kullanılır.",
   "settings.general.row.shell.autoDefault": "Otomatik (Varsayılan)",
   "settings.general.row.shell.terminalOnly": "yalnızca terminal",
   "settings.general.row.appearance.title": "Görünüm",
-  "settings.general.row.appearance.description": "OpenCode'un cihazınızdaki görünümünü özelleştirin",
+  "settings.general.row.appearance.description": "OpenCode Customs'un cihazınızdaki görünümünü özelleştirin",
   "settings.general.row.colorScheme.title": "Renk şeması",
   "settings.general.row.colorScheme.description":
-    "OpenCode'un sistem, açık veya koyu temayı takip etip etmeyeceğini seçin",
+    "OpenCode Customs'un sistem, açık veya koyu temayı takip etip etmeyeceğini seçin",
   "settings.general.row.theme.title": "Tema",
-  "settings.general.row.theme.description": "OpenCode'un temasını özelleştirin.",
+  "settings.general.row.theme.description": "OpenCode Customs'un temasını özelleştirin.",
   "settings.general.row.font.title": "Kod yazı tipi",
   "settings.general.row.font.description": "Kod bloklarında kullanılan yazı tipini özelleştirin",
   "settings.general.row.terminalFont.title": "Terminal yazı tipi",
@@ -1022,7 +1022,7 @@ export const dict = {
   "settings.general.row.releaseNotes.description": "Güncellemelerden sonra Yenilikler bildirimlerini göster",
 
   "settings.updates.row.startup.title": "Başlangıçta güncellemeleri kontrol et",
-  "settings.updates.row.startup.description": "OpenCode başladığında otomatik güncelleme kontrolü yap",
+  "settings.updates.row.startup.description": "OpenCode Customs başladığında otomatik güncelleme kontrolü yap",
   "settings.updates.row.check.title": "Güncellemeleri kontrol et",
   "settings.updates.row.check.description": "Elle güncelleme kontrolü yap ve varsa yükle",
   "settings.updates.action.checkNow": "Şimdi kontrol et",
@@ -1030,7 +1030,7 @@ export const dict = {
   "settings.updates.action.downloading": "İndiriliyor...",
   "settings.updates.action.installing": "Kuruluyor...",
   "settings.updates.toast.latest.title": "Güncelsiniz",
-  "settings.updates.toast.latest.description": "OpenCode'un en son sürümünü kullanıyorsunuz.",
+  "settings.updates.toast.latest.description": "OpenCode Customs'un en son sürümünü kullanıyorsunuz.",
 
   "sound.option.none": "Yok",
   "sound.option.alert01": "Uyarı 01",
@@ -1446,10 +1446,10 @@ export const dict = {
   "status.popover.runtime.router.reason.switchReady": "Target model passed the readiness check",
   "status.popover.runtime.router.reason.switchFailoverReady": "Fallback model passed the readiness check",
   "status.popover.runtime.router.reason.switchPreviousBusy": "Previous model is still used by another request",
-  "status.popover.runtime.router.reason.switchPreviousExternal": "Previous model was loaded outside OpenCode and was kept",
+  "status.popover.runtime.router.reason.switchPreviousExternal": "Previous model was loaded outside OpenCode Customs and was kept",
   "status.popover.runtime.router.reason.switchPreviousUnloaded": "Previous managed model was safely unloaded",
   "status.popover.runtime.router.reason.switchCleanupFailed": "Previous model cleanup failed; the active model is still ready",
-  "status.popover.runtime.router.reason.switchContextPreserved": "LM Studio context was kept without an OpenCode override",
+  "status.popover.runtime.router.reason.switchContextPreserved": "LM Studio context was kept without an OpenCode Customs override",
   "status.popover.runtime.router.reason.switchNoCandidate": "No compatible model is available",
   "status.popover.runtime.router.reason.switchUnconfigured": "LM Studio model management is not configured",
   "status.popover.runtime.router.reason.switchMemory": "Not enough safe memory to load this model",
@@ -1706,7 +1706,7 @@ export const dict = {
   "settings.general.voice.provider.local": "Local Docker TTS",
   "settings.general.voice.provider.fish": "Fish Audio Local",
   "settings.general.voice.fish.endpoint.title": "Local Fish Speech endpoint",
-  "settings.general.voice.fish.endpoint.description": "Native macOS Fish Speech /v1/tts endpoint using PyTorch MPS. OpenCode sends no API key and never falls back to cloud, Apple speech, or CPU.",
+  "settings.general.voice.fish.endpoint.description": "Native macOS Fish Speech /v1/tts endpoint using PyTorch MPS. OpenCode Customs sends no API key and never falls back to cloud, Apple speech, or CPU.",
   "settings.general.voice.fish.status.check": "Check MPS server",
   "settings.general.voice.fish.status.checking": "Checking…",
   "settings.general.voice.fish.status.ready": "PyTorch MPS server ready · {{latency}} ms",
@@ -2016,7 +2016,7 @@ export const dict = {
   "personalization.archetype.sarcastic": "Sarcastic",
   "personalization.archetype.sarcastic.description": "Light dry sarcasm without insults.",
   "provider.llamaServer.title": "llama.cpp server",
-  "provider.llamaServer.description": "Connect an already running llama-server. OpenCode discovers single-model and router modes without loading or unloading models.",
+  "provider.llamaServer.description": "Connect an already running llama-server. OpenCode Customs discovers single-model and router modes without loading or unloading models.",
   "provider.llamaServer.endpoint": "Endpoint",
   "provider.llamaServer.apiKey": "API key (optional)",
   "provider.llamaServer.saveTest": "Save and test",

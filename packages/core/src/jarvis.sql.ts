@@ -99,6 +99,7 @@ export const JarvisMemoryTable = sqliteTable(
     pinned: integer({ mode: "boolean" }).notNull().default(false),
     conflicts_with: text({ mode: "json" }).$type<readonly string[]>().notNull(),
     embedding: text({ mode: "json" }).$type<readonly number[]>(),
+    embedding_model: text({ mode: "json" }).$type<Jarvis.ModelRef>(),
     last_used_at: integer(),
     ...Timestamps,
   },
@@ -121,7 +122,9 @@ export const JarvisWakeTable = sqliteTable(
     priority: integer().notNull(),
     status: text().$type<Jarvis.WakeCandidate["status"]>().notNull(),
     not_before: integer().notNull(),
+    blocked_reason: text(),
     time_created: integer().notNull(),
+    time_updated: integer().notNull(),
   },
   (table) => [index("jarvis_wake_status_time_idx").on(table.status, table.not_before)],
 )

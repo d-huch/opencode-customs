@@ -31,6 +31,8 @@ final class VoiceAgent {
   private var retryAttempted = false
   private var taskGeneration = 0
   private var lastLevelAt = Date.distantPast
+  private var pcmSampleRate = 16_000.0
+  private var pcmRemainder = Data()
 
   func start(locale: String) {
     guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: locale)), recognizer.isAvailable else {
@@ -57,6 +59,50 @@ final class VoiceAgent {
     } catch {
       finish(error: errorDescription(error))
     }
+  }
+
+  func startPCM(locale: String, sampleRate: Double) {
+    guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: locale)), recognizer.isAvailable else {
+      finish(error: "Speech recognition is unavailable for \(locale).")
+      return
+    }
+    self.recognizer = recognizer
+    pcmSampleRate = sampleRate
+    startRecognitionTask(requiresOnDevice: recognizer.supportsOnDeviceRecognition)
+    emit(Output(type: "listening", text: nil, error: nil))
+    FileHandle.standardInput.readabilityHandler = { [weak self] handle in
+      guard let self else { return }
+      let data = handle.availableData
+      if data.isEmpty {
+        DispatchQueue.main.async { self.endPCMInput() }
+        return
+      }
+      appendPCM(data)
+    }
+  }
+
+  private func appendPCM(_ data: Data) {
+    pcmRemainder.append(data)
+    let byteCount = pcmRemainder.count - pcmRemainder.count % 2
+    guard byteCount > 0,
+          let format = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: pcmSampleRate, channels: 1, interleaved: true),
+          let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(byteCount / 2)),
+          let samples = buffer.int16ChannelData?[0] else { return }
+    pcmRemainder.prefix(byteCount).withUnsafeBytes { bytes in
+      guard let source = bytes.baseAddress else { return }
+      memcpy(samples, source, byteCount)
+    }
+    buffer.frameLength = buffer.frameCapacity
+    request.append(buffer)
+    pcmRemainder.removeFirst(byteCount)
+  }
+
+  private func endPCMInput() {
+    guard !finished, !endingAudio else { return }
+    endingAudio = true
+    FileHandle.standardInput.readabilityHandler = nil
+    request.endAudio()
+    DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in self?.finish() }
   }
 
   private func startRecognitionTask(requiresOnDevice: Bool) {
@@ -152,6 +198,7 @@ final class VoiceAgent {
     endpointTimer?.invalidate()
     endpointTimer = nil
     if engine.isRunning { engine.stop() }
+    FileHandle.standardInput.readabilityHandler = nil
     removeTap()
     task?.cancel()
     if let error {
@@ -215,13 +262,32 @@ func requestPermissions(_ completion: @escaping (Bool) -> Void) {
   }
 }
 
-let locale = CommandLine.arguments.dropFirst().first ?? "en-US"
-let agent = VoiceAgent()
-requestPermissions { granted in
-  guard granted else {
-    emit(Output(type: "error", text: nil, error: "Microphone permission was denied."))
-    exit(3)
+func requestSpeechPermission(_ completion: @escaping (Bool) -> Void) {
+  SFSpeechRecognizer.requestAuthorization { status in
+    DispatchQueue.main.async { completion(status == .authorized) }
   }
-  agent.start(locale: locale)
+}
+
+let arguments = Array(CommandLine.arguments.dropFirst())
+let stdinPCM = arguments.first == "--stdin-pcm"
+let locale = stdinPCM ? (arguments.dropFirst().first ?? "en-US") : (arguments.first ?? "en-US")
+let sampleRate = stdinPCM ? (Double(arguments.dropFirst(2).first ?? "16000") ?? 16_000) : 16_000
+let agent = VoiceAgent()
+if stdinPCM {
+  requestSpeechPermission { granted in
+    guard granted else {
+      emit(Output(type: "error", text: nil, error: "Speech recognition permission was denied."))
+      exit(2)
+    }
+    agent.startPCM(locale: locale, sampleRate: sampleRate)
+  }
+} else {
+  requestPermissions { granted in
+    guard granted else {
+      emit(Output(type: "error", text: nil, error: "Microphone permission was denied."))
+      exit(3)
+    }
+    agent.start(locale: locale)
+  }
 }
 RunLoop.main.run()

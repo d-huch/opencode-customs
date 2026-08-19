@@ -1,0 +1,16 @@
+fileFormatVersion: 2
+guid: 453cb572d93d57a42a6aa96548df5e06
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 2100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 239141
+  packageName: Gamer Girl
+  packageVersion: 1.0
+  assetPath: Assets/GamerGirl/Render pipeline/HDRP/Materials/MAT_GAMERGIRL_OUTFIT_01
+    Orange.mat
+  uploadId: 543100

@@ -36,7 +36,6 @@ export function HomeProjects(props: { projects: HomeProjectsController; scroll: 
       onOpenChat={props.projects.utility.chat}
       chatSelected={props.projects.utility.chatSelected}
       onOpenSettings={props.projects.utility.settings}
-      onOpenHelp={props.projects.utility.help}
     />
   )
 }

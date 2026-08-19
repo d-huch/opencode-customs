@@ -1,0 +1,16 @@
+fileFormatVersion: 2
+guid: 2e33d8c2709aaa44ca2fbec0e92e5039
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 2100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 239141
+  packageName: Gamer Girl
+  packageVersion: 1.0
+  assetPath: Assets/GamerGirl/Render pipeline/Built-in/Materials/MAT_GAMERGIRL_HEADSET
+    Violet.mat
+  uploadId: 543100

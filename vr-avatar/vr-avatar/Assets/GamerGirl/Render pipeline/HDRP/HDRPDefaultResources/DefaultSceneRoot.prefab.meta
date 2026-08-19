@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: 9a44dee1449976d48a887748b97877e2
+PrefabImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 239141
+  packageName: Gamer Girl
+  packageVersion: 1.0
+  assetPath: Assets/GamerGirl/Render pipeline/HDRP/HDRPDefaultResources/DefaultSceneRoot.prefab
+  uploadId: 543100

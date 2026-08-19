@@ -208,7 +208,7 @@ describe("Avatar Bridge v2 integration", () => {
       actions: [],
       resumeSequence: latestSequence,
     }))
-    expect(await next(resumedMessages, "welcome")).toMatchObject({ serverVersion: "2.2", protocolMinor: 2 })
+    expect(await next(resumedMessages, "welcome")).toMatchObject({ serverVersion: "2.3", protocolMinor: 3 })
 
     resumed.close()
     await bridge.stop()

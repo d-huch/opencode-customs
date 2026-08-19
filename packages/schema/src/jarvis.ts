@@ -62,6 +62,7 @@ export const Config = Schema.Struct({
   models: ModelRoles,
   plannerTimeoutMs: NonNegativeInt,
   plannerIdleUnloadMs: NonNegativeInt,
+  plannerEscalationMinWords: NonNegativeInt,
   initiative: InitiativePolicy,
   updatedAt: NonNegativeInt,
 }).annotate({ identifier: "Jarvis.Config" })
@@ -137,6 +138,7 @@ export const MemoryRecord = Schema.Struct({
   pinned: Schema.Boolean,
   conflictsWith: Schema.Array(Schema.String),
   embedding: optional(Schema.Array(Schema.Number)),
+  embeddingModel: optional(ModelRef),
   createdAt: NonNegativeInt,
   updatedAt: NonNegativeInt,
   lastUsedAt: optional(NonNegativeInt),
@@ -154,6 +156,27 @@ export const MemorySearch = Schema.Struct({
 }).annotate({ identifier: "Jarvis.MemorySearch" })
 export interface MemorySearch extends Schema.Schema.Type<typeof MemorySearch> {}
 
+export const MemoryPatch = Schema.Struct({
+  text: optional(Schema.String),
+  confidence: optional(Schema.Number),
+  importance: optional(Schema.Number),
+  lifecycle: optional(MemoryRecord.fields.lifecycle),
+  pinned: optional(Schema.Boolean),
+}).annotate({ identifier: "Jarvis.MemoryPatch" })
+export interface MemoryPatch extends Schema.Schema.Type<typeof MemoryPatch> {}
+
+export const MemoryConflictResolution = Schema.Struct({
+  action: Schema.Literals(["keep_both", "choose_current", "choose_other"]),
+  otherMemoryID: Schema.String,
+}).annotate({ identifier: "Jarvis.MemoryConflictResolution" })
+export interface MemoryConflictResolution extends Schema.Schema.Type<typeof MemoryConflictResolution> {}
+
+export const MemoryBackfillResult = Schema.Struct({
+  queued: NonNegativeInt,
+  remaining: NonNegativeInt,
+}).annotate({ identifier: "Jarvis.MemoryBackfillResult" })
+export interface MemoryBackfillResult extends Schema.Schema.Type<typeof MemoryBackfillResult> {}
+
 export const WakeCandidate = Schema.Struct({
   id: Schema.String,
   profileID: Schema.String,
@@ -165,8 +188,35 @@ export const WakeCandidate = Schema.Struct({
   status: Schema.Literals(["pending", "admitted", "dismissed", "blocked"]),
   notBefore: NonNegativeInt,
   createdAt: NonNegativeInt,
+  updatedAt: NonNegativeInt,
+  blockedReason: optional(Schema.String),
 }).annotate({ identifier: "Jarvis.WakeCandidate" })
 export interface WakeCandidate extends Schema.Schema.Type<typeof WakeCandidate> {}
+
+export const ModelRoleStatus = Schema.Struct({
+  role: Schema.Literals(["dialogue", "planner", "embedding"]),
+  status: Schema.Literals(["unconfigured", "ready", "loading", "offline", "unauthorized", "unsupported", "degraded"]),
+  model: optional(ModelRef),
+  verified: Schema.Boolean,
+  detail: optional(Schema.String),
+}).annotate({ identifier: "Jarvis.ModelRoleStatus" })
+export interface ModelRoleStatus extends Schema.Schema.Type<typeof ModelRoleStatus> {}
+
+export const PlannerLifecycle = Schema.Struct({
+  state: Schema.Literals(["idle", "loading", "ready", "busy", "unloading", "offline"]),
+  managed: Schema.Boolean,
+  activeRequests: NonNegativeInt,
+  lastUsedAt: optional(NonNegativeInt),
+}).annotate({ identifier: "Jarvis.PlannerLifecycle" })
+export interface PlannerLifecycle extends Schema.Schema.Type<typeof PlannerLifecycle> {}
+
+export const EmbeddingBackfill = Schema.Struct({
+  state: Schema.Literals(["idle", "running", "blocked", "error"]),
+  remaining: NonNegativeInt,
+  processed: NonNegativeInt,
+  error: optional(Schema.String),
+}).annotate({ identifier: "Jarvis.EmbeddingBackfill" })
+export interface EmbeddingBackfill extends Schema.Schema.Type<typeof EmbeddingBackfill> {}
 
 export const RuntimeStatus = Schema.Struct({
   state: Schema.Literals(["ready", "degraded", "suspended"]),
@@ -177,6 +227,9 @@ export const RuntimeStatus = Schema.Struct({
   pendingInbox: NonNegativeInt,
   memoryRecords: NonNegativeInt,
   degradedReasons: Schema.Array(Schema.String),
+  modelRoles: Schema.Array(ModelRoleStatus),
+  planner: PlannerLifecycle,
+  embeddings: EmbeddingBackfill,
 }).annotate({ identifier: "Jarvis.RuntimeStatus" })
 export interface RuntimeStatus extends Schema.Schema.Type<typeof RuntimeStatus> {}
 
@@ -221,6 +274,17 @@ export const GoalOutcomeCreate = Schema.Struct({
   changedEntityIDs: Schema.Array(Schema.String),
 }).annotate({ identifier: "Jarvis.GoalOutcomeCreate" })
 export interface GoalOutcomeCreate extends Schema.Schema.Type<typeof GoalOutcomeCreate> {}
+
+export const GoalReplan = Schema.Struct({
+  reason: optional(Schema.String),
+}).annotate({ identifier: "Jarvis.GoalReplan" })
+export interface GoalReplan extends Schema.Schema.Type<typeof GoalReplan> {}
+
+export const GoalCancel = Schema.Struct({
+  summary: optional(Schema.String),
+  changedEntityIDs: optional(Schema.Array(Schema.String)),
+}).annotate({ identifier: "Jarvis.GoalCancel" })
+export interface GoalCancel extends Schema.Schema.Type<typeof GoalCancel> {}
 
 export const WakeCreate = Schema.Struct({
   sessionID: optional(Schema.String),

@@ -160,6 +160,55 @@ describe("JarvisRuntime", () => {
       expect(yield* JarvisRuntime.claimWake(db)).toBeUndefined()
     }),
   )
+
+  it.effect("edits memory, replans goals, and lets blocked Inbox items retry", () =>
+    Effect.gen(function* () {
+      const { db } = yield* Database.Service
+      const now = Date.now()
+      yield* JarvisRuntime.syncProfiles(db, { profiles: [profile], primaryProfileID: profile.id })
+      yield* JarvisRuntime.remember(db, {
+        id: "memory-edit",
+        scope: "user",
+        kind: "preference",
+        text: "Old preference",
+        sourceID: "test:edit",
+        confidence: 0.5,
+        importance: 0.5,
+        lifecycle: "candidate",
+        pinned: false,
+        conflictsWith: [],
+        createdAt: now,
+        updatedAt: now,
+      })
+      expect(yield* JarvisRuntime.patchMemory(db, "memory-edit", { text: "New preference", pinned: true, lifecycle: "verified" })).toMatchObject({ text: "New preference", pinned: true, lifecycle: "verified" })
+
+      const goal = yield* JarvisRuntime.createGoal(db, { profileID: profile.id, mode: "chat", objective: "Complete a multi-step task" })
+      yield* JarvisRuntime.suspendGoal(db, goal.id, "blocked")
+      expect(yield* JarvisRuntime.replanGoal(db, goal.id, { reason: "new evidence" })).toMatchObject({ status: "pending", suspensionReason: "new evidence" })
+      expect(yield* JarvisRuntime.cancelGoal(db, goal.id, { summary: "Stopped" })).toMatchObject({ status: "cancelled", summary: "Stopped" })
+
+      const wake = yield* JarvisRuntime.enqueueWake(db, { kind: "manual", topic: "manual-test", text: "Check", priority: 1 })
+      yield* JarvisRuntime.markWakeBlocked(db, wake?.id ?? "", "offline")
+      expect(yield* JarvisRuntime.retryWake(db, wake?.id ?? "")).toMatchObject({ status: "pending", blockedReason: undefined })
+      expect(yield* JarvisRuntime.dismissWake(db, wake?.id ?? "")).toMatchObject({ status: "dismissed" })
+    }),
+  )
+
+  it.effect("bounds planner and initiative configuration", () =>
+    Effect.gen(function* () {
+      const { db } = yield* Database.Service
+      const config = yield* JarvisRuntime.getConfig(db)
+      const updated = yield* JarvisRuntime.updateConfig(db, {
+        ...config,
+        plannerTimeoutMs: 1,
+        plannerIdleUnloadMs: 1,
+        plannerEscalationMinWords: 999,
+        initiative: { ...config.initiative, quietStart: "invalid", reflectionLimit: 99, eventLimit: 99, topicCooldownMinutes: 1 },
+      })
+      expect(updated).toMatchObject({ plannerTimeoutMs: 2_000, plannerIdleUnloadMs: 30_000, plannerEscalationMinWords: 100 })
+      expect(updated.initiative).toMatchObject({ quietStart: "22:00", reflectionLimit: 2, eventLimit: 20, topicCooldownMinutes: 5 })
+    }),
+  )
 })
 
 describe("Jarvis deterministic routing", () => {
@@ -167,6 +216,7 @@ describe("Jarvis deterministic routing", () => {
     Effect.sync(() => {
       expect(JarvisRuntime.shouldPlan({ text: "Спочатку знайди ключ, потім відкрий двері" })).toBe(true)
       expect(JarvisRuntime.shouldPlan({ text: "Як тебе звати?" })).toBe(false)
+      expect(JarvisRuntime.shouldPlan({ text: "один два три чотири", minWords: 4 })).toBe(true)
       expect(JarvisRuntime.plannerAcknowledgement(profile)).toContain("Прораховую")
     }),
   )

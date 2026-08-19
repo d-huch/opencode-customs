@@ -125,6 +125,20 @@ export type AvatarBridgeStatus = {
   url?: string
   token?: string
   message?: string
+  presence?: {
+    characterID: string
+    sessionID?: string
+    profileID?: string
+    surface: "desktop" | "unity"
+    state: "idle" | "listening" | "thinking" | "planning" | "speaking" | "acting" | "uncertain" | "error"
+    emotion: string
+    intensity: number
+    subtitle?: string
+    goal?: string
+    requestID?: string
+    updatedAt: number
+  }
+  sync?: { state: "idle" | "syncing" | "offline" | "error"; pending: number; error?: string }
   modelRuntime?: {
     activeRole?: "dialogue" | "planner"
     selectedModel?: { providerID: string; modelID: string }
@@ -334,6 +348,15 @@ export type ElectronAPI = {
   showResearchBrowser: () => Promise<void>
   clearResearchBrowserData: () => Promise<void>
   getAvatarBridgeStatus: () => Promise<AvatarBridgeStatus>
+  routeAvatarSpeech: (sessionID: string, text: string) => Promise<boolean>
+  selectAvatarModel: () => Promise<{ name: string; bytes: number; updatedAt: number } | null>
+  getAvatarModel: () => Promise<{
+    data: ArrayBuffer
+    name: string
+    bytes: number
+    updatedAt: number
+  } | null>
+  clearAvatarModel: () => Promise<void>
   updateAvatarBridgeConfig: (input: {
     lanEnabled?: boolean
     interactionAutoApprove?: boolean
@@ -352,6 +375,8 @@ export type ElectronAPI = {
     }>
   }) => Promise<void>
   startAvatarBridgePairing: () => Promise<NonNullable<NonNullable<AvatarBridgeStatus["lan"]>["pairing"]>>
+  cancelAvatarBridgePairing: () => Promise<void>
+  retryAvatarBridgeSync: () => Promise<void>
   revokeAvatarBridgeDevice: (id: string) => Promise<void>
   resolveAvatarBridgeApproval: (id: string, approved: boolean) => Promise<boolean>
   deleteAvatarBridgeMemory: (id: string) => Promise<void>

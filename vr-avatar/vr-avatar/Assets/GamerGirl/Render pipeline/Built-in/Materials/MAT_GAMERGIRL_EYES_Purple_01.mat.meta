@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 2cc8b08b118b4d64cad03fd464c50184
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 2100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 239141
+  packageName: Gamer Girl
+  packageVersion: 1.0
+  assetPath: Assets/GamerGirl/Render pipeline/Built-in/Materials/MAT_GAMERGIRL_EYES_Purple_01.mat
+  uploadId: 543100

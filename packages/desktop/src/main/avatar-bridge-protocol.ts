@@ -1,6 +1,6 @@
 export const AVATAR_BRIDGE_PROTOCOL = 2
-export const AVATAR_BRIDGE_PROTOCOL_MINOR = 2
-export const AVATAR_BRIDGE_VERSION = "2.2"
+export const AVATAR_BRIDGE_PROTOCOL_MINOR = 3
+export const AVATAR_BRIDGE_VERSION = "2.3"
 export const AVATAR_BRIDGE_PROTOCOLS = [1, 2] as const
 export const AVATAR_ACTIONS = [
   "animation.trigger",
@@ -15,6 +15,46 @@ export type AvatarActionName = (typeof AVATAR_ACTIONS)[number]
 export type AvatarRisk = "ambient" | "interaction" | "critical"
 export type AvatarVector = { x: number; y: number; z: number }
 export type AvatarJson = null | boolean | number | string | AvatarJson[] | { [key: string]: AvatarJson }
+export type AvatarPresentationState =
+  | "idle"
+  | "listening"
+  | "thinking"
+  | "planning"
+  | "speaking"
+  | "acting"
+  | "uncertain"
+  | "error"
+
+export type JarvisPresence = {
+  characterID: string
+  sessionID?: string
+  profileID?: string
+  surface: "desktop" | "unity"
+  state: AvatarPresentationState
+  emotion: string
+  intensity: number
+  subtitle?: string
+  goal?: string
+  requestID?: string
+  updatedAt: number
+}
+
+export type AvatarSpeechFrame = {
+  requestID: string
+  codec: "pcm_s16le"
+  sampleRate: number
+  channels: 1
+  locale?: string
+  mode: "push_to_talk" | "hands_free"
+}
+
+export type SurfaceHandoff = {
+  sessionID: string
+  from: "desktop" | "unity"
+  to: "desktop" | "unity"
+  profileID?: string
+  timestamp: number
+}
 
 export type AvatarActionInput = {
   action: AvatarActionName
@@ -149,6 +189,8 @@ export type AvatarClientMessage =
   | { type: "heartbeat"; sequence: number }
   | { type: "speech.start" | "speech.cancel"; requestID: string }
   | { type: "speech.partial"; requestID: string; text: string; language?: string }
+  | ({ type: "audio.start" } & AvatarSpeechFrame)
+  | { type: "audio.end" | "audio.cancel"; requestID: string }
   | { type: "capability.manifest"; revision: number; capabilities: AvatarCapability[] }
   | { type: "world.snapshot"; world: AvatarWorld }
   | {
@@ -174,6 +216,26 @@ export function parseAvatarClientMessage(value: unknown): AvatarClientMessage | 
   if (value.type === "hello") return parseHello(value)
   if (value.type === "user.transcript" || value.type === "speech.final") return parseTranscript(value)
   if (value.type === "speech.start" || value.type === "speech.cancel") {
+    if (!shortID(value.requestID)) return
+    return { type: value.type, requestID: value.requestID }
+  }
+  if (value.type === "audio.start") {
+    if (!shortID(value.requestID) || value.codec !== "pcm_s16le" || value.channels !== 1) return
+    if (!integer(value.sampleRate, 8_000, 48_000)) return
+    if (value.mode !== "push_to_talk" && value.mode !== "hands_free") return
+    const locale = optionalString(value.locale, 32)
+    if (locale === invalid) return
+    return {
+      type: value.type,
+      requestID: value.requestID,
+      codec: value.codec,
+      sampleRate: value.sampleRate,
+      channels: value.channels,
+      mode: value.mode,
+      ...(typeof locale === "string" ? { locale } : {}),
+    }
+  }
+  if (value.type === "audio.end" || value.type === "audio.cancel") {
     if (!shortID(value.requestID)) return
     return { type: value.type, requestID: value.requestID }
   }

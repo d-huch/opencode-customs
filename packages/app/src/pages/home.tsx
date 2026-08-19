@@ -42,7 +42,6 @@ export function NewHome() {
             onOpenChat={projects.utility.chat}
             chatSelected={projects.utility.chatSelected}
             onOpenSettings={projects.utility.settings}
-            onOpenHelp={projects.utility.help}
             language={projects.copy.language}
           />
         </div>

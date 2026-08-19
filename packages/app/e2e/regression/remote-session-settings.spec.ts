@@ -215,6 +215,14 @@ for (const locale of [
         })),
       )
       .toEqual({ paddingLeft: "20px", paddingRight: "20px", overflow: 0 })
+
+    if (locale.id === "en") {
+      await dialog.locator('[data-action="settings-jarvis-model-dialogue"]').click()
+      await expect(page.locator('[data-option-key="action:manage"]')).toBeVisible()
+      await page.locator('[data-option-key="action:manage"]').click()
+      await expect(dialog.getByRole("tab", { name: "Models", exact: true })).toHaveAttribute("aria-selected", "true")
+      await expect(page.getByText("Local context must be used within a context provider")).toHaveCount(0)
+    }
   })
 }
 
@@ -538,6 +546,7 @@ function jarvisStatus() {
       models: {},
       plannerTimeoutMs: 8_000,
       plannerIdleUnloadMs: 600_000,
+      plannerEscalationMinWords: 18,
       initiative: {
         enabled: true,
         quietStart: "22:00",
@@ -556,6 +565,13 @@ function jarvisStatus() {
       "Dialogue model is not configured.",
       "Planner model is not configured; multi-step goals will be suspended.",
     ],
+    modelRoles: [
+      { role: "dialogue", status: "unconfigured", verified: false },
+      { role: "planner", status: "unconfigured", verified: false },
+      { role: "embedding", status: "unconfigured", verified: false },
+    ],
+    planner: { state: "offline", managed: false, activeRequests: 0 },
+    embeddings: { state: "blocked", remaining: 0, processed: 0 },
   }
 }
 

@@ -3,6 +3,8 @@
   "rootNamespace": "OpenCode.Customs.AvatarBridge",
   "references": [
     "Unity.AI.Navigation",
+    "Unity.Animation.Rigging",
+    "Unity.InputSystem",
     "Unity.Newtonsoft.Json"
   ],
   "autoReferenced": true

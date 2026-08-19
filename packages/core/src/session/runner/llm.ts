@@ -338,7 +338,7 @@ const layer = Layer.effect(
         chat &&
         latestUser?.type === "user" &&
         jarvisProfile &&
-        JarvisRuntime.shouldPlan({ text: latestUser.text }) &&
+        JarvisRuntime.shouldPlan({ text: latestUser.text, minWords: jarvisConfig?.plannerEscalationMinWords }) &&
         !jarvisGoals.some((goal) => goal.objective === latestUser.text)
           ? yield* Effect.gen(function* () {
               const goal = yield* JarvisRuntime.createGoal(db, {
@@ -370,6 +370,7 @@ const layer = Layer.effect(
                   Effect.orDie,
                 )
               }
+              JarvisRuntime.plannerStarted()
               const planned = yield* LLM.generateObject({
                 model: plannerModel.value,
                 schema: PlannerOutput,
@@ -387,7 +388,11 @@ const layer = Layer.effect(
                     ].join("\n\n"),
                   ),
                 ],
-              }).pipe(Effect.timeout(jarvisConfig?.plannerTimeoutMs ?? 8_000), Effect.option)
+              }).pipe(
+                Effect.timeout(jarvisConfig?.plannerTimeoutMs ?? 8_000),
+                Effect.option,
+                Effect.ensuring(Effect.sync(JarvisRuntime.plannerFinished)),
+              )
               if (Option.isNone(planned) || planned.value.object.steps.length === 0 || planned.value.object.steps.length > 8) {
                 return yield* JarvisRuntime.suspendGoal(
                   db,

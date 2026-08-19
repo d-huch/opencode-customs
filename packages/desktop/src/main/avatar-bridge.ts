@@ -21,6 +21,8 @@ import {
   type AvatarClientMessage,
   type AvatarHello,
   type AvatarJson,
+  type AvatarPresentationState,
+  type AvatarSpeechFrame,
   type AvatarTranscript,
   type AvatarWorldEvent,
   type GameActionInput,
@@ -43,6 +45,7 @@ const TURN_TIMEOUT = 5 * 60_000
 const HEARTBEAT_INTERVAL = 15_000
 const HEARTBEAT_TIMEOUT = 45_000
 const AUDIO_CHUNK_SIZE = 32 * 1024
+const AUDIO_INPUT_MAX_BYTES = 48_000 * 2 * 60
 const IDEMPOTENCY_TTL = 5 * 60_000
 
 type ServerConnection = { url: string; username: string | null; password: string | null }
@@ -68,6 +71,13 @@ type ClientState = AvatarHello & {
   attentionEvents: AvatarWorldEvent[]
   attentionTimer?: NodeJS.Timeout
   attentionCooldowns: Map<string, number>
+  audioInput?: {
+    frame: AvatarSpeechFrame
+    recognition: PCMRecognition
+    bytes: number
+    paused: boolean
+    startedAt: number
+  }
 }
 type PendingAction = {
   socket: WebSocket
@@ -102,6 +112,12 @@ type PendingApproval = {
   timer: NodeJS.Timeout
   resolve: (approved: boolean) => void
 }
+type PCMRecognition = {
+  write: (chunk: Buffer) => boolean
+  finish: () => void
+  cancel: () => void
+  result: Promise<string>
+}
 export type AvatarBridgeController = Awaited<ReturnType<typeof startAvatarBridge>>
 
 export async function startAvatarBridge(
@@ -112,6 +128,12 @@ export async function startAvatarBridge(
       input: AvatarHello["voice"] & { text: string },
       signal: AbortSignal,
     ) => Promise<{ contentType: string; audio: ArrayBuffer }>
+    startRecognition?: (input: {
+      locale: string
+      sampleRate: number
+      onEvent?: (event: { type: string; text?: string }) => void
+      onDrain?: () => void
+    }) => PCMRecognition
   } = {},
 ) {
   const writeLog = options.log ?? (() => undefined)
@@ -127,6 +149,7 @@ export async function startAvatarBridge(
   const pendingApprovals = new Map<string, PendingApproval>()
   const idempotency = new Map<string, { expiresAt: number; promise: Promise<GameActionResult> }>()
   const goals = new AvatarGoalStack()
+  const serverGoalIDs = new Map<string, string>()
   const worlds = new AvatarWorldStore()
   const budgets = new AvatarCycleBudget()
   const modelRuntime = {
@@ -135,8 +158,10 @@ export async function startAvatarBridge(
     reason: undefined as string | undefined,
     lastPlannerAt: undefined as number | undefined,
   }
+  const presence = new Map<string, NonNullable<AvatarBridgeStatus["presence"]>>()
   const serverConnection = { current: undefined as ServerConnection | undefined }
   const importedLegacyMemoryServers = new Set<string>()
+  const sync = { state: "offline" as "idle" | "syncing" | "offline" | "error", error: undefined as string | undefined }
   const sockets = new WebSocketServer({ noServer: true, maxPayload: MAX_HTTP_BODY })
   const lan = { current: undefined as Server | undefined, port: undefined as number | undefined }
   const local = createServer((request, response) => void handleHttp(request, response, false))
@@ -183,6 +208,7 @@ export async function startAvatarBridge(
       version: AVATAR_BRIDGE_VERSION,
       url,
       token,
+      sync: { state: sync.state, pending: persistent.outbox().length, error: sync.error },
       config,
       lan: {
         enabled: config.lanEnabled,
@@ -204,6 +230,7 @@ export async function startAvatarBridge(
       memories: persistent.memories().slice(0, 100),
       goals: goals.list(),
       modelRuntime: { ...modelRuntime },
+      presence: [...presence.values()].sort((a, b) => b.updatedAt - a.updatedAt)[0],
       connectedClients: [...clients.values()].map((client) => ({
         clientID: client.clientID,
         characterID: client.characterID,
@@ -361,6 +388,7 @@ export async function startAvatarBridge(
         riskBudget: [...new Set(riskBudget)],
       })
       const state = selectClient(characterID, true)
+      if (state) void persistGoal(state, goal).catch((error) => writeLog("avatar", "durable goal create failed", { error: String(error) }, "warn"))
       if (state) sendState(state, { type: "game.goal", ...goal })
       json(response, 201, {
         goal,
@@ -387,6 +415,7 @@ export async function startAvatarBridge(
           budgets.clear(goal.id)
           const state = selectClient(goal.characterID, true)
           if (state) sendState(state, { type: "game.goal.outcome", goal })
+          void persistGoalOutcome(goal).catch((error) => writeLog("avatar", "durable goal outcome failed", { error: String(error) }, "warn"))
         }
         json(response, goal ? 200 : 404, goal ?? { error: "Goal was not found" })
         return
@@ -443,7 +472,31 @@ export async function startAvatarBridge(
     const authTimer = setTimeout(() => socket.close(4401, "Pairing timed out"), 5_000)
     socket.on("message", (data, binary) => {
       if (binary) {
-        socket.close(4400, "Binary client messages are not supported")
+        const state = clients.get(socket)
+        if (!state?.audioInput) {
+          socket.close(4400, "Binary audio requires audio.start")
+          return
+        }
+        const chunk = Buffer.isBuffer(data)
+          ? data
+          : Array.isArray(data)
+            ? Buffer.concat(data)
+            : Buffer.from(data as ArrayBuffer)
+        if (state.audioInput.bytes + chunk.byteLength > AUDIO_INPUT_MAX_BYTES) {
+          const requestID = state.audioInput.frame.requestID
+          cancelAudioInput(state, "audio_limit")
+          sendState(state, { type: "audio.error", requestID, error: "Audio input exceeded 60 seconds" }, false)
+          return
+        }
+        state.audioInput.bytes += chunk.byteLength
+        const writable = state.audioInput.recognition.write(chunk)
+        sendState(state, {
+          type: "audio.ack",
+          requestID: state.audioInput.frame.requestID,
+          bytes: state.audioInput.bytes,
+          paused: !writable,
+        }, false)
+        state.audioInput.paused = !writable
         return
       }
       const message = parseAvatarClientMessage(parseJSON(data.toString()))
@@ -513,6 +566,7 @@ export async function startAvatarBridge(
           protocol: message.protocol,
           remote,
         })
+        setPresence(connected, "idle")
         return
       }
       state.lastHeartbeatAt = Date.now()
@@ -533,10 +587,29 @@ export async function startAvatarBridge(
     }
     if (message.type === "speech.start" || message.type === "speech.cancel") {
       cancelTurn(state, message.requestID)
+      if (message.type === "speech.start") setPresence(state, "listening", { requestID: message.requestID })
+      if (message.type === "speech.cancel") setPresence(state, "idle", { requestID: undefined, subtitle: undefined })
+      return
+    }
+    if (message.type === "audio.start") {
+      startAudioInput(state, message)
+      return
+    }
+    if (message.type === "audio.end") {
+      if (state.audioInput?.frame.requestID !== message.requestID) return
+      state.audioInput.recognition.finish()
+      sendState(state, { type: "audio.processing", requestID: message.requestID }, false)
+      return
+    }
+    if (message.type === "audio.cancel") {
+      if (state.audioInput?.frame.requestID !== message.requestID) return
+      cancelAudioInput(state, "client_cancelled")
+      setPresence(state, "idle", { requestID: undefined, subtitle: undefined })
       return
     }
     if (message.type === "speech.partial") {
       state.partialTranscript = message.text
+      setPresence(state, "listening", { requestID: message.requestID, subtitle: message.text })
       return
     }
     if (message.type === "capability.manifest") {
@@ -596,17 +669,100 @@ export async function startAvatarBridge(
       return
     }
     if (message.type !== "user.transcript" && message.type !== "speech.final") return
+    enqueueTranscript(state, message)
+  }
+
+  function enqueueTranscript(state: ClientState, message: AvatarTranscript) {
     if (!admitClientMessage(state.stream, `speech:${message.requestID}`)) return
     const next = state.queue.then(() => handleTranscript(state, message))
     state.queue = next.catch((error) => {
       state.turn = undefined
       state.turnRequestID = undefined
+      setPresence(state, "error", { requestID: message.requestID, subtitle: error instanceof Error ? error.message : String(error) })
       sendState(state, {
         type: "assistant.error",
         requestID: message.requestID,
         error: error instanceof Error ? error.message : String(error),
       })
     })
+  }
+
+  function startAudioInput(state: ClientState, frame: AvatarSpeechFrame) {
+    if (!options.startRecognition) {
+      sendState(state, { type: "audio.error", requestID: frame.requestID, error: "Streaming speech recognition is unavailable" }, false)
+      return
+    }
+    cancelAudioInput(state, "superseded")
+    cancelTurn(state, frame.requestID)
+    const recognition = options.startRecognition({
+      locale: frame.locale ?? "uk-UA",
+      sampleRate: frame.sampleRate,
+      onEvent: (event) => {
+        if (state.audioInput?.recognition !== recognition) return
+        if (event.type === "partial" && event.text) {
+          state.partialTranscript = event.text
+          setPresence(state, "listening", { requestID: frame.requestID, subtitle: event.text })
+          sendState(state, { type: "user.transcript.partial", requestID: frame.requestID, text: event.text }, false)
+        }
+      },
+      onDrain: () => {
+        if (state.audioInput?.recognition !== recognition || !state.audioInput.paused) return
+        state.audioInput.paused = false
+        sendState(state, { type: "audio.flow", requestID: frame.requestID, paused: false }, false)
+      },
+    })
+    state.audioInput = { frame, recognition, bytes: 0, paused: false, startedAt: Date.now() }
+    state.partialTranscript = undefined
+    setPresence(state, "listening", { requestID: frame.requestID, subtitle: undefined })
+    sendState(state, { type: "audio.accepted", requestID: frame.requestID, maxBytes: AUDIO_INPUT_MAX_BYTES }, false)
+    void recognition.result
+      .then((text) => {
+        if (state.audioInput?.recognition !== recognition) return
+        state.audioInput = undefined
+        if (!text) {
+          setPresence(state, "idle", { requestID: undefined, subtitle: undefined })
+          return
+        }
+        state.partialTranscript = text
+        sendState(state, { type: "user.transcript.final", requestID: frame.requestID, text }, false)
+        enqueueTranscript(state, { type: "speech.final", requestID: frame.requestID, text, language: frame.locale })
+      })
+      .catch((error) => {
+        if (state.audioInput?.recognition === recognition) state.audioInput = undefined
+        setPresence(state, "error", { requestID: frame.requestID, subtitle: error instanceof Error ? error.message : String(error) })
+        sendState(state, { type: "audio.error", requestID: frame.requestID, error: error instanceof Error ? error.message : String(error) }, false)
+      })
+  }
+
+  function cancelAudioInput(state: ClientState, reason: string) {
+    const input = state.audioInput
+    if (!input) return
+    state.audioInput = undefined
+    input.recognition.cancel()
+    sendState(state, { type: "audio.cancelled", requestID: input.frame.requestID, reason }, false)
+  }
+
+  function setPresence(
+    state: ClientState,
+    next: AvatarPresentationState,
+    patch: Partial<NonNullable<AvatarBridgeStatus["presence"]>> = {},
+  ) {
+    const previous = presence.get(state.characterID)
+    const value: NonNullable<AvatarBridgeStatus["presence"]> = {
+      characterID: state.characterID,
+      sessionID: state.sessionID,
+      profileID: state.profileID,
+      surface: "unity",
+      state: next,
+      emotion: patch.emotion ?? previous?.emotion ?? "neutral",
+      intensity: patch.intensity ?? previous?.intensity ?? 0.4,
+      subtitle: patch.subtitle ?? (next === "idle" ? undefined : previous?.subtitle),
+      goal: patch.goal ?? goals.list(state.characterID).find((goal) => goal.status === "active")?.text ?? previous?.goal,
+      requestID: patch.requestID ?? (next === "idle" ? undefined : previous?.requestID),
+      updatedAt: Date.now(),
+    }
+    presence.set(state.characterID, value)
+    sendState(state, { type: "avatar.presentation", ...value }, false)
   }
 
   async function dispatchLegacy(action: AvatarActionInput) {
@@ -670,6 +826,7 @@ export async function startAvatarBridge(
       cancellable: capability.cancellable,
     })
     state.cooldowns.set(capability.id, Date.now() + capability.cooldownMs)
+    setPresence(state, "acting", { goal: goals.get(action.cycleID)?.text })
     sendState(state, {
       type: "game.action",
       id,
@@ -680,6 +837,10 @@ export async function startAvatarBridge(
       timeoutMs: capability.timeoutMs,
     })
     const completed = await result
+    setPresence(state, completed.ok ? "idle" : "uncertain", {
+      subtitle: completed.message,
+      goal: goals.get(action.cycleID)?.text,
+    })
     const failure = goals.actionResult(action.cycleID, capability.id, completed.ok, completed.message)
     return {
       ...completed,
@@ -792,6 +953,7 @@ export async function startAvatarBridge(
     const controller = new AbortController()
     state.turn = controller
     state.turnRequestID = message.requestID
+    setPresence(state, "thinking", { requestID: message.requestID, subtitle: message.text })
     sendState(state, { type: "assistant.started", requestID: message.requestID })
     const started = Date.now()
     const sessionID = state.sessionID ?? (await createChatSession(connection, state, controller.signal))
@@ -800,19 +962,18 @@ export async function startAvatarBridge(
     const context = gameContext(state)
     const route = await selectTurnModel(connection, state, message.text, controller.signal)
     modelRuntime.activeRole = route.role
-    modelRuntime.selectedModel = route.model
+    modelRuntime.selectedModel = undefined
     modelRuntime.reason = route.reason
     writeLog("avatar", "selected local Jarvis model role", {
       characterID: state.characterID,
       role: route.role,
-      model: route.model ? `${route.model.providerID}/${route.model.modelID}` : "session default",
+      model: "server Jarvis dialogue role",
       reason: route.reason,
     })
     await request(connection, `/api/session/${encodeURIComponent(sessionID)}/prompt`, {
       method: "POST",
       body: JSON.stringify({
         agent: "chat",
-        ...(route.model ? { model: route.model } : {}),
         parts: [
           { type: "text", text: message.text },
           ...(context ? [{ type: "text", text: context }] : []),
@@ -829,6 +990,12 @@ export async function startAvatarBridge(
     })
     const text = assistantText(await response.json(), started)
     if (!text) throw new Error("The agent completed without a text response")
+    setPresence(state, state.voice ? "speaking" : "idle", {
+      requestID: message.requestID,
+      subtitle: text,
+      emotion: inferSpeechEmotion(text),
+      intensity: Math.min(1, 0.35 + Math.min(0.5, (text.match(/[!?]/g)?.length ?? 0) * 0.12)),
+    })
     sendState(state, { type: "assistant.text", requestID: message.requestID, sessionID, text })
     if (state.voice) {
       if (!options.synthesize) throw new Error("Local voice synthesis is unavailable")
@@ -848,6 +1015,39 @@ export async function startAvatarBridge(
       state.turnRequestID = undefined
     }
     sendState(state, { type: "assistant.done", requestID: message.requestID, sessionID })
+    setPresence(state, "idle", { subtitle: text, requestID: undefined })
+  }
+
+  async function speakSession(sessionID: string, text: string) {
+    const state = [...clients.values()].find((client) => client.sessionID === sessionID)
+    if (!state || !state.voice || !options.synthesize) return false
+    const requestID = `surface_${randomUUID()}`
+    cancelTurn(state, requestID)
+    const controller = new AbortController()
+    state.turn = controller
+    state.turnRequestID = requestID
+    setPresence(state, "speaking", {
+      requestID,
+      subtitle: text,
+      emotion: inferSpeechEmotion(text),
+      intensity: Math.min(1, 0.35 + Math.min(0.5, (text.match(/[!?]/g)?.length ?? 0) * 0.12)),
+    })
+    const audio = await options.synthesize({ ...state.voice, text }, controller.signal)
+    if (state.protocol === 1) {
+      send(state.socket, {
+        type: "assistant.audio",
+        requestID,
+        sessionID,
+        contentType: audio.contentType,
+        data: Buffer.from(new Uint8Array(audio.audio)).toString("base64"),
+      })
+    } else sendAudio(state, requestID, sessionID, text, audio.contentType, Buffer.from(audio.audio))
+    if (state.turn === controller) {
+      state.turn = undefined
+      state.turnRequestID = undefined
+    }
+    setPresence(state, "idle", { subtitle: text, requestID: undefined })
+    return true
   }
 
   async function selectTurnModel(
@@ -856,14 +1056,12 @@ export async function startAvatarBridge(
     text: string,
     signal: AbortSignal,
   ) {
-    const config = persistent.config()
-    const dialogue = config.dialogueModel ?? (state.model ? { providerID: state.model.providerID, modelID: state.model.id } : undefined)
     void connection
+    void state
     void text
     void signal
     return {
       role: "dialogue" as const,
-      model: dialogue,
       reason: "server Jarvis runtime owns hidden planner escalation",
     }
   }
@@ -885,6 +1083,7 @@ export async function startAvatarBridge(
       if (action.socket !== state.socket || !action.cancellable) continue
       sendState(state, { type: "game.action.cancel", id, cycleID: action.cycleID, reason: "player_interrupted" })
     }
+    if (controller) setPresence(state, "listening", { requestID, subtitle: undefined })
   }
 
   function sendAudio(
@@ -1004,6 +1203,8 @@ export async function startAvatarBridge(
     clients.delete(socket)
     if (!state) return
     state.turn?.abort()
+    cancelAudioInput(state, "disconnected")
+    presence.delete(state.characterID)
     if (state.attentionTimer) clearTimeout(state.attentionTimer)
     worlds.clearCharacter(state.characterID)
     for (const [id, action] of pendingActions) {
@@ -1082,6 +1283,10 @@ export async function startAvatarBridge(
       if (!lan.port) throw new Error("Enable secure LAN access before starting Quest pairing")
       return pairing.start(lan.port)
     },
+    cancelPairing() {
+      pairing.cancel()
+    },
+    speakSession,
     revokeDevice: async (id: string) => {
       const revoked = await persistent.revokeDevice(id)
       if (revoked) {
@@ -1092,9 +1297,20 @@ export async function startAvatarBridge(
     resolveApproval,
     memories: (filter?: Partial<Pick<AvatarMemory, "gameID" | "saveSlotID" | "characterID">>) =>
       persistent.memories(filter),
-    remember: (input: Omit<AvatarMemory, "id" | "createdAt" | "updatedAt"> & { id?: string }) =>
-      persistent.remember(input),
-    deleteMemory: (id: string) => persistent.deleteMemory(id),
+    remember: async (input: Omit<AvatarMemory, "id" | "createdAt" | "updatedAt"> & { id?: string }) => {
+      const memory = await persistent.remember(input)
+      await persistent.enqueueOutbox({ sourceID: `legacy-avatar:${memory.id}`, operation: "upsert", payload: memory })
+      await flushOutbox()
+      return memory
+    },
+    deleteMemory: async (id: string) => {
+      const memory = persistent.memories().find((item) => item.id === id)
+      const deleted = await persistent.deleteMemory(id)
+      if (!deleted || !memory) return deleted
+      await persistent.enqueueOutbox({ sourceID: `legacy-avatar:${memory.id}`, operation: "delete", payload: { memoryID: `legacy-avatar-${memory.id}` } })
+      await flushOutbox()
+      return deleted
+    },
     updateMemory: (
       id: string,
       input: string | { text?: string; pinned?: boolean; confidence?: number; importance?: number },
@@ -1109,19 +1325,30 @@ export async function startAvatarBridge(
         confidence: typeof patch.confidence === "number" ? patch.confidence : memory.confidence,
         importance: typeof patch.importance === "number" ? patch.importance : memory.importance,
         pinned: typeof patch.pinned === "boolean" ? patch.pinned : memory.pinned,
+      }).then(async (updated) => {
+        await persistent.enqueueOutbox({ sourceID: `legacy-avatar:${updated.id}`, operation: "upsert", payload: updated })
+        await flushOutbox()
+        return updated
       })
     },
-    clearMemories: (filter?: Partial<Pick<AvatarMemory, "gameID" | "saveSlotID" | "characterID">>) =>
-      persistent.clearMemories(filter),
+    clearMemories: async (filter?: Partial<Pick<AvatarMemory, "gameID" | "saveSlotID" | "characterID">>) => {
+      const memories = persistent.memories(filter)
+      await persistent.clearMemories(filter)
+      await Promise.all(memories.map((memory) => persistent.enqueueOutbox({ sourceID: `legacy-avatar:${memory.id}`, operation: "delete", payload: { memoryID: `legacy-avatar-${memory.id}` } })))
+      await flushOutbox()
+    },
     configureServer(connection: ServerConnection) {
       serverConnection.current = connection
       if (importedLegacyMemoryServers.has(connection.url)) return
       importedLegacyMemoryServers.add(connection.url)
-      void importLegacyMemories(connection).catch((error) => {
+      void synchronizeJarvis(connection).catch((error) => {
         importedLegacyMemoryServers.delete(connection.url)
-        writeLog("avatar", "legacy Avatar memory import failed", { error: String(error) }, "warn")
+        sync.state = "error"
+        sync.error = String(error)
+        writeLog("avatar", "Jarvis synchronization failed", { error: String(error) }, "warn")
       })
     },
+    retrySync: () => flushOutbox(true),
     stop: async () => {
       clearInterval(heartbeat)
       for (const state of clients.values()) {
@@ -1133,6 +1360,34 @@ export async function startAvatarBridge(
       await closeServer(local)
       await persistent.flush()
     },
+  }
+
+  async function synchronizeJarvis(connection: ServerConnection) {
+    sync.state = "syncing"
+    sync.error = undefined
+    const key = normalizeServerURL(connection.url)
+    const migration = persistent.migration(key)
+    if (!migration.sharedModelsMigratedAt) {
+      await migrateSharedModels(connection)
+      await persistent.markMigration(key, { sharedModelsMigratedAt: Date.now() })
+    }
+    if (!migration.legacyMemoryImportedAt) {
+      await importLegacyMemories(connection)
+      await persistent.markMigration(key, { legacyMemoryImportedAt: Date.now() })
+    }
+    await flushOutbox(true)
+    sync.state = "idle"
+  }
+
+  async function migrateSharedModels(connection: ServerConnection) {
+    const legacy = persistent.config()
+    if (!legacy.dialogueModel && !legacy.plannerModel) return
+    const config = await request(connection, "/api/jarvis/config", { signal: AbortSignal.timeout(10_000) }).then((response) => response.json() as Promise<unknown>)
+    if (!isRecord(config) || !isRecord(config.models)) throw new Error("Jarvis returned an invalid config during model migration")
+    const models = { ...config.models }
+    if (!models.dialogue && legacy.dialogueModel) models.dialogue = legacy.dialogueModel
+    if (!models.planner && legacy.plannerModel) models.planner = legacy.plannerModel
+    await request(connection, "/api/jarvis/config", { method: "PUT", body: JSON.stringify({ ...config, models, updatedAt: Date.now() }), signal: AbortSignal.timeout(10_000) })
   }
 
   async function importLegacyMemories(connection: ServerConnection) {
@@ -1148,36 +1403,69 @@ export async function startAvatarBridge(
       memories.map((memory) =>
         request(connection, "/api/jarvis/memory", {
           method: "POST",
-          body: JSON.stringify({
-            id: `legacy-avatar-${memory.id}`,
-            ...(memory.scope === "personal" ? {} : primaryProfileID ? { profileID: primaryProfileID } : {}),
-            scope: memory.scope === "personal" ? "user" : "game",
-            gameID: memory.gameID,
-            saveSlotID: memory.saveSlotID,
-            characterID: memory.characterID,
-            kind:
-              memory.kind === "personal"
-                ? "preference"
-                : memory.kind === "episodic"
-                  ? "episode"
-                  : memory.kind === "quest" || memory.kind === "world"
-                    ? "knowledge"
-                    : memory.kind,
-            text: memory.text,
-            sourceID: `legacy-avatar:${memory.id}`,
-            confidence: memory.confidence,
-            importance: memory.importance,
-            lifecycle: memory.kind === "correction" ? "verified" : "candidate",
-            pinned: memory.pinned,
-            conflictsWith: memory.conflictWith ? [`legacy-avatar-${memory.conflictWith}`] : [],
-            createdAt: memory.createdAt,
-            updatedAt: memory.updatedAt,
-          }),
+          body: JSON.stringify(jarvisMemoryPayload(memory, primaryProfileID)),
           signal: AbortSignal.timeout(10_000),
         }),
       ),
     )
     writeLog("avatar", "legacy Avatar memories imported into Jarvis runtime", { count: memories.length })
+  }
+
+  async function flushOutbox(force = false) {
+    const connection = serverConnection.current
+    if (!connection) {
+      sync.state = "offline"
+      return
+    }
+    sync.state = "syncing"
+    sync.error = undefined
+    const status = await request(connection, "/api/jarvis/status", { signal: AbortSignal.timeout(10_000) }).then((response) => response.json() as Promise<unknown>)
+    const profileID = isRecord(status) && isRecord(status.primaryProfile) && typeof status.primaryProfile.id === "string" ? status.primaryProfile.id : undefined
+    for (const item of persistent.outbox()) {
+      if (!force && item.nextAttemptAt > Date.now()) continue
+      await (item.operation === "delete"
+        ? request(connection, `/api/jarvis/memory/${encodeURIComponent(String(item.payload?.memoryID ?? ""))}`, { method: "DELETE", signal: AbortSignal.timeout(10_000) })
+        : request(connection, "/api/jarvis/memory", { method: "POST", body: JSON.stringify(jarvisMemoryPayload(item.payload as AvatarMemory, profileID)), signal: AbortSignal.timeout(10_000) }))
+        .then(() => persistent.resolveOutbox(item.id))
+        .catch(async (error) => { await persistent.failOutbox(item.id, String(error)); sync.state = "error"; sync.error = String(error) })
+    }
+    if (persistent.outbox().length === 0) sync.state = "idle"
+  }
+
+  async function persistGoal(state: ClientState, goal: AgentGoal) {
+    const connection = serverConnection.current
+    if (!connection) return
+    const status = await request(connection, "/api/jarvis/status", { signal: AbortSignal.timeout(10_000) }).then((response) => response.json() as Promise<unknown>)
+    const profileID = isRecord(status) && isRecord(status.primaryProfile) && typeof status.primaryProfile.id === "string" ? status.primaryProfile.id : undefined
+    if (!profileID) return
+    const response = await request(connection, "/api/jarvis/goals", {
+      method: "POST",
+      body: JSON.stringify({
+        profileID,
+        sessionID: state.sessionID,
+        mode: "unity",
+        gameID: state.gameID,
+        saveSlotID: state.saveSlotID,
+        characterID: state.characterID,
+        objective: goal.text,
+        worldRevision: worlds.get(state.characterID)?.revision,
+        capabilityRevision: String(state.manifestRevision),
+      }),
+      signal: AbortSignal.timeout(10_000),
+    }).then((result) => result.json() as Promise<unknown>)
+    if (isRecord(response) && typeof response.id === "string") serverGoalIDs.set(goal.id, response.id)
+  }
+
+  async function persistGoalOutcome(goal: AgentGoal) {
+    const connection = serverConnection.current
+    const goalID = serverGoalIDs.get(goal.id)
+    if (!connection || !goalID || !goal.outcome) return
+    const cancelled = goal.outcome.status === "cancelled"
+    await request(connection, cancelled ? `/api/jarvis/goals/${encodeURIComponent(goalID)}/cancel` : `/api/jarvis/goals/${encodeURIComponent(goalID)}/outcome`, {
+      method: "POST",
+      body: JSON.stringify(cancelled ? { summary: goal.outcome.reason } : { status: goal.outcome.status, summary: goal.outcome.reason, changedEntityIDs: [] }),
+      signal: AbortSignal.timeout(10_000),
+    })
   }
 }
 
@@ -1194,6 +1482,44 @@ type GameActionResult = {
   cycleID?: string
   remainingActions?: number
   world?: ReturnType<AvatarWorldStore["get"]>
+}
+
+function jarvisMemoryPayload(memory: AvatarMemory, primaryProfileID?: string) {
+  return {
+    id: `legacy-avatar-${memory.id}`,
+    ...(memory.scope === "personal" ? {} : primaryProfileID ? { profileID: primaryProfileID } : {}),
+    scope: memory.scope === "personal" ? "user" : "game",
+    gameID: memory.gameID,
+    saveSlotID: memory.saveSlotID,
+    characterID: memory.characterID,
+    kind:
+      memory.kind === "personal"
+        ? "preference"
+        : memory.kind === "episodic"
+          ? "episode"
+          : memory.kind === "quest" || memory.kind === "world"
+            ? "knowledge"
+            : memory.kind,
+    text: memory.text,
+    sourceID: `legacy-avatar:${memory.id}`,
+    confidence: memory.confidence,
+    importance: memory.importance,
+    lifecycle: memory.kind === "correction" ? "verified" : "candidate",
+    pinned: memory.pinned,
+    conflictsWith: memory.conflictWith ? [`legacy-avatar-${memory.conflictWith}`] : [],
+    createdAt: memory.createdAt,
+    updatedAt: memory.updatedAt,
+  }
+}
+
+function normalizeServerURL(value: string) {
+  const url = new URL(value)
+  url.username = ""
+  url.password = ""
+  url.search = ""
+  url.hash = ""
+  url.pathname = url.pathname.replace(/\/+$/u, "") || "/"
+  return url.toString()
 }
 
 async function request(connection: ServerConnection, path: string, init: RequestInit = {}) {

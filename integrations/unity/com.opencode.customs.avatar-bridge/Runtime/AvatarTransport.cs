@@ -15,6 +15,7 @@ namespace OpenCode.Customs.AvatarBridge
         WebSocketState State { get; }
         Task ConnectAsync(Uri uri, string certificateFingerprint, CancellationToken cancellation);
         Task SendTextAsync(string value, CancellationToken cancellation);
+        Task SendBinaryAsync(byte[] value, CancellationToken cancellation);
         Task<AvatarTransportMessage> ReceiveAsync(CancellationToken cancellation);
         Task CloseAsync(CancellationToken cancellation);
     }
@@ -52,6 +53,13 @@ namespace OpenCode.Customs.AvatarBridge
             var bytes = Encoding.UTF8.GetBytes(value);
             await sendLock.WaitAsync(cancellation);
             try { await socket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, cancellation); }
+            finally { sendLock.Release(); }
+        }
+
+        public async Task SendBinaryAsync(byte[] value, CancellationToken cancellation)
+        {
+            await sendLock.WaitAsync(cancellation);
+            try { await socket.SendAsync(new ArraySegment<byte>(value), WebSocketMessageType.Binary, true, cancellation); }
             finally { sendLock.Release(); }
         }
 

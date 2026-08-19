@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { ConfigV1 } from "@opencode-ai/core/v1/config/config"
 import { Effect } from "effect"
-import { lmStudioEmbeddingProvider } from "@/local-agent-runtime/embeddings"
+import { llamaServerEmbeddingProvider, lmStudioEmbeddingProvider } from "@/local-agent-runtime/embeddings"
 
 describe("LM Studio embedding provider", () => {
   test("discovers a loaded embedding model and calls the OpenAI-compatible endpoint", async () => {
@@ -87,6 +87,23 @@ describe("LM Studio embedding provider", () => {
 
     expect((await Effect.runPromise(provider.model()))?.name).toBe("allowed")
     expect((await Effect.runPromise(provider.model("blocked")))?.name).toBe("blocked")
+  })
+})
+
+describe("llama-server embedding provider", () => {
+  test("uses the configured OpenAI-compatible embeddings route", async () => {
+    const requests: string[] = []
+    const provider = llamaServerEmbeddingProvider(
+      () => Effect.succeed({ provider: { "llama-server": { options: { baseURL: "http://127.0.0.1:8080/v1" } } } }),
+      async (input) => {
+        requests.push(String(input))
+        return Response.json({ data: [{ index: 0, embedding: [0, 1, 0] }] })
+      },
+    )
+    const model = await Effect.runPromise(provider.model("llama-server:bge-small"))
+    expect(model?.name).toBe("bge-small")
+    expect(await Effect.runPromise(provider.embed({ model: model!, texts: ["memory"] }))).toEqual([[0, 1, 0]])
+    expect(requests).toEqual(["http://127.0.0.1:8080/v1/embeddings"])
   })
 })
 

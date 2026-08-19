@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 6c76292e7698a704a8c91ea0da0a9b9d
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 2100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 239141
+  packageName: Gamer Girl
+  packageVersion: 1.0
+  assetPath: Assets/GamerGirl/Render pipeline/Built-in/Materials/MAT_GAMERGIRL_TEETH.mat
+  uploadId: 543100

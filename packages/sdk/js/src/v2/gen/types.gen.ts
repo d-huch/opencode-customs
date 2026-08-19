@@ -6761,8 +6761,31 @@ export type JarvisConfig = {
   models: JarvisModelRoles
   plannerTimeoutMs: number
   plannerIdleUnloadMs: number
+  plannerEscalationMinWords: number
   initiative: JarvisInitiativePolicy
   updatedAt: number
+}
+
+export type JarvisModelRoleStatus = {
+  role: "dialogue" | "planner" | "embedding"
+  status: "unconfigured" | "ready" | "loading" | "offline" | "unauthorized" | "unsupported" | "degraded"
+  model?: JarvisModelRef
+  verified: boolean
+  detail?: string
+}
+
+export type JarvisPlannerLifecycle = {
+  state: "idle" | "loading" | "ready" | "busy" | "unloading" | "offline"
+  managed: boolean
+  activeRequests: number
+  lastUsedAt?: number
+}
+
+export type JarvisEmbeddingBackfill = {
+  state: "idle" | "running" | "blocked" | "error"
+  remaining: number
+  processed: number
+  error?: string
 }
 
 export type JarvisRuntimeStatus = {
@@ -6774,6 +6797,9 @@ export type JarvisRuntimeStatus = {
   pendingInbox: number
   memoryRecords: number
   degradedReasons: Array<string>
+  modelRoles: Array<JarvisModelRoleStatus>
+  planner: JarvisPlannerLifecycle
+  embeddings: JarvisEmbeddingBackfill
 }
 
 export type JarvisProfileSync = {
@@ -6844,10 +6870,13 @@ export type JarvisGoalResume = {
   characterID?: string
 }
 
-export type JarvisGoalStepResult = {
-  stepID: string
-  success: boolean
-  error?: string
+export type JarvisGoalReplan = {
+  reason?: string
+}
+
+export type JarvisGoalCancel = {
+  summary?: string
+  changedEntityIDs?: Array<string>
 }
 
 export type JarvisGoalOutcome = {
@@ -6857,6 +6886,12 @@ export type JarvisGoalOutcome = {
   summary: string
   changedEntityIDs: Array<string>
   createdAt: number
+}
+
+export type JarvisGoalStepResult = {
+  stepID: string
+  success: boolean
+  error?: string
 }
 
 export type JarvisGoalOutcomeCreate = {
@@ -6891,6 +6926,7 @@ export type JarvisMemoryRecord = {
   pinned: boolean
   conflictsWith: Array<string>
   embedding?: Array<number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN">
+  embeddingModel?: JarvisModelRef
   createdAt: number
   updatedAt: number
   lastUsedAt?: number
@@ -6898,6 +6934,24 @@ export type JarvisMemoryRecord = {
 
 export type JarvisMemoryMutation = {
   changed: number
+}
+
+export type JarvisMemoryPatch = {
+  text?: string
+  confidence?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  importance?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  lifecycle?: "candidate" | "verified" | "archived"
+  pinned?: boolean
+}
+
+export type JarvisMemoryConflictResolution = {
+  action: "keep_both" | "choose_current" | "choose_other"
+  otherMemoryID: string
+}
+
+export type JarvisMemoryBackfillResult = {
+  queued: number
+  remaining: number
 }
 
 export type JarvisWakeCandidate = {
@@ -6911,6 +6965,8 @@ export type JarvisWakeCandidate = {
   status: "pending" | "admitted" | "dismissed" | "blocked"
   notBefore: number
   createdAt: number
+  updatedAt: number
+  blockedReason?: string
 }
 
 export type JarvisWakeCreate = {
@@ -15553,6 +15609,68 @@ export type V2JarvisResumeGoalResponses = {
 
 export type V2JarvisResumeGoalResponse = V2JarvisResumeGoalResponses[keyof V2JarvisResumeGoalResponses]
 
+export type V2JarvisReplanGoalData = {
+  body: JarvisGoalReplan
+  path: {
+    goalID: string
+  }
+  query?: never
+  url: "/api/jarvis/goals/{goalID}/replan"
+}
+
+export type V2JarvisReplanGoalErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2JarvisReplanGoalError = V2JarvisReplanGoalErrors[keyof V2JarvisReplanGoalErrors]
+
+export type V2JarvisReplanGoalResponses = {
+  /**
+   * Success
+   */
+  200: JarvisGoal
+}
+
+export type V2JarvisReplanGoalResponse = V2JarvisReplanGoalResponses[keyof V2JarvisReplanGoalResponses]
+
+export type V2JarvisCancelGoalData = {
+  body: JarvisGoalCancel
+  path: {
+    goalID: string
+  }
+  query?: never
+  url: "/api/jarvis/goals/{goalID}/cancel"
+}
+
+export type V2JarvisCancelGoalErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2JarvisCancelGoalError = V2JarvisCancelGoalErrors[keyof V2JarvisCancelGoalErrors]
+
+export type V2JarvisCancelGoalResponses = {
+  /**
+   * Success
+   */
+  200: JarvisGoalOutcome
+}
+
+export type V2JarvisCancelGoalResponse = V2JarvisCancelGoalResponses[keyof V2JarvisCancelGoalResponses]
+
 export type V2JarvisRecordGoalStepData = {
   body: JarvisGoalStepResult
   path: {
@@ -15735,6 +15853,99 @@ export type V2JarvisRemoveMemoryResponses = {
 
 export type V2JarvisRemoveMemoryResponse = V2JarvisRemoveMemoryResponses[keyof V2JarvisRemoveMemoryResponses]
 
+export type V2JarvisPatchMemoryData = {
+  body: JarvisMemoryPatch
+  path: {
+    memoryID: string
+  }
+  query?: never
+  url: "/api/jarvis/memory/{memoryID}"
+}
+
+export type V2JarvisPatchMemoryErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2JarvisPatchMemoryError = V2JarvisPatchMemoryErrors[keyof V2JarvisPatchMemoryErrors]
+
+export type V2JarvisPatchMemoryResponses = {
+  /**
+   * Success
+   */
+  200: JarvisMemoryRecord
+}
+
+export type V2JarvisPatchMemoryResponse = V2JarvisPatchMemoryResponses[keyof V2JarvisPatchMemoryResponses]
+
+export type V2JarvisResolveMemoryConflictData = {
+  body: JarvisMemoryConflictResolution
+  path: {
+    memoryID: string
+  }
+  query?: never
+  url: "/api/jarvis/memory/{memoryID}/conflict"
+}
+
+export type V2JarvisResolveMemoryConflictErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2JarvisResolveMemoryConflictError =
+  V2JarvisResolveMemoryConflictErrors[keyof V2JarvisResolveMemoryConflictErrors]
+
+export type V2JarvisResolveMemoryConflictResponses = {
+  /**
+   * Success
+   */
+  200: JarvisMemoryRecord
+}
+
+export type V2JarvisResolveMemoryConflictResponse =
+  V2JarvisResolveMemoryConflictResponses[keyof V2JarvisResolveMemoryConflictResponses]
+
+export type V2JarvisReindexMemoryData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/api/jarvis/memory/reindex"
+}
+
+export type V2JarvisReindexMemoryErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2JarvisReindexMemoryError = V2JarvisReindexMemoryErrors[keyof V2JarvisReindexMemoryErrors]
+
+export type V2JarvisReindexMemoryResponses = {
+  /**
+   * Jarvis.MemoryBackfillResult
+   */
+  200: JarvisMemoryBackfillResult
+}
+
+export type V2JarvisReindexMemoryResponse = V2JarvisReindexMemoryResponses[keyof V2JarvisReindexMemoryResponses]
+
 export type V2JarvisInboxData = {
   body?: never
   path?: never
@@ -15792,6 +16003,68 @@ export type V2JarvisWakeResponses = {
 }
 
 export type V2JarvisWakeResponse = V2JarvisWakeResponses[keyof V2JarvisWakeResponses]
+
+export type V2JarvisDismissInboxData = {
+  body?: never
+  path: {
+    wakeID: string
+  }
+  query?: never
+  url: "/api/jarvis/inbox/{wakeID}/dismiss"
+}
+
+export type V2JarvisDismissInboxErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2JarvisDismissInboxError = V2JarvisDismissInboxErrors[keyof V2JarvisDismissInboxErrors]
+
+export type V2JarvisDismissInboxResponses = {
+  /**
+   * Success
+   */
+  200: JarvisWakeCandidate
+}
+
+export type V2JarvisDismissInboxResponse = V2JarvisDismissInboxResponses[keyof V2JarvisDismissInboxResponses]
+
+export type V2JarvisRetryInboxData = {
+  body?: never
+  path: {
+    wakeID: string
+  }
+  query?: never
+  url: "/api/jarvis/inbox/{wakeID}/retry"
+}
+
+export type V2JarvisRetryInboxErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2JarvisRetryInboxError = V2JarvisRetryInboxErrors[keyof V2JarvisRetryInboxErrors]
+
+export type V2JarvisRetryInboxResponses = {
+  /**
+   * Success
+   */
+  200: JarvisWakeCandidate
+}
+
+export type V2JarvisRetryInboxResponse = V2JarvisRetryInboxResponses[keyof V2JarvisRetryInboxResponses]
 
 export type PtyConnectData = {
   body?: never

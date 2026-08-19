@@ -44,6 +44,11 @@ export class AvatarPairingManager {
     return { ...this.active, addresses: [...this.active.addresses] }
   }
 
+  cancel() {
+    this.active = undefined
+    this.failures = 0
+  }
+
   async pair(input: { pin: string; name: string }) {
     const pairing = this.status()
     if (!pairing) return

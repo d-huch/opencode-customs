@@ -33,3 +33,17 @@ logs/
 eval-results/
 *.bun-build
 tsconfig.tsbuildinfo
+
+# Unity project generated state
+/vr-avatar/vr-avatar/[Ll]ibrary/
+/vr-avatar/vr-avatar/[Tt]emp/
+/vr-avatar/vr-avatar/[Oo]bj/
+/vr-avatar/vr-avatar/[Bb]uild/
+/vr-avatar/vr-avatar/[Bb]uilds/
+/vr-avatar/vr-avatar/[Ll]ogs/
+/vr-avatar/vr-avatar/[Uu]ser[Ss]ettings/
+/vr-avatar/vr-avatar/MemoryCaptures/
+/vr-avatar/vr-avatar/Recordings/
+/vr-avatar/vr-avatar/Assets/Resources/PerformanceTestRun*
+/vr-avatar/vr-avatar/*.csproj
+/vr-avatar/vr-avatar/*.sln

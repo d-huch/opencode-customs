@@ -41,6 +41,7 @@
     "@types/luxon": "catalog:",
     "@types/node": "catalog:",
     "@types/qrcode": "1.5.6",
+    "@types/three": "0.185.4",
     "@typescript/native-preview": "catalog:",
     "tw-animate-css": "1.4.0",
     "typescript": "catalog:",
@@ -62,6 +63,7 @@
     "@opencode-ai/session-ui": "workspace:*",
     "@opencode-ai/ui": "workspace:*",
     "@pierre/trees": "1.0.0-beta.4",
+    "@pixiv/three-vrm": "3.5.5",
     "@sentry/solid": "catalog:",
     "@shikijs/transformers": "3.9.2",
     "@solid-primitives/active-element": "2.1.3",
@@ -88,12 +90,13 @@
     "luxon": "catalog:",
     "marked": "catalog:",
     "marked-shiki": "catalog:",
-    "remeda": "catalog:",
     "qrcode": "1.5.4",
+    "remeda": "catalog:",
     "shiki": "catalog:",
     "solid-js": "catalog:",
     "solid-list": "catalog:",
     "solid-presence": "0.2.0",
-    "tailwindcss": "catalog:"
+    "tailwindcss": "catalog:",
+    "three": "0.185.1"
   }
 }

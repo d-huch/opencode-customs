@@ -92,10 +92,23 @@ export type AgentGoal = {
 }
 
 type PersistedState = {
-  version: 3
+  version: 4
   config: AvatarBridgeConfig
   devices: AvatarPairedDevice[]
   memories: AvatarMemory[]
+  migrations: Record<string, { legacyMemoryImportedAt?: number; sharedModelsMigratedAt?: number }>
+  outbox: AvatarOutboxItem[]
+}
+
+export type AvatarOutboxItem = {
+  id: string
+  sourceID: string
+  operation: "upsert" | "delete"
+  payload?: Record<string, unknown>
+  attempts: number
+  nextAttemptAt: number
+  error?: string
+  createdAt: number
 }
 
 export const avatarBridgeDefaults: AvatarBridgeConfig = {
@@ -408,6 +421,40 @@ export class AvatarPersistentStore {
     return this.save()
   }
 
+  migration(server: string) {
+    return { ...this.state.migrations[server] }
+  }
+
+  markMigration(server: string, patch: { legacyMemoryImportedAt?: number; sharedModelsMigratedAt?: number }) {
+    this.state.migrations[server] = { ...this.state.migrations[server], ...patch }
+    return this.save()
+  }
+
+  enqueueOutbox(input: Omit<AvatarOutboxItem, "id" | "attempts" | "nextAttemptAt" | "createdAt">) {
+    const now = Date.now()
+    const item: AvatarOutboxItem = { ...input, id: `outbox_${randomUUID()}`, attempts: 0, nextAttemptAt: now, createdAt: now }
+    this.state.outbox = [...this.state.outbox.filter((entry) => entry.sourceID !== input.sourceID), item].slice(-1_000)
+    return this.save().then(() => ({ ...item }))
+  }
+
+  outbox() {
+    return this.state.outbox.toSorted((left, right) => left.createdAt - right.createdAt).map((item) => ({ ...item }))
+  }
+
+  resolveOutbox(id: string) {
+    this.state.outbox = this.state.outbox.filter((item) => item.id !== id)
+    return this.save()
+  }
+
+  failOutbox(id: string, error: string) {
+    const item = this.state.outbox.find((entry) => entry.id === id)
+    if (!item) return Promise.resolve()
+    item.attempts++
+    item.error = error.slice(0, 1_000)
+    item.nextAttemptAt = Date.now() + Math.min(60_000, 1_000 * 2 ** Math.min(item.attempts, 6))
+    return this.save()
+  }
+
   flush() {
     return this.pending
   }
@@ -457,19 +504,27 @@ async function readPersisted(path: string): Promise<PersistedState> {
   const value = await readFile(path, "utf8")
     .then((text) => JSON.parse(text) as unknown)
     .catch(() => undefined)
-  if (!isRecord(value) || (value.version !== 2 && value.version !== 3)) return defaults()
+  if (!isRecord(value) || (value.version !== 2 && value.version !== 3 && value.version !== 4)) return defaults()
   return {
-    version: 3,
+    version: 4,
     config: normalizeConfig(isRecord(value.config) ? value.config : {}),
     devices: Array.isArray(value.devices) ? value.devices.filter(isDevice).slice(-32) : [],
     memories: Array.isArray(value.memories)
       ? value.memories.flatMap((memory) => migrateMemory(memory)).filter(isMemory).slice(0, 1_000)
       : [],
+    migrations: isRecord(value.migrations)
+      ? Object.fromEntries(Object.entries(value.migrations).filter((entry): entry is [string, { legacyMemoryImportedAt?: number; sharedModelsMigratedAt?: number }] => isRecord(entry[1])))
+      : {},
+    outbox: Array.isArray(value.outbox) ? value.outbox.filter(isOutboxItem).slice(-1_000) : [],
   }
 }
 
 function defaults(): PersistedState {
-  return { version: 3, config: { ...avatarBridgeDefaults }, devices: [], memories: [] }
+  return { version: 4, config: { ...avatarBridgeDefaults }, devices: [], memories: [], migrations: {}, outbox: [] }
+}
+
+function isOutboxItem(value: unknown): value is AvatarOutboxItem {
+  return isRecord(value) && typeof value.id === "string" && typeof value.sourceID === "string" && (value.operation === "upsert" || value.operation === "delete") && typeof value.attempts === "number" && typeof value.nextAttemptAt === "number" && typeof value.createdAt === "number"
 }
 
 function normalizeConfig(value: Record<string, unknown>): AvatarBridgeConfig {

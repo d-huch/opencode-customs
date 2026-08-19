@@ -5,6 +5,7 @@ import { join, resolve } from "node:path"
 const root = resolve(import.meta.dir, "..")
 const skipBuild = process.argv.includes("--skip-build")
 const checkUnity = process.argv.includes("--unity")
+const buildQuest = process.argv.includes("--quest-build")
 const commands = [
   { name: "App typecheck", cwd: "packages/app", command: ["bun", "typecheck"] },
   { name: "Desktop typecheck", cwd: "packages/desktop", command: ["bun", "typecheck"] },
@@ -45,8 +46,8 @@ if (missing.length > 0) {
   process.exit(1)
 }
 const manifest = await Bun.file(resolve(root, unityFiles[0])).json()
-if (manifest.version !== "2.2.0" || !manifest.samples?.some((sample: { path?: string }) => sample.path === "Samples~/JarvisLab")) {
-  console.error("[Jarvis] Unity package manifest does not expose Jarvis Lab v2.2")
+if (manifest.version !== "2.3.1" || !manifest.samples?.some((sample: { path?: string }) => sample.path === "Samples~/JarvisLab")) {
+  console.error("[Jarvis] Unity package manifest does not expose Jarvis Lab v2.3.1")
   process.exit(1)
 }
 console.log("\n[Jarvis] Unity UPM manifest and vertical-slice assets are present")
@@ -129,6 +130,31 @@ if (checkUnity) {
     "-",
   ])
   console.log(`\n[Jarvis] Unity 6 validation artifacts: ${project}`)
+
+  const quest = resolve(root, "vr-avatar/vr-avatar")
+  if (existsSync(join(quest, "ProjectSettings/ProjectVersion.txt"))) {
+    runUnity("Compiling Quest 3 alpha project", ["-projectPath", quest, "-quit", "-logFile", "-"])
+    runUnity("Generating Quest Jarvis Room", [
+      "-projectPath",
+      quest,
+      "-executeMethod",
+      "OpenCode.Customs.QuestAlpha.Editor.QuestJarvisRoomBuilder.Create",
+      "-quit",
+      "-logFile",
+      "-",
+    ])
+    if (buildQuest) {
+      runUnity("Building Quest development APK", [
+        "-projectPath",
+        quest,
+        "-executeMethod",
+        "OpenCode.Customs.QuestAlpha.Editor.QuestJarvisRoomBuilder.BuildQuestDevelopment",
+        "-quit",
+        "-logFile",
+        "-",
+      ])
+    }
+  }
 }
 
 if (!skipBuild) {

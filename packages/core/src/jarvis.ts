@@ -4,6 +4,7 @@ import { Jarvis } from "@opencode-ai/schema/jarvis"
 import { and, asc, desc, eq, inArray, notInArray, sql } from "drizzle-orm"
 import { Effect, Option, Schema } from "effect"
 import { Database } from "./database/database"
+import { RepositoryEmbeddings } from "./repository-embeddings"
 import {
   JarvisConfigTable,
   JarvisGoalOutcomeTable,
@@ -18,11 +19,13 @@ const CONFIG_ID = 1
 const MAX_PLAN_STEPS = 8
 const MAX_ACTIONS = 8
 const MAX_CYCLE_MS = 60_000
+const plannerRuntime = { activeRequests: 0, lastUsedAt: undefined as number | undefined }
 
 export const defaultConfig = (): Jarvis.Config => ({
   models: {},
   plannerTimeoutMs: 8_000,
   plannerIdleUnloadMs: 10 * 60_000,
+  plannerEscalationMinWords: 18,
   initiative: {
     enabled: true,
     quietStart: "22:00",
@@ -35,14 +38,29 @@ export const defaultConfig = (): Jarvis.Config => ({
 })
 
 export const getConfig = Effect.fn("JarvisRuntime.getConfig")(function* (db: Database.Interface["db"]) {
-  return (yield* db.select().from(JarvisConfigTable).where(eq(JarvisConfigTable.id, CONFIG_ID)).get())?.data ?? defaultConfig()
+  const stored = (yield* db.select().from(JarvisConfigTable).where(eq(JarvisConfigTable.id, CONFIG_ID)).get())?.data
+  return stored ? { ...defaultConfig(), ...stored, initiative: { ...defaultConfig().initiative, ...stored.initiative } } : defaultConfig()
 })
 
 export const updateConfig = Effect.fn("JarvisRuntime.updateConfig")(function* (
   db: Database.Interface["db"],
   input: Jarvis.Config,
 ) {
-  const data = { ...input, updatedAt: Date.now() }
+  const data: Jarvis.Config = {
+    ...input,
+    plannerTimeoutMs: Math.min(60_000, Math.max(2_000, input.plannerTimeoutMs)),
+    plannerIdleUnloadMs: input.plannerIdleUnloadMs === 0 ? 0 : Math.min(60 * 60_000, Math.max(30_000, input.plannerIdleUnloadMs)),
+    plannerEscalationMinWords: Math.min(100, Math.max(4, input.plannerEscalationMinWords)),
+    initiative: {
+      ...input.initiative,
+      quietStart: validTime(input.initiative.quietStart) ? input.initiative.quietStart : "22:00",
+      quietEnd: validTime(input.initiative.quietEnd) ? input.initiative.quietEnd : "08:00",
+      reflectionLimit: Math.min(2, input.initiative.reflectionLimit),
+      eventLimit: Math.min(20, input.initiative.eventLimit),
+      topicCooldownMinutes: Math.min(240, Math.max(5, input.initiative.topicCooldownMinutes)),
+    },
+    updatedAt: Date.now(),
+  }
   yield* db
     .insert(JarvisConfigTable)
     .values({ id: CONFIG_ID, data, time_updated: data.updatedAt })
@@ -327,8 +345,14 @@ export const remember = Effect.fn("JarvisRuntime.remember")(function* (
   input: Jarvis.MemoryRecord,
 ) {
   const now = Date.now()
+  const config = yield* getConfig(db)
+  const embedded = input.embedding
+    ? undefined
+    : yield* embedText(config.models.embedding, input.text).pipe(Effect.catch(() => Effect.succeed(undefined)))
   const record = {
     ...input,
+    embedding: input.embedding ?? embedded?.vector,
+    embeddingModel: input.embeddingModel ?? embedded?.model,
     lifecycle: input.kind === "correction" ? ("verified" as const) : input.lifecycle,
     updatedAt: now,
   }
@@ -345,6 +369,7 @@ export const remember = Effect.fn("JarvisRuntime.remember")(function* (
         pinned: record.pinned,
         conflicts_with: record.conflictsWith,
         embedding: record.embedding,
+        embedding_model: record.embeddingModel,
         time_updated: now,
       },
     })
@@ -355,6 +380,12 @@ export const searchMemory = Effect.fn("JarvisRuntime.searchMemory")(function* (
   db: Database.Interface["db"],
   input: Jarvis.MemorySearch,
 ) {
+  const config = yield* getConfig(db)
+  const embedded = input.embedding
+    ? undefined
+    : yield* embedText(config.models.embedding, input.query).pipe(Effect.catch(() => Effect.succeed(undefined)))
+  const queryEmbedding = input.embedding ?? embedded?.vector
+  const queryModel = embedded?.model ?? config.models.embedding
   const terms = input.query.toLocaleLowerCase().match(/[\p{L}\p{N}_-]{2,}/gu)?.slice(0, 16) ?? []
   const match = terms.map((term) => `"${term.replaceAll('"', '""')}"*`).join(" OR ")
   const ranked = match
@@ -382,7 +413,10 @@ export const searchMemory = Effect.fn("JarvisRuntime.searchMemory")(function* (
         row.importance * 2 +
         row.confidence +
         Math.max(0, 1 + Math.min(0, -(lexicalRanks.get(row.id) ?? 0)) / 10) +
-        semanticScore(row.embedding, input.embedding) +
+        semanticScore(
+          sameModel(row.embedding_model, queryModel) ? row.embedding : undefined,
+          queryEmbedding,
+        ) +
         Math.max(0, 1 - (now - row.time_updated) / (1000 * 60 * 60 * 24 * 90)),
     }))
     .toSorted((a, b) => b.score - a.score)
@@ -400,6 +434,78 @@ export const removeMemory = Effect.fn("JarvisRuntime.removeMemory")(function* (
   id: string,
 ) {
   return (yield* db.delete(JarvisMemoryTable).where(eq(JarvisMemoryTable.id, id)).returning({ id: JarvisMemoryTable.id })).length
+})
+
+export const patchMemory = Effect.fn("JarvisRuntime.patchMemory")(function* (
+  db: Database.Interface["db"],
+  id: string,
+  input: Jarvis.MemoryPatch,
+) {
+  const current = yield* db.select().from(JarvisMemoryTable).where(eq(JarvisMemoryTable.id, id)).get()
+  if (!current) return undefined
+  const text = input.text?.trim()
+  if (input.text !== undefined && !text) return undefined
+  yield* db
+    .update(JarvisMemoryTable)
+    .set({
+      body: text ?? current.body,
+      confidence: input.confidence ?? current.confidence,
+      importance: input.importance ?? current.importance,
+      lifecycle: input.lifecycle ?? current.lifecycle,
+      pinned: input.pinned ?? current.pinned,
+      embedding: text && text !== current.body ? null : current.embedding,
+      embedding_model: text && text !== current.body ? null : current.embedding_model,
+      time_updated: Date.now(),
+    })
+    .where(eq(JarvisMemoryTable.id, id))
+  const updated = yield* db.select().from(JarvisMemoryTable).where(eq(JarvisMemoryTable.id, id)).get()
+  return updated ? memoryFromRow(updated) : undefined
+})
+
+export const resolveMemoryConflict = Effect.fn("JarvisRuntime.resolveMemoryConflict")(function* (
+  db: Database.Interface["db"],
+  id: string,
+  input: Jarvis.MemoryConflictResolution,
+) {
+  const rows = yield* db.select().from(JarvisMemoryTable).where(inArray(JarvisMemoryTable.id, [id, input.otherMemoryID]))
+  if (rows.length !== 2) return undefined
+  const current = rows.find((row) => row.id === id)
+  const other = rows.find((row) => row.id === input.otherMemoryID)
+  if (!current || !other) return undefined
+  const now = Date.now()
+  if (input.action === "keep_both") {
+    yield* db.update(JarvisMemoryTable).set({ conflicts_with: [], time_updated: now }).where(inArray(JarvisMemoryTable.id, [id, input.otherMemoryID]))
+  }
+  if (input.action === "choose_current") {
+    yield* db.update(JarvisMemoryTable).set({ lifecycle: "verified", conflicts_with: [], time_updated: now }).where(eq(JarvisMemoryTable.id, id))
+    yield* db.update(JarvisMemoryTable).set({ lifecycle: "archived", conflicts_with: [], time_updated: now }).where(eq(JarvisMemoryTable.id, input.otherMemoryID))
+  }
+  if (input.action === "choose_other") {
+    yield* db.update(JarvisMemoryTable).set({ lifecycle: "archived", conflicts_with: [], time_updated: now }).where(eq(JarvisMemoryTable.id, id))
+    yield* db.update(JarvisMemoryTable).set({ lifecycle: "verified", conflicts_with: [], time_updated: now }).where(eq(JarvisMemoryTable.id, input.otherMemoryID))
+  }
+  const updated = yield* db.select().from(JarvisMemoryTable).where(eq(JarvisMemoryTable.id, id)).get()
+  return updated ? memoryFromRow(updated) : undefined
+})
+
+export const memoryBackfillStatus = Effect.fn("JarvisRuntime.memoryBackfillStatus")(function* (
+  db: Database.Interface["db"],
+) {
+  return yield* count(db, JarvisMemoryTable, sql`${JarvisMemoryTable.embedding} IS NULL`)
+})
+
+export const backfillMemory = Effect.fn("JarvisRuntime.backfillMemory")(function* (
+  db: Database.Interface["db"],
+  limit = 16,
+) {
+  const config = yield* getConfig(db)
+  if (!config.models.embedding) return { queued: 0, remaining: yield* memoryBackfillStatus(db) }
+  const rows = yield* db.select().from(JarvisMemoryTable).where(sql`${JarvisMemoryTable.embedding} IS NULL`).orderBy(asc(JarvisMemoryTable.time_updated)).limit(Math.min(64, Math.max(1, limit)))
+  const results = yield* Effect.forEach(rows, (row) => embedText(config.models.embedding, row.body).pipe(Effect.catch(() => Effect.succeed(undefined))), { concurrency: 1 })
+  const completed = results.flatMap((result, index) => result ? [{ result, row: rows[index] }] : []).filter((item): item is { result: { vector: readonly number[]; model: Jarvis.ModelRef }; row: typeof JarvisMemoryTable.$inferSelect } => !!item.row)
+  if (completed.length > 0)
+    yield* Effect.forEach(completed, (item) => db.update(JarvisMemoryTable).set({ embedding: item.result.vector, embedding_model: item.result.model, time_updated: Date.now() }).where(eq(JarvisMemoryTable.id, item.row.id)), { concurrency: 1 })
+  return { queued: completed.length, remaining: yield* memoryBackfillStatus(db) }
 })
 
 export const enqueueWake = Effect.fn("JarvisRuntime.enqueueWake")(function* (
@@ -435,6 +541,7 @@ export const enqueueWake = Effect.fn("JarvisRuntime.enqueueWake")(function* (
     status: "pending",
     notBefore: input.notBefore ?? now,
     createdAt: now,
+    updatedAt: now,
   }
   yield* db.insert(JarvisWakeTable).values(wakeRow(candidate))
   return candidate
@@ -487,8 +594,43 @@ export const claimWake = Effect.fn("JarvisRuntime.claimWake")(function* (db: Dat
 export const markWakeBlocked = Effect.fn("JarvisRuntime.markWakeBlocked")(function* (
   db: Database.Interface["db"],
   wakeID: string,
+  reason?: string,
 ) {
-  yield* db.update(JarvisWakeTable).set({ status: "blocked" }).where(eq(JarvisWakeTable.id, wakeID))
+  yield* db.update(JarvisWakeTable).set({ status: "blocked", blocked_reason: reason?.slice(0, 1_000), time_updated: Date.now() }).where(eq(JarvisWakeTable.id, wakeID))
+})
+
+export const dismissWake = Effect.fn("JarvisRuntime.dismissWake")(function* (db: Database.Interface["db"], wakeID: string) {
+  const rows = yield* db.update(JarvisWakeTable).set({ status: "dismissed", blocked_reason: null, time_updated: Date.now() }).where(eq(JarvisWakeTable.id, wakeID)).returning()
+  return rows[0] ? wakeFromRow(rows[0]) : undefined
+})
+
+export const retryWake = Effect.fn("JarvisRuntime.retryWake")(function* (db: Database.Interface["db"], wakeID: string) {
+  const rows = yield* db.update(JarvisWakeTable).set({ status: "pending", blocked_reason: null, not_before: Date.now(), time_updated: Date.now() }).where(eq(JarvisWakeTable.id, wakeID)).returning()
+  return rows[0] ? wakeFromRow(rows[0]) : undefined
+})
+
+export const replanGoal = Effect.fn("JarvisRuntime.replanGoal")(function* (
+  db: Database.Interface["db"],
+  goalID: string,
+  input: Jarvis.GoalReplan,
+) {
+  const goal = yield* db.select().from(JarvisGoalTable).where(eq(JarvisGoalTable.id, goalID)).get()
+  if (!goal || ["completed", "failed", "cancelled"].includes(goal.status)) return undefined
+  yield* db.delete(JarvisPlanStepTable).where(eq(JarvisPlanStepTable.goal_id, goalID))
+  yield* db.update(JarvisGoalTable).set({ status: "pending", plan: null, suspension_reason: input.reason?.slice(0, 1_000), action_count: 0, cycle_started_at: null, time_updated: Date.now() }).where(eq(JarvisGoalTable.id, goalID))
+  return yield* goalByID(db, goalID)
+})
+
+export const cancelGoal = Effect.fn("JarvisRuntime.cancelGoal")(function* (
+  db: Database.Interface["db"],
+  goalID: string,
+  input: Jarvis.GoalCancel,
+) {
+  return yield* completeGoal(db, goalID, {
+    status: "cancelled",
+    summary: input.summary?.trim() || "Cancelled by the user.",
+    changedEntityIDs: input.changedEntityIDs ?? [],
+  })
 })
 
 export const status = Effect.fn("JarvisRuntime.status")(function* (db: Database.Interface["db"]) {
@@ -508,6 +650,14 @@ export const status = Effect.fn("JarvisRuntime.status")(function* (db: Database.
     ...(config.models.dialogue ? [] : ["Dialogue model is not configured."]),
     ...(config.models.planner ? [] : ["Planner model is not configured; multi-step goals will be suspended."]),
   ]
+  const modelRoles = (["dialogue", "planner", "embedding"] as const).map((role) => ({
+    role,
+    status: config.models[role] ? ("degraded" as const) : ("unconfigured" as const),
+    model: config.models[role],
+    verified: false,
+    detail: config.models[role] ? "Configured manually; runtime availability has not been verified." : undefined,
+  }))
+  const remaining = yield* memoryBackfillStatus(db)
   return {
     state: degradedReasons.length === 0 ? ("ready" as const) : ("degraded" as const),
     primaryProfile,
@@ -517,14 +667,38 @@ export const status = Effect.fn("JarvisRuntime.status")(function* (db: Database.
     pendingInbox: pending,
     memoryRecords: memories,
     degradedReasons,
+    modelRoles,
+    planner: {
+      state: config.models.planner ? (plannerRuntime.activeRequests > 0 ? ("busy" as const) : ("idle" as const)) : ("offline" as const),
+      managed: false,
+      activeRequests: plannerRuntime.activeRequests,
+      lastUsedAt: plannerRuntime.lastUsedAt,
+    },
+    embeddings: {
+      state: config.models.embedding ? (remaining > 0 ? ("blocked" as const) : ("idle" as const)) : ("blocked" as const),
+      remaining,
+      processed: 0,
+      error: config.models.embedding ? undefined : "Embedding model is not configured; lexical search remains available.",
+    },
   }
 })
+
+export function plannerStarted() {
+  plannerRuntime.activeRequests++
+  plannerRuntime.lastUsedAt = Date.now()
+}
+
+export function plannerFinished() {
+  plannerRuntime.activeRequests = Math.max(0, plannerRuntime.activeRequests - 1)
+  plannerRuntime.lastUsedAt = Date.now()
+}
 
 export function shouldPlan(input: {
   readonly text: string
   readonly failedAttempts?: number
   readonly memoryConflict?: boolean
   readonly critical?: boolean
+  readonly minWords?: number
 }) {
   const text = input.text.toLocaleLowerCase()
   return (
@@ -532,7 +706,7 @@ export function shouldPlan(input: {
     input.memoryConflict === true ||
     input.critical === true ||
     /(?:склади|створи|побудуй|план|кілька крок|спочатку.+потім|plan|multiple steps|first.+then)/iu.test(text) ||
-    text.length > 600
+    text.trim().split(/\s+/u).length >= Math.max(4, input.minWords ?? 18)
   )
 }
 
@@ -636,6 +810,7 @@ function memoryRow(record: Jarvis.MemoryRecord): typeof JarvisMemoryTable.$infer
     pinned: record.pinned,
     conflicts_with: record.conflictsWith,
     embedding: record.embedding,
+    embedding_model: record.embeddingModel,
     last_used_at: record.lastUsedAt,
     time_created: record.createdAt,
     time_updated: record.updatedAt,
@@ -659,6 +834,7 @@ function memoryFromRow(row: typeof JarvisMemoryTable.$inferSelect): Jarvis.Memor
     pinned: row.pinned,
     conflictsWith: row.conflicts_with,
     embedding: row.embedding ?? undefined,
+    embeddingModel: row.embedding_model ?? undefined,
     createdAt: row.time_created,
     updatedAt: row.time_updated,
     lastUsedAt: row.last_used_at ?? undefined,
@@ -681,6 +857,19 @@ function semanticScore(stored?: readonly number[] | null, query?: readonly numbe
   return left > 0 && right > 0 ? Math.max(0, dot / (left * right)) * 2 : 0
 }
 
+function sameModel(stored?: Jarvis.ModelRef | null, query?: Jarvis.ModelRef) {
+  return !!stored && !!query && stored.providerID === query.providerID && stored.modelID === query.modelID
+}
+
+const embedText = Effect.fn("JarvisRuntime.embedText")(function* (model: Jarvis.ModelRef | undefined, text: string) {
+  if (!model || !text.trim()) return undefined
+  const selected = yield* RepositoryEmbeddings.model(`${model.providerID}:${model.modelID}`)
+  if (!selected) return undefined
+  const embedded = yield* RepositoryEmbeddings.embed({ model: selected, texts: [text] })
+  const vector = embedded?.vectors[0]
+  return vector ? { vector, model } : undefined
+})
+
 function wakeRow(candidate: Jarvis.WakeCandidate): typeof JarvisWakeTable.$inferInsert {
   return {
     id: candidate.id,
@@ -693,6 +882,8 @@ function wakeRow(candidate: Jarvis.WakeCandidate): typeof JarvisWakeTable.$infer
     status: candidate.status,
     not_before: candidate.notBefore,
     time_created: candidate.createdAt,
+    time_updated: candidate.updatedAt,
+    blocked_reason: candidate.blockedReason,
   }
 }
 
@@ -708,6 +899,8 @@ function wakeFromRow(row: typeof JarvisWakeTable.$inferSelect): Jarvis.WakeCandi
     status: row.status,
     notBefore: row.not_before,
     createdAt: row.time_created,
+    updatedAt: row.time_updated,
+    blockedReason: row.blocked_reason ?? undefined,
   }
 }
 
@@ -721,6 +914,10 @@ export function isQuietHour(now: Date, policy: Jarvis.InitiativePolicy) {
   const end = parse(policy.quietEnd)
   if (start === end) return false
   return start < end ? value >= start && value < end : value >= start || value < end
+}
+
+function validTime(value: string) {
+  return /^(?:[01]\d|2[0-3]):[0-5]\d$/u.test(value)
 }
 
 const count = Effect.fn("JarvisRuntime.count")(function* (

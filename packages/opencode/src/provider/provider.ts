@@ -45,7 +45,7 @@ import {
   probeLlamaServer,
 } from "./llama-server"
 import { RepositoryEmbeddings } from "@opencode-ai/core/repository-embeddings"
-import { lmStudioEmbeddingProvider } from "@/local-agent-runtime/embeddings"
+import { llamaServerEmbeddingProvider, lmStudioEmbeddingProvider } from "@/local-agent-runtime/embeddings"
 
 const OPENAI_HEADER_TIMEOUT_DEFAULT = 300_000
 // A missing model limit is unknown capacity, not unlimited capacity. Conservative
@@ -1399,7 +1399,8 @@ const layer = Layer.effect(
     const modelsDevSvc = yield* ModelsDev.Service
     const runtimeFlags = yield* RuntimeFlags.Service
     const unregisterEmbeddings = RepositoryEmbeddings.register(lmStudioEmbeddingProvider(config.get))
-    yield* Effect.addFinalizer(() => Effect.sync(unregisterEmbeddings))
+    const unregisterLlamaEmbeddings = RepositoryEmbeddings.register(llamaServerEmbeddingProvider(config.get))
+    yield* Effect.addFinalizer(() => Effect.sync(() => { unregisterLlamaEmbeddings(); unregisterEmbeddings() }))
 
     const state = yield* InstanceState.make<State>(() =>
       Effect.gen(function* () {

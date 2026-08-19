@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 86ab0e8b8edbfb745ae4b39497a27556
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 2100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 239141
+  packageName: Gamer Girl
+  packageVersion: 1.0
+  assetPath: Assets/GamerGirl/Render pipeline/HDRP/Materials/MAT_GAMERGIRL_HAIR_Red_01.mat
+  uploadId: 543100

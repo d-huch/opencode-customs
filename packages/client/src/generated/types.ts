@@ -3439,6 +3439,7 @@ export type ServerJarvisStatusOutput = {
     }
     readonly plannerTimeoutMs: number
     readonly plannerIdleUnloadMs: number
+    readonly plannerEscalationMinWords: number
     readonly initiative: {
       readonly enabled: boolean
       readonly quietStart: string
@@ -3454,6 +3455,25 @@ export type ServerJarvisStatusOutput = {
   readonly pendingInbox: number
   readonly memoryRecords: number
   readonly degradedReasons: ReadonlyArray<string>
+  readonly modelRoles: ReadonlyArray<{
+    readonly role: "dialogue" | "planner" | "embedding"
+    readonly status: "unconfigured" | "ready" | "loading" | "offline" | "unauthorized" | "unsupported" | "degraded"
+    readonly model?: { readonly providerID: string; readonly modelID: string }
+    readonly verified: boolean
+    readonly detail?: string
+  }>
+  readonly planner: {
+    readonly state: "idle" | "loading" | "ready" | "busy" | "unloading" | "offline"
+    readonly managed: boolean
+    readonly activeRequests: number
+    readonly lastUsedAt?: number
+  }
+  readonly embeddings: {
+    readonly state: "idle" | "running" | "blocked" | "error"
+    readonly remaining: number
+    readonly processed: number
+    readonly error?: string
+  }
 }
 
 export type ServerJarvisConfigOutput = {
@@ -3466,6 +3486,7 @@ export type ServerJarvisConfigOutput = {
   }
   readonly plannerTimeoutMs: number
   readonly plannerIdleUnloadMs: number
+  readonly plannerEscalationMinWords: number
   readonly initiative: {
     readonly enabled: boolean
     readonly quietStart: string
@@ -3488,6 +3509,7 @@ export type ServerJarvisUpdateConfigInput = {
     }
     readonly plannerTimeoutMs: number
     readonly plannerIdleUnloadMs: number
+    readonly plannerEscalationMinWords: number
     readonly initiative: {
       readonly enabled: boolean
       readonly quietStart: string
@@ -3508,6 +3530,7 @@ export type ServerJarvisUpdateConfigInput = {
     }
     readonly plannerTimeoutMs: number
     readonly plannerIdleUnloadMs: number
+    readonly plannerEscalationMinWords: number
     readonly initiative: {
       readonly enabled: boolean
       readonly quietStart: string
@@ -3528,6 +3551,7 @@ export type ServerJarvisUpdateConfigInput = {
     }
     readonly plannerTimeoutMs: number
     readonly plannerIdleUnloadMs: number
+    readonly plannerEscalationMinWords: number
     readonly initiative: {
       readonly enabled: boolean
       readonly quietStart: string
@@ -3548,6 +3572,7 @@ export type ServerJarvisUpdateConfigInput = {
     }
     readonly plannerTimeoutMs: number
     readonly plannerIdleUnloadMs: number
+    readonly plannerEscalationMinWords: number
     readonly initiative: {
       readonly enabled: boolean
       readonly quietStart: string
@@ -3568,6 +3593,7 @@ export type ServerJarvisUpdateConfigInput = {
     }
     readonly plannerTimeoutMs: number
     readonly plannerIdleUnloadMs: number
+    readonly plannerEscalationMinWords: number
     readonly initiative: {
       readonly enabled: boolean
       readonly quietStart: string
@@ -3578,6 +3604,27 @@ export type ServerJarvisUpdateConfigInput = {
     }
     readonly updatedAt: number
   }["plannerIdleUnloadMs"]
+  readonly plannerEscalationMinWords: {
+    readonly primaryProfileID?: string
+    readonly inboxSessionID?: string
+    readonly models: {
+      readonly dialogue?: { readonly providerID: string; readonly modelID: string }
+      readonly planner?: { readonly providerID: string; readonly modelID: string }
+      readonly embedding?: { readonly providerID: string; readonly modelID: string }
+    }
+    readonly plannerTimeoutMs: number
+    readonly plannerIdleUnloadMs: number
+    readonly plannerEscalationMinWords: number
+    readonly initiative: {
+      readonly enabled: boolean
+      readonly quietStart: string
+      readonly quietEnd: string
+      readonly reflectionLimit: number
+      readonly eventLimit: number
+      readonly topicCooldownMinutes: number
+    }
+    readonly updatedAt: number
+  }["plannerEscalationMinWords"]
   readonly initiative: {
     readonly primaryProfileID?: string
     readonly inboxSessionID?: string
@@ -3588,6 +3635,7 @@ export type ServerJarvisUpdateConfigInput = {
     }
     readonly plannerTimeoutMs: number
     readonly plannerIdleUnloadMs: number
+    readonly plannerEscalationMinWords: number
     readonly initiative: {
       readonly enabled: boolean
       readonly quietStart: string
@@ -3608,6 +3656,7 @@ export type ServerJarvisUpdateConfigInput = {
     }
     readonly plannerTimeoutMs: number
     readonly plannerIdleUnloadMs: number
+    readonly plannerEscalationMinWords: number
     readonly initiative: {
       readonly enabled: boolean
       readonly quietStart: string
@@ -3630,6 +3679,7 @@ export type ServerJarvisUpdateConfigOutput = {
   }
   readonly plannerTimeoutMs: number
   readonly plannerIdleUnloadMs: number
+  readonly plannerEscalationMinWords: number
   readonly initiative: {
     readonly enabled: boolean
     readonly quietStart: string
@@ -3978,6 +4028,66 @@ export type ServerJarvisResumeGoalOutput = {
   }
 } | null
 
+export type ServerJarvisReplanGoalInput = {
+  readonly goalID: { readonly goalID: string }["goalID"]
+  readonly reason?: { readonly reason?: string }["reason"]
+}
+
+export type ServerJarvisReplanGoalOutput = {
+  readonly id: string
+  readonly profileID: string
+  readonly sessionID?: string
+  readonly mode: "chat" | "unity"
+  readonly gameID?: string
+  readonly saveSlotID?: string
+  readonly characterID?: string
+  readonly objective: string
+  readonly status: "pending" | "planning" | "active" | "suspended" | "completed" | "failed" | "cancelled"
+  readonly suspensionReason?: string
+  readonly worldRevision?: number
+  readonly capabilityRevision?: string
+  readonly actionCount: number
+  readonly cycleStartedAt?: number
+  readonly createdAt: number
+  readonly updatedAt: number
+  readonly plan?: {
+    readonly goal: string
+    readonly steps: ReadonlyArray<{
+      readonly id: string
+      readonly goalID: string
+      readonly position: number
+      readonly action: string
+      readonly arguments: { readonly [x: string]: JsonValue }
+      readonly expectedPostconditions: ReadonlyArray<string>
+      readonly status: "pending" | "running" | "completed" | "failed" | "suspended" | "cancelled"
+      readonly attempts: number
+      readonly lastError?: string
+      readonly updatedAt: number
+    }>
+    readonly stopConditions: ReadonlyArray<string>
+    readonly riskBudget: "ambient" | "interaction" | "critical"
+    readonly replanConditions: ReadonlyArray<string>
+  }
+} | null
+
+export type ServerJarvisCancelGoalInput = {
+  readonly goalID: { readonly goalID: string }["goalID"]
+  readonly summary?: { readonly summary?: string; readonly changedEntityIDs?: ReadonlyArray<string> }["summary"]
+  readonly changedEntityIDs?: {
+    readonly summary?: string
+    readonly changedEntityIDs?: ReadonlyArray<string>
+  }["changedEntityIDs"]
+}
+
+export type ServerJarvisCancelGoalOutput = {
+  readonly id: string
+  readonly goalID: string
+  readonly status: "completed" | "failed" | "cancelled"
+  readonly summary: string
+  readonly changedEntityIDs: ReadonlyArray<string>
+  readonly createdAt: number
+} | null
+
 export type ServerJarvisRecordGoalStepInput = {
   readonly goalID: { readonly goalID: string }["goalID"]
   readonly stepID: { readonly stepID: string; readonly success: boolean; readonly error?: string }["stepID"]
@@ -4143,6 +4253,7 @@ export type ServerJarvisSearchMemoryOutput = ReadonlyArray<{
   readonly pinned: boolean
   readonly conflictsWith: ReadonlyArray<string>
   readonly embedding?: ReadonlyArray<number | "Infinity" | "-Infinity" | "NaN">
+  readonly embeddingModel?: { readonly providerID: string; readonly modelID: string }
   readonly createdAt: number
   readonly updatedAt: number
   readonly lastUsedAt?: number
@@ -4165,6 +4276,7 @@ export type ServerJarvisRememberInput = {
     readonly pinned: boolean
     readonly conflictsWith: ReadonlyArray<string>
     readonly embedding?: ReadonlyArray<number | "Infinity" | "-Infinity" | "NaN">
+    readonly embeddingModel?: { readonly providerID: string; readonly modelID: string }
     readonly createdAt: number
     readonly updatedAt: number
     readonly lastUsedAt?: number
@@ -4185,6 +4297,7 @@ export type ServerJarvisRememberInput = {
     readonly pinned: boolean
     readonly conflictsWith: ReadonlyArray<string>
     readonly embedding?: ReadonlyArray<number | "Infinity" | "-Infinity" | "NaN">
+    readonly embeddingModel?: { readonly providerID: string; readonly modelID: string }
     readonly createdAt: number
     readonly updatedAt: number
     readonly lastUsedAt?: number
@@ -4205,6 +4318,7 @@ export type ServerJarvisRememberInput = {
     readonly pinned: boolean
     readonly conflictsWith: ReadonlyArray<string>
     readonly embedding?: ReadonlyArray<number | "Infinity" | "-Infinity" | "NaN">
+    readonly embeddingModel?: { readonly providerID: string; readonly modelID: string }
     readonly createdAt: number
     readonly updatedAt: number
     readonly lastUsedAt?: number
@@ -4225,6 +4339,7 @@ export type ServerJarvisRememberInput = {
     readonly pinned: boolean
     readonly conflictsWith: ReadonlyArray<string>
     readonly embedding?: ReadonlyArray<number | "Infinity" | "-Infinity" | "NaN">
+    readonly embeddingModel?: { readonly providerID: string; readonly modelID: string }
     readonly createdAt: number
     readonly updatedAt: number
     readonly lastUsedAt?: number
@@ -4245,6 +4360,7 @@ export type ServerJarvisRememberInput = {
     readonly pinned: boolean
     readonly conflictsWith: ReadonlyArray<string>
     readonly embedding?: ReadonlyArray<number | "Infinity" | "-Infinity" | "NaN">
+    readonly embeddingModel?: { readonly providerID: string; readonly modelID: string }
     readonly createdAt: number
     readonly updatedAt: number
     readonly lastUsedAt?: number
@@ -4265,6 +4381,7 @@ export type ServerJarvisRememberInput = {
     readonly pinned: boolean
     readonly conflictsWith: ReadonlyArray<string>
     readonly embedding?: ReadonlyArray<number | "Infinity" | "-Infinity" | "NaN">
+    readonly embeddingModel?: { readonly providerID: string; readonly modelID: string }
     readonly createdAt: number
     readonly updatedAt: number
     readonly lastUsedAt?: number
@@ -4285,6 +4402,7 @@ export type ServerJarvisRememberInput = {
     readonly pinned: boolean
     readonly conflictsWith: ReadonlyArray<string>
     readonly embedding?: ReadonlyArray<number | "Infinity" | "-Infinity" | "NaN">
+    readonly embeddingModel?: { readonly providerID: string; readonly modelID: string }
     readonly createdAt: number
     readonly updatedAt: number
     readonly lastUsedAt?: number
@@ -4305,6 +4423,7 @@ export type ServerJarvisRememberInput = {
     readonly pinned: boolean
     readonly conflictsWith: ReadonlyArray<string>
     readonly embedding?: ReadonlyArray<number | "Infinity" | "-Infinity" | "NaN">
+    readonly embeddingModel?: { readonly providerID: string; readonly modelID: string }
     readonly createdAt: number
     readonly updatedAt: number
     readonly lastUsedAt?: number
@@ -4325,6 +4444,7 @@ export type ServerJarvisRememberInput = {
     readonly pinned: boolean
     readonly conflictsWith: ReadonlyArray<string>
     readonly embedding?: ReadonlyArray<number | "Infinity" | "-Infinity" | "NaN">
+    readonly embeddingModel?: { readonly providerID: string; readonly modelID: string }
     readonly createdAt: number
     readonly updatedAt: number
     readonly lastUsedAt?: number
@@ -4345,6 +4465,7 @@ export type ServerJarvisRememberInput = {
     readonly pinned: boolean
     readonly conflictsWith: ReadonlyArray<string>
     readonly embedding?: ReadonlyArray<number | "Infinity" | "-Infinity" | "NaN">
+    readonly embeddingModel?: { readonly providerID: string; readonly modelID: string }
     readonly createdAt: number
     readonly updatedAt: number
     readonly lastUsedAt?: number
@@ -4365,6 +4486,7 @@ export type ServerJarvisRememberInput = {
     readonly pinned: boolean
     readonly conflictsWith: ReadonlyArray<string>
     readonly embedding?: ReadonlyArray<number | "Infinity" | "-Infinity" | "NaN">
+    readonly embeddingModel?: { readonly providerID: string; readonly modelID: string }
     readonly createdAt: number
     readonly updatedAt: number
     readonly lastUsedAt?: number
@@ -4385,6 +4507,7 @@ export type ServerJarvisRememberInput = {
     readonly pinned: boolean
     readonly conflictsWith: ReadonlyArray<string>
     readonly embedding?: ReadonlyArray<number | "Infinity" | "-Infinity" | "NaN">
+    readonly embeddingModel?: { readonly providerID: string; readonly modelID: string }
     readonly createdAt: number
     readonly updatedAt: number
     readonly lastUsedAt?: number
@@ -4405,6 +4528,7 @@ export type ServerJarvisRememberInput = {
     readonly pinned: boolean
     readonly conflictsWith: ReadonlyArray<string>
     readonly embedding?: ReadonlyArray<number | "Infinity" | "-Infinity" | "NaN">
+    readonly embeddingModel?: { readonly providerID: string; readonly modelID: string }
     readonly createdAt: number
     readonly updatedAt: number
     readonly lastUsedAt?: number
@@ -4425,6 +4549,7 @@ export type ServerJarvisRememberInput = {
     readonly pinned: boolean
     readonly conflictsWith: ReadonlyArray<string>
     readonly embedding?: ReadonlyArray<number | "Infinity" | "-Infinity" | "NaN">
+    readonly embeddingModel?: { readonly providerID: string; readonly modelID: string }
     readonly createdAt: number
     readonly updatedAt: number
     readonly lastUsedAt?: number
@@ -4445,10 +4570,32 @@ export type ServerJarvisRememberInput = {
     readonly pinned: boolean
     readonly conflictsWith: ReadonlyArray<string>
     readonly embedding?: ReadonlyArray<number | "Infinity" | "-Infinity" | "NaN">
+    readonly embeddingModel?: { readonly providerID: string; readonly modelID: string }
     readonly createdAt: number
     readonly updatedAt: number
     readonly lastUsedAt?: number
   }["embedding"]
+  readonly embeddingModel?: {
+    readonly id: string
+    readonly profileID?: string
+    readonly scope: "user" | "profile" | "game" | "working"
+    readonly gameID?: string
+    readonly saveSlotID?: string
+    readonly characterID?: string
+    readonly kind: "preference" | "episode" | "relationship" | "promise" | "knowledge" | "correction" | "plan"
+    readonly text: string
+    readonly sourceID: string
+    readonly confidence: number | "Infinity" | "-Infinity" | "NaN"
+    readonly importance: number | "Infinity" | "-Infinity" | "NaN"
+    readonly lifecycle: "candidate" | "verified" | "archived"
+    readonly pinned: boolean
+    readonly conflictsWith: ReadonlyArray<string>
+    readonly embedding?: ReadonlyArray<number | "Infinity" | "-Infinity" | "NaN">
+    readonly embeddingModel?: { readonly providerID: string; readonly modelID: string }
+    readonly createdAt: number
+    readonly updatedAt: number
+    readonly lastUsedAt?: number
+  }["embeddingModel"]
   readonly createdAt: {
     readonly id: string
     readonly profileID?: string
@@ -4465,6 +4612,7 @@ export type ServerJarvisRememberInput = {
     readonly pinned: boolean
     readonly conflictsWith: ReadonlyArray<string>
     readonly embedding?: ReadonlyArray<number | "Infinity" | "-Infinity" | "NaN">
+    readonly embeddingModel?: { readonly providerID: string; readonly modelID: string }
     readonly createdAt: number
     readonly updatedAt: number
     readonly lastUsedAt?: number
@@ -4485,6 +4633,7 @@ export type ServerJarvisRememberInput = {
     readonly pinned: boolean
     readonly conflictsWith: ReadonlyArray<string>
     readonly embedding?: ReadonlyArray<number | "Infinity" | "-Infinity" | "NaN">
+    readonly embeddingModel?: { readonly providerID: string; readonly modelID: string }
     readonly createdAt: number
     readonly updatedAt: number
     readonly lastUsedAt?: number
@@ -4505,6 +4654,7 @@ export type ServerJarvisRememberInput = {
     readonly pinned: boolean
     readonly conflictsWith: ReadonlyArray<string>
     readonly embedding?: ReadonlyArray<number | "Infinity" | "-Infinity" | "NaN">
+    readonly embeddingModel?: { readonly providerID: string; readonly modelID: string }
     readonly createdAt: number
     readonly updatedAt: number
     readonly lastUsedAt?: number
@@ -4527,6 +4677,7 @@ export type ServerJarvisRememberOutput = {
   readonly pinned: boolean
   readonly conflictsWith: ReadonlyArray<string>
   readonly embedding?: ReadonlyArray<number | "Infinity" | "-Infinity" | "NaN">
+  readonly embeddingModel?: { readonly providerID: string; readonly modelID: string }
   readonly createdAt: number
   readonly updatedAt: number
   readonly lastUsedAt?: number
@@ -4535,6 +4686,103 @@ export type ServerJarvisRememberOutput = {
 export type ServerJarvisRemoveMemoryInput = { readonly memoryID: { readonly memoryID: string }["memoryID"] }
 
 export type ServerJarvisRemoveMemoryOutput = { readonly changed: number }
+
+export type ServerJarvisPatchMemoryInput = {
+  readonly memoryID: { readonly memoryID: string }["memoryID"]
+  readonly text?: {
+    readonly text?: string
+    readonly confidence?: number | "Infinity" | "-Infinity" | "NaN"
+    readonly importance?: number | "Infinity" | "-Infinity" | "NaN"
+    readonly lifecycle?: "candidate" | "verified" | "archived"
+    readonly pinned?: boolean
+  }["text"]
+  readonly confidence?: {
+    readonly text?: string
+    readonly confidence?: number | "Infinity" | "-Infinity" | "NaN"
+    readonly importance?: number | "Infinity" | "-Infinity" | "NaN"
+    readonly lifecycle?: "candidate" | "verified" | "archived"
+    readonly pinned?: boolean
+  }["confidence"]
+  readonly importance?: {
+    readonly text?: string
+    readonly confidence?: number | "Infinity" | "-Infinity" | "NaN"
+    readonly importance?: number | "Infinity" | "-Infinity" | "NaN"
+    readonly lifecycle?: "candidate" | "verified" | "archived"
+    readonly pinned?: boolean
+  }["importance"]
+  readonly lifecycle?: {
+    readonly text?: string
+    readonly confidence?: number | "Infinity" | "-Infinity" | "NaN"
+    readonly importance?: number | "Infinity" | "-Infinity" | "NaN"
+    readonly lifecycle?: "candidate" | "verified" | "archived"
+    readonly pinned?: boolean
+  }["lifecycle"]
+  readonly pinned?: {
+    readonly text?: string
+    readonly confidence?: number | "Infinity" | "-Infinity" | "NaN"
+    readonly importance?: number | "Infinity" | "-Infinity" | "NaN"
+    readonly lifecycle?: "candidate" | "verified" | "archived"
+    readonly pinned?: boolean
+  }["pinned"]
+}
+
+export type ServerJarvisPatchMemoryOutput = {
+  readonly id: string
+  readonly profileID?: string
+  readonly scope: "user" | "profile" | "game" | "working"
+  readonly gameID?: string
+  readonly saveSlotID?: string
+  readonly characterID?: string
+  readonly kind: "preference" | "episode" | "relationship" | "promise" | "knowledge" | "correction" | "plan"
+  readonly text: string
+  readonly sourceID: string
+  readonly confidence: number | "Infinity" | "-Infinity" | "NaN"
+  readonly importance: number | "Infinity" | "-Infinity" | "NaN"
+  readonly lifecycle: "candidate" | "verified" | "archived"
+  readonly pinned: boolean
+  readonly conflictsWith: ReadonlyArray<string>
+  readonly embedding?: ReadonlyArray<number | "Infinity" | "-Infinity" | "NaN">
+  readonly embeddingModel?: { readonly providerID: string; readonly modelID: string }
+  readonly createdAt: number
+  readonly updatedAt: number
+  readonly lastUsedAt?: number
+} | null
+
+export type ServerJarvisResolveMemoryConflictInput = {
+  readonly memoryID: { readonly memoryID: string }["memoryID"]
+  readonly action: {
+    readonly action: "keep_both" | "choose_current" | "choose_other"
+    readonly otherMemoryID: string
+  }["action"]
+  readonly otherMemoryID: {
+    readonly action: "keep_both" | "choose_current" | "choose_other"
+    readonly otherMemoryID: string
+  }["otherMemoryID"]
+}
+
+export type ServerJarvisResolveMemoryConflictOutput = {
+  readonly id: string
+  readonly profileID?: string
+  readonly scope: "user" | "profile" | "game" | "working"
+  readonly gameID?: string
+  readonly saveSlotID?: string
+  readonly characterID?: string
+  readonly kind: "preference" | "episode" | "relationship" | "promise" | "knowledge" | "correction" | "plan"
+  readonly text: string
+  readonly sourceID: string
+  readonly confidence: number | "Infinity" | "-Infinity" | "NaN"
+  readonly importance: number | "Infinity" | "-Infinity" | "NaN"
+  readonly lifecycle: "candidate" | "verified" | "archived"
+  readonly pinned: boolean
+  readonly conflictsWith: ReadonlyArray<string>
+  readonly embedding?: ReadonlyArray<number | "Infinity" | "-Infinity" | "NaN">
+  readonly embeddingModel?: { readonly providerID: string; readonly modelID: string }
+  readonly createdAt: number
+  readonly updatedAt: number
+  readonly lastUsedAt?: number
+} | null
+
+export type ServerJarvisReindexMemoryOutput = { readonly queued: number; readonly remaining: number }
 
 export type ServerJarvisInboxOutput = ReadonlyArray<{
   readonly id: string
@@ -4547,6 +4795,8 @@ export type ServerJarvisInboxOutput = ReadonlyArray<{
   readonly status: "pending" | "admitted" | "dismissed" | "blocked"
   readonly notBefore: number
   readonly createdAt: number
+  readonly updatedAt: number
+  readonly blockedReason?: string
 }>
 
 export type ServerJarvisWakeInput = {
@@ -4611,4 +4861,40 @@ export type ServerJarvisWakeOutput = {
   readonly status: "pending" | "admitted" | "dismissed" | "blocked"
   readonly notBefore: number
   readonly createdAt: number
+  readonly updatedAt: number
+  readonly blockedReason?: string
+} | null
+
+export type ServerJarvisDismissInboxInput = { readonly wakeID: { readonly wakeID: string }["wakeID"] }
+
+export type ServerJarvisDismissInboxOutput = {
+  readonly id: string
+  readonly profileID: string
+  readonly sessionID?: string
+  readonly kind: "attention" | "goal" | "promise" | "model" | "reflection" | "manual"
+  readonly topic: string
+  readonly text: string
+  readonly priority: number
+  readonly status: "pending" | "admitted" | "dismissed" | "blocked"
+  readonly notBefore: number
+  readonly createdAt: number
+  readonly updatedAt: number
+  readonly blockedReason?: string
+} | null
+
+export type ServerJarvisRetryInboxInput = { readonly wakeID: { readonly wakeID: string }["wakeID"] }
+
+export type ServerJarvisRetryInboxOutput = {
+  readonly id: string
+  readonly profileID: string
+  readonly sessionID?: string
+  readonly kind: "attention" | "goal" | "promise" | "model" | "reflection" | "manual"
+  readonly topic: string
+  readonly text: string
+  readonly priority: number
+  readonly status: "pending" | "admitted" | "dismissed" | "blocked"
+  readonly notBefore: number
+  readonly createdAt: number
+  readonly updatedAt: number
+  readonly blockedReason?: string
 } | null

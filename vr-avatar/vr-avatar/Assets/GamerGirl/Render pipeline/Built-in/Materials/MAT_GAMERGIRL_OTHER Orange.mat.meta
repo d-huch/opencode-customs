@@ -1,0 +1,16 @@
+fileFormatVersion: 2
+guid: a52ea8a34cc158440a9160959f0fce55
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 2100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 239141
+  packageName: Gamer Girl
+  packageVersion: 1.0
+  assetPath: Assets/GamerGirl/Render pipeline/Built-in/Materials/MAT_GAMERGIRL_OTHER
+    Orange.mat
+  uploadId: 543100

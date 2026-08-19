@@ -93,10 +93,14 @@ import type {
   InstanceDisposeErrors,
   InstanceDisposeResponses,
   JarvisConfig,
+  JarvisGoalCancel,
   JarvisGoalCreate,
   JarvisGoalOutcomeCreate,
+  JarvisGoalReplan,
   JarvisGoalResume,
   JarvisGoalStepResult,
+  JarvisMemoryConflictResolution,
+  JarvisMemoryPatch,
   JarvisMemoryRecord,
   JarvisMemorySearch,
   JarvisProfileSync,
@@ -326,28 +330,42 @@ import type {
   V2IntegrationGetResponses,
   V2IntegrationListErrors,
   V2IntegrationListResponses,
+  V2JarvisCancelGoalErrors,
+  V2JarvisCancelGoalResponses,
   V2JarvisCompleteGoalErrors,
   V2JarvisCompleteGoalResponses,
   V2JarvisConfigErrors,
   V2JarvisConfigResponses,
   V2JarvisCreateGoalErrors,
   V2JarvisCreateGoalResponses,
+  V2JarvisDismissInboxErrors,
+  V2JarvisDismissInboxResponses,
   V2JarvisGoalsErrors,
   V2JarvisGoalsResponses,
   V2JarvisInboxErrors,
   V2JarvisInboxResponses,
   V2JarvisOutcomesErrors,
   V2JarvisOutcomesResponses,
+  V2JarvisPatchMemoryErrors,
+  V2JarvisPatchMemoryResponses,
   V2JarvisProfilesErrors,
   V2JarvisProfilesResponses,
   V2JarvisRecordGoalStepErrors,
   V2JarvisRecordGoalStepResponses,
+  V2JarvisReindexMemoryErrors,
+  V2JarvisReindexMemoryResponses,
   V2JarvisRememberErrors,
   V2JarvisRememberResponses,
   V2JarvisRemoveMemoryErrors,
   V2JarvisRemoveMemoryResponses,
+  V2JarvisReplanGoalErrors,
+  V2JarvisReplanGoalResponses,
+  V2JarvisResolveMemoryConflictErrors,
+  V2JarvisResolveMemoryConflictResponses,
   V2JarvisResumeGoalErrors,
   V2JarvisResumeGoalResponses,
+  V2JarvisRetryInboxErrors,
+  V2JarvisRetryInboxResponses,
   V2JarvisSearchMemoryErrors,
   V2JarvisSearchMemoryResponses,
   V2JarvisStatusErrors,
@@ -7968,6 +7986,72 @@ export class Jarvis extends HeyApiClient {
   }
 
   /**
+   * Discard and rebuild a Jarvis goal plan
+   */
+  public replanGoal<ThrowOnError extends boolean = false>(
+    parameters: {
+      goalID: string
+      jarvisGoalReplan: JarvisGoalReplan
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "goalID" },
+            { key: "jarvisGoalReplan", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<V2JarvisReplanGoalResponses, V2JarvisReplanGoalErrors, ThrowOnError>({
+      url: "/api/jarvis/goals/{goalID}/replan",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Cancel a durable Jarvis goal
+   */
+  public cancelGoal<ThrowOnError extends boolean = false>(
+    parameters: {
+      goalID: string
+      jarvisGoalCancel: JarvisGoalCancel
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "goalID" },
+            { key: "jarvisGoalCancel", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<V2JarvisCancelGoalResponses, V2JarvisCancelGoalErrors, ThrowOnError>({
+      url: "/api/jarvis/goals/{goalID}/cancel",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
    * Record a Jarvis plan step result
    */
   public recordGoalStep<ThrowOnError extends boolean = false>(
@@ -8128,6 +8212,91 @@ export class Jarvis extends HeyApiClient {
   }
 
   /**
+   * Edit or classify a Jarvis memory record
+   */
+  public patchMemory<ThrowOnError extends boolean = false>(
+    parameters: {
+      memoryID: string
+      jarvisMemoryPatch: JarvisMemoryPatch
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "memoryID" },
+            { key: "jarvisMemoryPatch", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).patch<
+      V2JarvisPatchMemoryResponses,
+      V2JarvisPatchMemoryErrors,
+      ThrowOnError
+    >({
+      url: "/api/jarvis/memory/{memoryID}",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Resolve a Jarvis memory conflict
+   */
+  public resolveMemoryConflict<ThrowOnError extends boolean = false>(
+    parameters: {
+      memoryID: string
+      jarvisMemoryConflictResolution: JarvisMemoryConflictResolution
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "memoryID" },
+            { key: "jarvisMemoryConflictResolution", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      V2JarvisResolveMemoryConflictResponses,
+      V2JarvisResolveMemoryConflictErrors,
+      ThrowOnError
+    >({
+      url: "/api/jarvis/memory/{memoryID}/conflict",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Schedule bounded Jarvis memory embedding backfill
+   */
+  public reindexMemory<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).post<
+      V2JarvisReindexMemoryResponses,
+      V2JarvisReindexMemoryErrors,
+      ThrowOnError
+    >({ url: "/api/jarvis/memory/reindex", ...options })
+  }
+
+  /**
    * List Primary Jarvis Inbox candidates
    */
   public inbox<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
@@ -8156,6 +8325,44 @@ export class Jarvis extends HeyApiClient {
         ...options?.headers,
         ...params.headers,
       },
+    })
+  }
+
+  /**
+   * Dismiss a Jarvis Inbox item
+   */
+  public dismissInbox<ThrowOnError extends boolean = false>(
+    parameters: {
+      wakeID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "wakeID" }] }])
+    return (options?.client ?? this.client).post<
+      V2JarvisDismissInboxResponses,
+      V2JarvisDismissInboxErrors,
+      ThrowOnError
+    >({
+      url: "/api/jarvis/inbox/{wakeID}/dismiss",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Retry a blocked Jarvis Inbox item
+   */
+  public retryInbox<ThrowOnError extends boolean = false>(
+    parameters: {
+      wakeID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "wakeID" }] }])
+    return (options?.client ?? this.client).post<V2JarvisRetryInboxResponses, V2JarvisRetryInboxErrors, ThrowOnError>({
+      url: "/api/jarvis/inbox/{wakeID}/retry",
+      ...options,
+      ...params,
     })
   }
 }

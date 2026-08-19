@@ -1,0 +1,16 @@
+fileFormatVersion: 2
+guid: d6a96165d6213fa40bd2fe2395b625c6
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 2100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 239141
+  packageName: Gamer Girl
+  packageVersion: 1.0
+  assetPath: Assets/GamerGirl/Render pipeline/HDRP/Materials/MAT_GAMERGIRL_OTHER
+    White.mat
+  uploadId: 543100

@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process"
+import { access } from "node:fs/promises"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { promisify } from "node:util"
@@ -17,6 +18,33 @@ const legacyDesktopEntryFpm = `${legacyDesktopEntry}=/usr/share/applications/ope
 
 const metainfoFpm = (appId: string) =>
   `${path.join(packageDir, "resources", `${appId}.metainfo.xml`)}=/usr/share/metainfo/${appId}.metainfo.xml`
+
+async function repairMacSignature(appPath: string) {
+  const valid = await execFileAsync("codesign", ["--verify", "--deep", "--strict", appPath]).then(
+    () => true,
+    () => false,
+  )
+  if (valid) return
+  // Local Customs builds often have an Apple Development identity whose trust
+  // chain is unavailable outside Xcode. Selecting it implicitly produces an app
+  // that can pass once through the codesign cache and fail later. Only use a
+  // certificate when the caller explicitly selected one; otherwise create a
+  // stable ad-hoc signature for the personal build.
+  const identity = process.env.CSC_NAME?.trim() || "-"
+  await execFileAsync("codesign", [
+    "--force",
+    "--deep",
+    "--strict",
+    "--options",
+    "runtime",
+    "--entitlements",
+    path.join(packageDir, "resources", "entitlements.plist"),
+    "--sign",
+    identity,
+    appPath,
+  ])
+  await execFileAsync("codesign", ["--verify", "--deep", "--strict", "--verbose=2", appPath])
+}
 
 async function signWindows(configuration: { path: string }) {
   if (process.platform !== "win32") return
@@ -77,6 +105,22 @@ const getBase = (appId: string): Configuration => ({
       filter: ["index.js", "index.d.ts", "build/Release/mac_window.node", "swift-build/**"],
     },
   ],
+  afterSign: async (context) => {
+    if (context.electronPlatformName !== "darwin") return
+    await repairMacSignature(path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`))
+  },
+  afterAllArtifactBuild: async (result) => {
+    if (process.platform !== "darwin") return []
+    const productName = channel === "dev" ? (customIcons ? "OpenCode Customs" : "OpenCode Dev") : channel === "beta" ? "OpenCode Beta" : "OpenCode"
+    const candidates = ["mac-arm64", "mac-x64", "mac-universal", "mac"].map((directory) =>
+      path.join(result.outDir, directory, `${productName}.app`),
+    )
+    const appPath = await Promise.all(candidates.map((candidate) => access(candidate).then(() => candidate, () => undefined))).then(
+      (values) => values.find((value): value is string => !!value),
+    )
+    if (appPath) await repairMacSignature(appPath)
+    return []
+  },
   mac: {
     category: "public.app-category.developer-tools",
     icon: `resources/icons/icon.${customIcons ? "png" : "icns"}`,

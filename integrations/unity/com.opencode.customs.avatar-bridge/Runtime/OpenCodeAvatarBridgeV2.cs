@@ -35,6 +35,15 @@ namespace OpenCode.Customs.AvatarBridge
         public string voiceModel = "fish-speech-s2-pro";
         public string voiceName = "default";
 
+        [Header("Quest microphone → Mac STT (protocol v2.3)")]
+        public bool enableMicrophoneStreaming = true;
+        public bool handsFree;
+        public string microphoneDevice;
+        [Range(8000, 48000)] public int microphoneSampleRate = 16000;
+        [Range(0.001f, 0.2f)] public float voiceActivationThreshold = 0.018f;
+        [Range(0.25f, 2f)] public float handsFreeSilenceSeconds = 0.75f;
+        public string speechLocale = "uk-UA";
+
         [Header("Events")]
         public AvatarStringEvent onConnected;
         public AvatarStringEvent onAssistantText;
@@ -44,6 +53,7 @@ namespace OpenCode.Customs.AvatarBridge
         public AvatarVisemeEvent onViseme;
         public AvatarEmotionEvent onSpeechEmotion;
         public AvatarStringEvent onAssistantState;
+        public AvatarStringEvent onTranscriptPartial;
 
         readonly ConcurrentQueue<Action> mainThread = new ConcurrentQueue<Action>();
         readonly Dictionary<string, CancellationTokenSource> activeActions = new Dictionary<string, CancellationTokenSource>();
@@ -58,6 +68,14 @@ namespace OpenCode.Customs.AvatarBridge
         string currentRequestID;
         VisemeCue[] pendingVisemes = Array.Empty<VisemeCue>();
         int reconnectAttempt;
+        AudioClip microphoneClip;
+        int microphoneReadPosition;
+        bool microphoneStreaming;
+        bool microphoneSpeechDetected;
+        bool audioFlowPaused;
+        float lastMicrophoneSpeechAt;
+        readonly Queue<byte[]> audioSendQueue = new Queue<byte[]>();
+        bool audioSendActive;
 
         public bool IsConnected => transport != null && transport.State == WebSocketState.Open;
         public string CurrentGoal { get; private set; }
@@ -76,6 +94,7 @@ namespace OpenCode.Customs.AvatarBridge
         void Update()
         {
             while (mainThread.TryDequeue(out var action)) action();
+            PumpMicrophone();
         }
 
         async void OnDestroy()
@@ -89,6 +108,7 @@ namespace OpenCode.Customs.AvatarBridge
             }
             lifetime?.Dispose();
             audioBuffer.Dispose();
+            StopMicrophoneCapture();
         }
 
         public async Task ConnectAsync()
@@ -112,7 +132,7 @@ namespace OpenCode.Customs.AvatarBridge
         public async void SubmitSpeechStart(string requestID)
         {
             currentRequestID = string.IsNullOrWhiteSpace(requestID) ? Guid.NewGuid().ToString("N") : requestID;
-            audioSource?.Stop();
+            ResetSpeechPresentation();
             CancelActiveActions();
             await SendAsync(new { type = "speech.start", requestID = currentRequestID });
         }
@@ -133,8 +153,27 @@ namespace OpenCode.Customs.AvatarBridge
         public async void CancelSpeech()
         {
             if (string.IsNullOrWhiteSpace(currentRequestID)) return;
-            audioSource?.Stop();
+            ResetSpeechPresentation();
             await SendAsync(new { type = "speech.cancel", requestID = currentRequestID });
+        }
+
+        public void BeginVoiceCapture()
+        {
+            if (!enableMicrophoneStreaming || !IsConnected) return;
+            EnsureMicrophoneCapture();
+            BeginAudioInput(handsFree ? "hands_free" : "push_to_talk");
+        }
+
+        public void EndVoiceCapture()
+        {
+            EndAudioInput(false);
+            if (!handsFree) StopMicrophoneCapture();
+        }
+
+        public void CancelVoiceCapture()
+        {
+            EndAudioInput(true);
+            if (!handsFree) StopMicrophoneCapture();
         }
 
         public async void ResolveCurrentApproval(bool approved)
@@ -218,6 +257,7 @@ namespace OpenCode.Customs.AvatarBridge
                     profile.sessionID = message.Value<string>("sessionID") ?? profile.sessionID;
                     mainThread.Enqueue(() => onConnected?.Invoke(profile.characterID));
                     _ = SendManifestAndSnapshot();
+                    if (handsFree && enableMicrophoneStreaming) mainThread.Enqueue(EnsureMicrophoneCapture);
                     return;
                 case "heartbeat": _ = SendAsync(new { type = "heartbeat", sequence = lastServerSequence }); return;
                 case "world.resync.request": mainThread.Enqueue(() => worldSensor?.ForceSnapshot()); return;
@@ -237,9 +277,31 @@ namespace OpenCode.Customs.AvatarBridge
                     mainThread.Enqueue(() => onAssistantState?.Invoke("speaking"));
                     return;
                 case "assistant.audio.end": _ = DecodeAndPlay(audioBuffer.ToArray(), audioContentType); return;
-                case "assistant.done": mainThread.Enqueue(() => onAssistantState?.Invoke("idle")); return;
-                case "assistant.cancelled": mainThread.Enqueue(() => { audioSource?.Stop(); onAssistantState?.Invoke("listening"); }); return;
+                case "assistant.done": mainThread.Enqueue(() => { onViseme?.Invoke(null, 0f); onAssistantState?.Invoke("idle"); }); return;
+                case "assistant.cancelled": mainThread.Enqueue(() => { ResetSpeechPresentation(); onAssistantState?.Invoke("listening"); }); return;
                 case "assistant.error": mainThread.Enqueue(() => onAssistantState?.Invoke("uncertain")); RaiseError(message.Value<string>("error")); return;
+                case "avatar.presentation":
+                    var presentation = message.ToObject<AvatarPresentationFrame>();
+                    if (presentation == null) return;
+                    CurrentGoal = presentation.goal ?? CurrentGoal;
+                    mainThread.Enqueue(() =>
+                    {
+                        onAssistantState?.Invoke(presentation.state);
+                        onSpeechEmotion?.Invoke(presentation.emotion ?? "neutral", presentation.intensity);
+                        if (!string.IsNullOrWhiteSpace(presentation.subtitle)) onAssistantText?.Invoke(presentation.subtitle);
+                        if (!string.IsNullOrWhiteSpace(presentation.goal)) onGoalChanged?.Invoke(presentation.goal);
+                    });
+                    return;
+                case "user.transcript.partial":
+                case "user.transcript.final":
+                    mainThread.Enqueue(() => onTranscriptPartial?.Invoke(message.Value<string>("text")));
+                    return;
+                case "audio.flow":
+                case "audio.ack":
+                    audioFlowPaused = message.Value<bool?>("paused") ?? false;
+                    if (!audioFlowPaused) _ = FlushAudioQueue();
+                    return;
+                case "audio.error": RaiseError(message.Value<string>("error")); EndAudioInput(true); return;
                 case "approval.request":
                     currentApproval = message.ToObject<ApprovalRequest>();
                     mainThread.Enqueue(() => onApprovalRequested?.Invoke(currentApproval.id, currentApproval.title, currentApproval.risk));
@@ -265,6 +327,144 @@ namespace OpenCode.Customs.AvatarBridge
             if (capabilityRegistry != null)
                 await SendAsync(new { type = "capability.manifest", revision = capabilityRegistry.Revision, capabilities = capabilityRegistry.Manifests() });
             mainThread.Enqueue(() => worldSensor?.ForceSnapshot());
+        }
+
+        void EnsureMicrophoneCapture()
+        {
+            if (microphoneClip != null || !enableMicrophoneStreaming) return;
+            if (!Application.HasUserAuthorization(UserAuthorization.Microphone))
+            {
+                _ = RequestMicrophoneAndStart();
+                return;
+            }
+            StartMicrophoneCapture();
+        }
+
+        async Task RequestMicrophoneAndStart()
+        {
+            var request = Application.RequestUserAuthorization(UserAuthorization.Microphone);
+            while (!request.isDone) await Task.Yield();
+            if (!Application.HasUserAuthorization(UserAuthorization.Microphone))
+            {
+                RaiseError("Quest microphone permission was denied.");
+                return;
+            }
+            mainThread.Enqueue(StartMicrophoneCapture);
+        }
+
+        void StartMicrophoneCapture()
+        {
+            if (microphoneClip != null) return;
+            microphoneClip = Microphone.Start(string.IsNullOrWhiteSpace(microphoneDevice) ? null : microphoneDevice, true, 10, microphoneSampleRate);
+            microphoneReadPosition = 0;
+        }
+
+        void StopMicrophoneCapture()
+        {
+            if (microphoneClip == null) return;
+            Microphone.End(string.IsNullOrWhiteSpace(microphoneDevice) ? null : microphoneDevice);
+            microphoneClip = null;
+            microphoneReadPosition = 0;
+        }
+
+        void BeginAudioInput(string mode)
+        {
+            if (microphoneStreaming || !IsConnected) return;
+            currentRequestID = Guid.NewGuid().ToString("N");
+            microphoneStreaming = true;
+            microphoneSpeechDetected = false;
+            audioFlowPaused = false;
+            audioSendQueue.Clear();
+            ResetSpeechPresentation();
+            CancelActiveActions();
+            _ = SendAsync(new AvatarSpeechFrame
+            {
+                requestID = currentRequestID,
+                sampleRate = microphoneSampleRate,
+                locale = speechLocale,
+                mode = mode,
+            }, "audio.start");
+        }
+
+        void EndAudioInput(bool cancel)
+        {
+            if (!microphoneStreaming || string.IsNullOrWhiteSpace(currentRequestID)) return;
+            microphoneStreaming = false;
+            _ = CompleteAudioInput(currentRequestID, cancel);
+        }
+
+        async Task CompleteAudioInput(string requestID, bool cancel)
+        {
+            if (cancel)
+            {
+                audioSendQueue.Clear();
+                await SendAsync(new { type = "audio.cancel", requestID });
+                return;
+            }
+            while (audioSendActive || audioSendQueue.Count > 0)
+            {
+                if (!audioSendActive) await FlushAudioQueue();
+                await Task.Yield();
+            }
+            await SendAsync(new { type = "audio.end", requestID });
+        }
+
+        void PumpMicrophone()
+        {
+            if (microphoneClip == null || !IsConnected) return;
+            var position = Microphone.GetPosition(string.IsNullOrWhiteSpace(microphoneDevice) ? null : microphoneDevice);
+            if (position < 0 || position == microphoneReadPosition) return;
+            var count = position > microphoneReadPosition ? position - microphoneReadPosition : microphoneClip.samples - microphoneReadPosition + position;
+            count = Mathf.Min(count, microphoneSampleRate / 10);
+            if (count <= 0) return;
+            var samples = new float[count];
+            microphoneClip.GetData(samples, microphoneReadPosition);
+            microphoneReadPosition = (microphoneReadPosition + count) % microphoneClip.samples;
+            var sum = 0f;
+            for (var index = 0; index < samples.Length; index++) sum += samples[index] * samples[index];
+            var level = Mathf.Sqrt(sum / samples.Length);
+            if (handsFree && !microphoneStreaming && level >= voiceActivationThreshold) BeginAudioInput("hands_free");
+            if (!microphoneStreaming) return;
+            if (level >= voiceActivationThreshold)
+            {
+                microphoneSpeechDetected = true;
+                lastMicrophoneSpeechAt = Time.unscaledTime;
+            }
+            QueueAudio(ToPCM16(samples));
+            if (handsFree && microphoneSpeechDetected && Time.unscaledTime - lastMicrophoneSpeechAt >= handsFreeSilenceSeconds) EndAudioInput(false);
+        }
+
+        static byte[] ToPCM16(float[] samples)
+        {
+            var bytes = new byte[samples.Length * 2];
+            for (var index = 0; index < samples.Length; index++)
+            {
+                var value = (short)Mathf.RoundToInt(Mathf.Clamp(samples[index], -1f, 1f) * short.MaxValue);
+                bytes[index * 2] = (byte)(value & 0xff);
+                bytes[index * 2 + 1] = (byte)((value >> 8) & 0xff);
+            }
+            return bytes;
+        }
+
+        void QueueAudio(byte[] chunk)
+        {
+            if (chunk == null || chunk.Length == 0) return;
+            if (audioSendQueue.Count >= 32) audioSendQueue.Dequeue();
+            audioSendQueue.Enqueue(chunk);
+            if (!audioFlowPaused) _ = FlushAudioQueue();
+        }
+
+        async Task FlushAudioQueue()
+        {
+            if (audioSendActive || audioFlowPaused || transport == null || transport.State != WebSocketState.Open) return;
+            audioSendActive = true;
+            try
+            {
+                while (!audioFlowPaused && audioSendQueue.Count > 0)
+                    await transport.SendBinaryAsync(audioSendQueue.Dequeue(), lifetime.Token);
+            }
+            catch (Exception error) when (!(error is OperationCanceledException)) { RaiseError(error.Message); }
+            finally { audioSendActive = false; }
         }
 
         async Task CaptureCamera(JObject request)
@@ -339,6 +539,12 @@ namespace OpenCode.Customs.AvatarBridge
             foreach (var capability in capabilityRegistry?.All ?? Array.Empty<IAvatarCapability>()) capability.Cancel();
         }
 
+        void ResetSpeechPresentation()
+        {
+            audioSource?.Stop();
+            onViseme?.Invoke(null, 0f);
+        }
+
         void CancelCycle(string cycleID)
         {
             CancelActiveActions();
@@ -377,6 +583,17 @@ namespace OpenCode.Customs.AvatarBridge
             try { await transport.SendTextAsync(AvatarJson.Serialize(value), lifetime.Token); }
             catch (Exception error) when (!(error is OperationCanceledException)) { RaiseError(error.Message); }
         }
+
+        Task SendAsync(AvatarSpeechFrame frame, string type) => SendAsync(new
+        {
+            type,
+            frame.requestID,
+            frame.codec,
+            frame.sampleRate,
+            frame.channels,
+            frame.locale,
+            frame.mode,
+        });
 
         void HandleAudioChunk(byte[] payload)
         {

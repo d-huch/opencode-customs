@@ -113,6 +113,43 @@ describe("Unity Avatar Bridge protocol", () => {
     })).toMatchObject({ protocol: 2, protocolMinor: 1 })
   })
 
+  test("accepts v2.3 Quest microphone frames and rejects unsafe formats", () => {
+    expect(
+      parseAvatarClientMessage({
+        type: "audio.start",
+        requestID: "voice-1",
+        codec: "pcm_s16le",
+        sampleRate: 16_000,
+        channels: 1,
+        locale: "uk-UA",
+        mode: "hands_free",
+      }),
+    ).toEqual({
+      type: "audio.start",
+      requestID: "voice-1",
+      codec: "pcm_s16le",
+      sampleRate: 16_000,
+      channels: 1,
+      locale: "uk-UA",
+      mode: "hands_free",
+    })
+    expect(parseAvatarClientMessage({ type: "audio.end", requestID: "voice-1" })).toEqual({
+      type: "audio.end",
+      requestID: "voice-1",
+    })
+    expect(
+      parseAvatarClientMessage({
+        type: "audio.start",
+        requestID: "voice-2",
+        codec: "float32",
+        sampleRate: 96_000,
+        channels: 2,
+        locale: "uk-UA",
+        mode: "hands_free",
+      }),
+    ).toBeUndefined()
+  })
+
   test("rejects duplicate capability IDs and oversized world snapshots", () => {
     const capability = {
       id: "door.open",

@@ -79,6 +79,7 @@ export default {
           \`pinned\` integer DEFAULT false NOT NULL,
           \`conflicts_with\` text NOT NULL,
           \`embedding\` text,
+          \`embedding_model\` text,
           \`last_used_at\` integer,
           \`time_created\` integer NOT NULL,
           \`time_updated\` integer NOT NULL
@@ -122,7 +123,9 @@ export default {
           \`priority\` integer NOT NULL,
           \`status\` text NOT NULL,
           \`not_before\` integer NOT NULL,
-          \`time_created\` integer NOT NULL
+          \`blocked_reason\` text,
+          \`time_created\` integer NOT NULL,
+          \`time_updated\` integer NOT NULL
         );
       `)
       yield* tx.run(`

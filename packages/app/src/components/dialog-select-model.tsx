@@ -2,6 +2,7 @@ import { Popover as Kobalte } from "@kobalte/core/popover"
 import { Component, ComponentProps, createEffect, createMemo, For, JSX, Show } from "solid-js"
 import { createStore } from "solid-js/store"
 import { useLocal } from "@/context/local"
+import { useModels } from "@/context/models"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { popularProviders } from "@/hooks/use-providers"
 import { Button } from "@opencode-ai/ui/button"
@@ -27,6 +28,7 @@ const isFree = (provider: string, cost: { input: number } | undefined) =>
   provider === "opencode" && (!cost || cost.input === 0)
 
 type ModelState = ReturnType<typeof useLocal>["model"]
+type ModelCatalog = Pick<ReturnType<typeof useModels>, "list" | "visible">
 type ModelItem = ReturnType<ModelState["list"]>[number]
 
 const modelKey = (model: ModelItem) => `${model.provider.id}:${model.id}`
@@ -225,12 +227,19 @@ export function ModelSelectorPopover(props: {
 export function ModelSelectorPopoverV2(props: {
   provider?: string
   model?: ModelState
+  catalog?: ModelCatalog
+  value?: () => { providerID: string; modelID: string } | undefined
+  onSelect?: (model: { providerID: string; modelID: string }) => void
+  onManage?: () => void
   trigger: ModelSelectorTrigger
   onClose?: () => void
 }) {
   const dialog = useDialog()
   const controller = createModelSelectorController({
     model: props.model,
+    catalog: props.catalog,
+    value: props.value,
+    select: props.onSelect,
     provider: () => props.provider,
     onSelect: () => props.onClose?.(),
   })
@@ -243,6 +252,10 @@ export function ModelSelectorPopoverV2(props: {
       current={controller.current}
       select={controller.select}
       onManage={() => {
+        if (props.onManage) {
+          props.onManage()
+          return
+        }
         void import("./dialog-manage-models").then((module) => {
           void dialog.show(() => <module.DialogManageModelsV2 />)
         })
@@ -255,13 +268,18 @@ export function ModelSelectorPopoverV2(props: {
 function createModelSelectorController(input: {
   provider: () => string | undefined
   model?: ModelState
+  catalog?: ModelCatalog
+  value?: () => { providerID: string; modelID: string } | undefined
+  select?: (model: { providerID: string; modelID: string }) => void
   onSelect: () => void
 }) {
-  const model = input.model ?? useLocal().model
+  const model = input.model ?? (input.catalog ? undefined : useLocal().model)
+  const catalog = input.catalog ?? model
+  if (!catalog) throw new Error("Model catalog is required")
   const allModels = createMemo(() =>
-    model
+    catalog
       .list()
-      .filter((item) => model.visible({ modelID: item.id, providerID: item.provider.id }))
+      .filter((item) => catalog.visible({ modelID: item.id, providerID: item.provider.id }))
       .filter((item) => (input.provider() ? item.provider.id === input.provider() : true)),
   )
 
@@ -281,10 +299,18 @@ function createModelSelectorController(input: {
       return Array.from(byProvider, ([category, items]) => ({ category, items })).sort(sortModelGroups)
     },
     current: () => {
-      const value = model.current()
+      const controlled = input.value?.()
+      if (controlled) return `${controlled.providerID}:${controlled.modelID}`
+      const value = model?.current()
       return value ? modelKey(value) : undefined
     },
     select: (item: ModelItem) => {
+      if (input.select) {
+        input.select({ modelID: item.id, providerID: item.provider.id })
+        input.onSelect()
+        return
+      }
+      if (!model) return
       model.set({ modelID: item.id, providerID: item.provider.id }, { recent: true })
       input.onSelect()
     },

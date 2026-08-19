@@ -1,6 +1,6 @@
 {
   "name": "com.opencode.customs.avatar-bridge",
-  "version": "2.2.0",
+  "version": "2.3.1",
   "displayName": "OpenCode Customs Avatar Bridge",
   "description": "Protocol v2 SDK for autonomous Unity 6 and VR companions.",
   "unity": "6000.0",
@@ -9,6 +9,8 @@
   },
   "dependencies": {
     "com.unity.ai.navigation": "2.0.0",
+    "com.unity.animation.rigging": "1.4.1",
+    "com.unity.inputsystem": "1.20.0",
     "com.unity.nuget.newtonsoft-json": "3.2.1"
   },
   "samples": [

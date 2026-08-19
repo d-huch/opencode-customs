@@ -1,0 +1,16 @@
+fileFormatVersion: 2
+guid: ed238490c30bc594bb67eb73017cf7e0
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 2100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 239141
+  packageName: Gamer Girl
+  packageVersion: 1.0
+  assetPath: Assets/GamerGirl/Render pipeline/URP/Materials/MAT_GAMERGIRL_OUTFIT_03
+    Pink.mat
+  uploadId: 543100

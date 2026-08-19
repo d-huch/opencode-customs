@@ -83,6 +83,7 @@ import {
 } from "@/pages/session/session-panel-width"
 import { SessionSidePanel } from "@/pages/session/session-side-panel"
 import { RepositoryDiagnosticsPanel } from "@/components/repository-diagnostics-panel"
+import { DesktopAvatarPanel } from "@/components/desktop-avatar-panel"
 import { sessionPanelLayout } from "@/pages/session/session-panel-layout"
 import { SessionReviewEmptyChangesV2 } from "@opencode-ai/session-ui/v2/session-review-empty-changes-v2"
 import { SessionReviewEmptyNoGitV2 } from "@opencode-ai/session-ui/v2/session-review-empty-no-git-v2"
@@ -1712,6 +1713,10 @@ export default function Page() {
   }
 
   const busy = (sessionID: string) => sync().data.session_working(sessionID)
+  const wideAvatarPanel = createMediaQuery("(min-width: 1280px)")
+  const desktopAvatarPanelOpen = createMemo(
+    () => isDesktop() && nonRepository() && !!params.id && wideAvatarPanel(),
+  )
 
   const queuedFollowups = createMemo(() => {
     const id = params.id
@@ -2285,7 +2290,7 @@ export default function Page() {
               !size.active() && !ui.reviewSnap && !desktopInlineTerminalOnlyOpen(),
           }}
           style={{
-            width: sessionPanelWidth(),
+            width: desktopAvatarPanelOpen() ? "calc(100% - 312px)" : sessionPanelWidth(),
           }}
         >
           {settings.general.newLayoutDesigns() ? (
@@ -2320,6 +2325,10 @@ export default function Page() {
             </div>
           </Show>
         </div>
+
+        <Show when={desktopAvatarPanelOpen() && params.id} keyed>
+          {(sessionID) => <DesktopAvatarPanel sessionID={sessionID} working={busy(sessionID)} />}
+        </Show>
 
         <Show when={!newSessionDesign() && desktopSidePanelOpen()}>
           <Suspense>
