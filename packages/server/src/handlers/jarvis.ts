@@ -1,5 +1,6 @@
 import { Database } from "@opencode-ai/core/database/database"
 import { JarvisRuntime } from "@opencode-ai/core/jarvis"
+import { JarvisBenchmark } from "@opencode-ai/core/jarvis-benchmark"
 import { Effect } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { Api } from "../api"
@@ -13,6 +14,27 @@ export const JarvisHandler = HttpApiBuilder.group(Api, "server.jarvis", (handler
       .handle("jarvis.status", () => storage(JarvisRuntime.status(db)))
       .handle("jarvis.config", () => storage(JarvisRuntime.getConfig(db)))
       .handle("jarvis.updateConfig", (ctx) => storage(JarvisRuntime.updateConfig(db, ctx.payload)))
+      .handle(
+        "jarvis.benchmarkStatus",
+        Effect.fn(function* () {
+          const benchmark = yield* JarvisBenchmark.Service
+          return yield* benchmark.status()
+        }),
+      )
+      .handle(
+        "jarvis.runBenchmark",
+        Effect.fn(function* (ctx) {
+          const benchmark = yield* JarvisBenchmark.Service
+          return yield* benchmark.run(ctx.payload.profile).pipe(Effect.orDie)
+        }),
+      )
+      .handle(
+        "jarvis.cancelBenchmark",
+        Effect.fn(function* () {
+          const benchmark = yield* JarvisBenchmark.Service
+          return yield* benchmark.cancel()
+        }),
+      )
       .handle("jarvis.profiles", () => storage(JarvisRuntime.profiles(db)))
       .handle("jarvis.syncProfiles", (ctx) => storage(JarvisRuntime.syncProfiles(db, ctx.payload)))
       .handle("jarvis.goals", (ctx) => storage(JarvisRuntime.goals(db, ctx.query.status)))

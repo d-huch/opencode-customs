@@ -47,3 +47,4 @@ tsconfig.tsbuildinfo
 /vr-avatar/vr-avatar/Assets/Resources/PerformanceTestRun*
 /vr-avatar/vr-avatar/*.csproj
 /vr-avatar/vr-avatar/*.sln
+/vr-avatar/vr-avatar/mono_crash.*.json

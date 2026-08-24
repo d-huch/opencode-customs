@@ -1,4 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto"
+import { createSocket } from "node:dgram"
 import { createServer } from "node:http"
 import type { IncomingMessage, ServerResponse } from "node:http"
 import type { Server } from "node:https"
@@ -6,7 +7,8 @@ import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { WebSocket, WebSocketServer } from "ws"
 import type { AvatarBridgeStatus } from "../preload/types"
-import { AvatarPairingManager, loadAvatarBridgeCertificate } from "./avatar-bridge-lan"
+import type { NemotronVoiceController } from "./nemotron-voice"
+import { AvatarPairingManager, avatarBridgeLanAddresses, loadAvatarBridgeCertificate } from "./avatar-bridge-lan"
 import {
   AVATAR_ACTIONS,
   AVATAR_BRIDGE_PROTOCOL,
@@ -47,8 +49,20 @@ const HEARTBEAT_TIMEOUT = 45_000
 const AUDIO_CHUNK_SIZE = 32 * 1024
 const AUDIO_INPUT_MAX_BYTES = 48_000 * 2 * 60
 const IDEMPOTENCY_TTL = 5 * 60_000
+const BOOTSTRAP_PORT = 57_112
+const DISCOVERY_PORT = 57_116
+const BOOTSTRAP_TTL = 30_000
+const BOOTSTRAP_RATE_LIMIT = 20
 
 type ServerConnection = { url: string; username: string | null; password: string | null }
+class OpenCodeHttpError extends Error {
+  constructor(
+    readonly status: number,
+    readonly detail: string,
+  ) {
+    super(`OpenCode request failed with HTTP ${status}${detail ? `: ${detail}` : ""}`)
+  }
+}
 type StreamState = {
   sequence: number
   history: Array<{ sequence: number; value: object }>
@@ -72,11 +86,21 @@ type ClientState = AvatarHello & {
   attentionTimer?: NodeJS.Timeout
   attentionCooldowns: Map<string, number>
   audioInput?: {
+    kind: "cascade"
     frame: AvatarSpeechFrame
     recognition: PCMRecognition
     bytes: number
     paused: boolean
     startedAt: number
+  } | {
+    kind: "nemotron"
+    frame: AvatarSpeechFrame
+    bytes: number
+    paused: boolean
+    startedAt: number
+    textStarted: boolean
+    audio: Buffer[]
+    unsubscribe: () => void
   }
 }
 type PendingAction = {
@@ -134,6 +158,9 @@ export async function startAvatarBridge(
       onEvent?: (event: { type: string; text?: string }) => void
       onDrain?: () => void
     }) => PCMRecognition
+    nemotronVoice?: NemotronVoiceController
+    bootstrapPort?: number
+    discoveryPort?: number
   } = {},
 ) {
   const writeLog = options.log ?? (() => undefined)
@@ -148,6 +175,15 @@ export async function startAvatarBridge(
   const pendingCameras = new Map<string, PendingCamera>()
   const pendingApprovals = new Map<string, PendingApproval>()
   const idempotency = new Map<string, { expiresAt: number; promise: Promise<GameActionResult> }>()
+  const bootstrapTokens = new Map<string, {
+    expiresAt: number
+    clientID: string
+    characterID: string
+    gameID: string
+    saveSlotID: string
+  }>()
+  const consumedBootstrapTokens = new Map<string, number>()
+  const bootstrapRequests: number[] = []
   const goals = new AvatarGoalStack()
   const serverGoalIDs = new Map<string, string>()
   const worlds = new AvatarWorldStore()
@@ -164,7 +200,19 @@ export async function startAvatarBridge(
   const sync = { state: "offline" as "idle" | "syncing" | "offline" | "error", error: undefined as string | undefined }
   const sockets = new WebSocketServer({ noServer: true, maxPayload: MAX_HTTP_BODY })
   const lan = { current: undefined as Server | undefined, port: undefined as number | undefined }
+  const bootstrapStatus = {
+    available: false,
+    port: undefined as number | undefined,
+    error: undefined as string | undefined,
+  }
+  const discoveryStatus = {
+    available: false,
+    port: undefined as number | undefined,
+    error: undefined as string | undefined,
+  }
+  const discovery = { current: undefined as ReturnType<typeof createSocket> | undefined }
   const local = createServer((request, response) => void handleHttp(request, response, false))
+  const bootstrap = createServer((request, response) => void handleBootstrap(request, response))
 
   local.on("upgrade", (request, socket, head) => upgrade(request, socket, head, false))
   sockets.on("connection", (socket, request) => connect(socket, request))
@@ -173,6 +221,7 @@ export async function startAvatarBridge(
   const address = local.address()
   if (!address || typeof address === "string") throw new Error("Avatar Bridge could not allocate a loopback port")
   const url = `ws://127.0.0.1:${address.port}/avatar`
+  await startBootstrap()
   if (persistent.config().lanEnabled) await startLan()
 
   const heartbeat = setInterval(() => {
@@ -186,6 +235,8 @@ export async function startAvatarBridge(
       if (state.protocol === 2) sendState(state, { type: "heartbeat", timestamp: now }, false)
     }
     for (const [key, entry] of idempotency) if (entry.expiresAt <= now) idempotency.delete(key)
+    for (const [key, entry] of bootstrapTokens) if (entry.expiresAt <= now) bootstrapTokens.delete(key)
+    for (const [key, expiresAt] of consumedBootstrapTokens) if (expiresAt <= now) consumedBootstrapTokens.delete(key)
     goals.expire(now).forEach((goal) => {
       budgets.clear(goal.id)
       const state = selectClient(goal.characterID, true)
@@ -208,6 +259,7 @@ export async function startAvatarBridge(
       version: AVATAR_BRIDGE_VERSION,
       url,
       token,
+      bootstrap: { ...bootstrapStatus },
       sync: { state: sync.state, pending: persistent.outbox().length, error: sync.error },
       config,
       lan: {
@@ -215,6 +267,7 @@ export async function startAvatarBridge(
         port: lan.port,
         certificateFingerprint: certificate.fingerprint,
         pairing: pairing.status(),
+        discovery: { ...discoveryStatus },
       },
       pairedDevices: persistent.devices().map(({ tokenHash: _tokenHash, ...device }) => device),
       pendingApprovals: [...pendingApprovals.values()].map((approval) => ({
@@ -270,6 +323,7 @@ export async function startAvatarBridge(
     }
     lan.current = server
     lan.port = address.port
+    await startDiscovery()
     writeLog("avatar", "secure Unity LAN bridge started", { port: address.port, fingerprint: certificate.fingerprint })
   }
 
@@ -277,8 +331,145 @@ export async function startAvatarBridge(
     const server = lan.current
     lan.current = undefined
     lan.port = undefined
+    await stopDiscovery()
     if (server) await closeServer(server)
     for (const state of clients.values()) if (state.remote) state.socket.close(1001, "LAN bridge disabled")
+  }
+
+  async function startBootstrap() {
+    try {
+      await listen(bootstrap, "127.0.0.1", options.bootstrapPort ?? BOOTSTRAP_PORT)
+      const address = bootstrap.address()
+      if (!address || typeof address === "string") throw new Error("Bootstrap API did not allocate a TCP port")
+      bootstrapStatus.available = true
+      bootstrapStatus.port = address.port
+      bootstrapStatus.error = undefined
+      writeLog("avatar", "Unity localhost bootstrap API started", { port: address.port })
+    } catch (error) {
+      bootstrapStatus.available = false
+      bootstrapStatus.error = error instanceof Error ? error.message : String(error)
+      writeLog("avatar", "Unity localhost bootstrap API unavailable", { error: bootstrapStatus.error }, "warn")
+    }
+  }
+
+  async function startDiscovery() {
+    await stopDiscovery()
+    const socket = createSocket("udp4")
+    discovery.current = socket
+    socket.on("message", (value, remote) => {
+      if (!persistent.config().lanEnabled || !lan.port) return
+      const request = parseJSON(value.toString("utf8"))
+      if (!isRecord(request) || request.service !== "opencode-customs-avatar" || request.version !== 1) return
+      const response = Buffer.from(JSON.stringify({
+        service: "opencode-customs-avatar",
+        version: 1,
+        instanceID: `avatar-${certificate.fingerprint.slice(0, 16)}`,
+        protocol: AVATAR_BRIDGE_PROTOCOL,
+        protocolMinor: AVATAR_BRIDGE_PROTOCOL_MINOR,
+        addresses: avatarBridgeLanAddresses(lan.port),
+        certificateFingerprint: certificate.fingerprint,
+        timestamp: Date.now(),
+      }))
+      socket.send(response, remote.port, remote.address)
+    })
+    try {
+      await new Promise<void>((resolve, reject) => {
+        socket.once("error", reject)
+        socket.bind(options.discoveryPort ?? DISCOVERY_PORT, "0.0.0.0", () => {
+          socket.off("error", reject)
+          socket.setBroadcast(true)
+          resolve()
+        })
+      })
+      const address = socket.address()
+      discoveryStatus.available = true
+      discoveryStatus.port = typeof address === "string" ? undefined : address.port
+      discoveryStatus.error = undefined
+      writeLog("avatar", "Quest LAN discovery started", { port: discoveryStatus.port })
+    } catch (error) {
+      socket.close()
+      if (discovery.current === socket) discovery.current = undefined
+      discoveryStatus.available = false
+      discoveryStatus.port = undefined
+      discoveryStatus.error = error instanceof Error ? error.message : String(error)
+      writeLog("avatar", "Quest LAN discovery unavailable", { error: discoveryStatus.error }, "warn")
+    }
+  }
+
+  async function stopDiscovery() {
+    const socket = discovery.current
+    discovery.current = undefined
+    discoveryStatus.available = false
+    discoveryStatus.port = undefined
+    if (!socket) return
+    await new Promise<void>((resolve) => socket.close(() => resolve()))
+  }
+
+  async function handleBootstrap(request: IncomingMessage, response: ServerResponse) {
+    if (!localAddress(request.socket.remoteAddress) || !validBootstrapHost(request.headers.host)) {
+      response.writeHead(403).end()
+      return
+    }
+    const endpoint = new URL(request.url ?? "/", "http://127.0.0.1")
+    if (request.method === "GET" && endpoint.pathname === "/v1/avatar/health") {
+      json(response, 200, {
+        product: "OpenCode Customs",
+        available: true,
+        bootstrapVersion: 1,
+        protocol: AVATAR_BRIDGE_PROTOCOL,
+        protocolMinor: AVATAR_BRIDGE_PROTOCOL_MINOR,
+      })
+      return
+    }
+    if (request.method !== "POST" || endpoint.pathname !== "/v1/avatar/bootstrap") {
+      response.writeHead(404).end()
+      return
+    }
+    const now = Date.now()
+    const firstRecentRequest = bootstrapRequests.findIndex((value) => value > now - 60_000)
+    bootstrapRequests.splice(0, firstRecentRequest === -1 ? bootstrapRequests.length : firstRecentRequest)
+    if (bootstrapRequests.length >= BOOTSTRAP_RATE_LIMIT) {
+      json(response, 429, { error: "Bootstrap rate limit exceeded" })
+      return
+    }
+    bootstrapRequests.push(now)
+    const body = await readJSON(request)
+    const identity = parseBootstrapIdentity(body)
+    if (!identity) {
+      json(response, 400, { error: "Invalid Avatar bootstrap identity" })
+      return
+    }
+    const bootstrapToken = randomBytes(32).toString("base64url")
+    const expiresAt = now + BOOTSTRAP_TTL
+    bootstrapTokens.set(bootstrapToken, { ...identity, expiresAt })
+    json(response, 201, {
+      bootstrapVersion: 1,
+      url,
+      token: bootstrapToken,
+      protocol: AVATAR_BRIDGE_PROTOCOL,
+      protocolMinor: AVATAR_BRIDGE_PROTOCOL_MINOR,
+      expiresAt,
+      ...identity,
+    })
+  }
+
+  function consumeBootstrapToken(message: AvatarHello) {
+    const entry = bootstrapTokens.get(message.token)
+    if (!entry) return consumedBootstrapTokens.has(message.token) ? "replay" : "unknown_token"
+    if (entry.expiresAt <= Date.now()) {
+      bootstrapTokens.delete(message.token)
+      return "expired"
+    }
+    if (
+      message.protocol !== 2 ||
+      message.clientID !== entry.clientID ||
+      message.characterID !== entry.characterID ||
+      message.gameID !== entry.gameID ||
+      message.saveSlotID !== entry.saveSlotID
+    ) return "identity_mismatch"
+    bootstrapTokens.delete(message.token)
+    consumedBootstrapTokens.set(message.token, entry.expiresAt)
+    return "accepted"
   }
 
   async function handleHttp(request: IncomingMessage, response: ServerResponse, remote: boolean) {
@@ -489,7 +680,13 @@ export async function startAvatarBridge(
           return
         }
         state.audioInput.bytes += chunk.byteLength
-        const writable = state.audioInput.recognition.write(chunk)
+        const writable = state.audioInput.kind === "cascade"
+          ? state.audioInput.recognition.write(chunk)
+          : options.nemotronVoice?.append({
+              requestID: state.audioInput.frame.requestID,
+              pcm: chunk,
+              sampleRate: state.audioInput.frame.sampleRate,
+            }) ?? false
         sendState(state, {
           type: "audio.ack",
           requestID: state.audioInput.frame.requestID,
@@ -511,7 +708,15 @@ export async function startAvatarBridge(
           return
         }
         const device = remote ? pairing.deviceForToken(message.token) : undefined
-        if ((!remote && message.token !== token) || (remote && (!device || message.protocol !== 2))) {
+        const localBootstrap = !remote && message.token !== token ? consumeBootstrapToken(message) : undefined
+        if ((!remote && message.token !== token && localBootstrap !== "accepted") || (remote && (!device || message.protocol !== 2))) {
+          if (!remote) writeLog("avatar", "Unity bootstrap authentication rejected", {
+            reason: localBootstrap ?? "unknown_token",
+            clientID: message.clientID,
+            characterID: message.characterID,
+            gameID: message.gameID,
+            saveSlotID: message.saveSlotID,
+          }, "warn")
           socket.close(4401, "Pairing rejected")
           return
         }
@@ -557,6 +762,7 @@ export async function startAvatarBridge(
             heartbeatMs: HEARTBEAT_INTERVAL,
             maximumActionsPerCycle: persistent.config().maximumActionsPerCycle,
             cycleTimeoutMs: persistent.config().cycleTimeoutMs,
+            voiceEngine: options.nemotronVoice?.engine() ?? "cascade",
           },
           false,
         )
@@ -597,7 +803,8 @@ export async function startAvatarBridge(
     }
     if (message.type === "audio.end") {
       if (state.audioInput?.frame.requestID !== message.requestID) return
-      state.audioInput.recognition.finish()
+      if (state.audioInput.kind === "cascade") state.audioInput.recognition.finish()
+      else void options.nemotronVoice?.commit(message.requestID)
       sendState(state, { type: "audio.processing", requestID: message.requestID }, false)
       return
     }
@@ -678,16 +885,31 @@ export async function startAvatarBridge(
     state.queue = next.catch((error) => {
       state.turn = undefined
       state.turnRequestID = undefined
-      setPresence(state, "error", { requestID: message.requestID, subtitle: error instanceof Error ? error.message : String(error) })
+      if (isExpectedTurnCancellation(error)) {
+        setPresence(state, "idle", { requestID: undefined, subtitle: undefined })
+        return
+      }
+      const detail = error instanceof Error ? error.message : String(error)
+      writeLog("avatar", "Unity transcript failed", {
+        clientID: state.clientID,
+        characterID: state.characterID,
+        requestID: message.requestID,
+        error: detail,
+      }, "error")
+      setPresence(state, "error", { requestID: message.requestID, subtitle: undefined })
       sendState(state, {
         type: "assistant.error",
         requestID: message.requestID,
-        error: error instanceof Error ? error.message : String(error),
+        error: detail,
       })
     })
   }
 
   function startAudioInput(state: ClientState, frame: AvatarSpeechFrame) {
+    if (options.nemotronVoice?.engine() === "nemotron") {
+      startNemotronAudioInput(state, frame)
+      return
+    }
     if (!options.startRecognition) {
       sendState(state, { type: "audio.error", requestID: frame.requestID, error: "Streaming speech recognition is unavailable" }, false)
       return
@@ -698,7 +920,7 @@ export async function startAvatarBridge(
       locale: frame.locale ?? "uk-UA",
       sampleRate: frame.sampleRate,
       onEvent: (event) => {
-        if (state.audioInput?.recognition !== recognition) return
+        if (state.audioInput?.kind !== "cascade" || state.audioInput.recognition !== recognition) return
         if (event.type === "partial" && event.text) {
           state.partialTranscript = event.text
           setPresence(state, "listening", { requestID: frame.requestID, subtitle: event.text })
@@ -706,18 +928,18 @@ export async function startAvatarBridge(
         }
       },
       onDrain: () => {
-        if (state.audioInput?.recognition !== recognition || !state.audioInput.paused) return
+        if (state.audioInput?.kind !== "cascade" || state.audioInput.recognition !== recognition || !state.audioInput.paused) return
         state.audioInput.paused = false
         sendState(state, { type: "audio.flow", requestID: frame.requestID, paused: false }, false)
       },
     })
-    state.audioInput = { frame, recognition, bytes: 0, paused: false, startedAt: Date.now() }
+    state.audioInput = { kind: "cascade", frame, recognition, bytes: 0, paused: false, startedAt: Date.now() }
     state.partialTranscript = undefined
     setPresence(state, "listening", { requestID: frame.requestID, subtitle: undefined })
     sendState(state, { type: "audio.accepted", requestID: frame.requestID, maxBytes: AUDIO_INPUT_MAX_BYTES }, false)
     void recognition.result
       .then((text) => {
-        if (state.audioInput?.recognition !== recognition) return
+        if (state.audioInput?.kind !== "cascade" || state.audioInput.recognition !== recognition) return
         state.audioInput = undefined
         if (!text) {
           setPresence(state, "idle", { requestID: undefined, subtitle: undefined })
@@ -728,17 +950,121 @@ export async function startAvatarBridge(
         enqueueTranscript(state, { type: "speech.final", requestID: frame.requestID, text, language: frame.locale })
       })
       .catch((error) => {
-        if (state.audioInput?.recognition === recognition) state.audioInput = undefined
+        if (state.audioInput?.kind === "cascade" && state.audioInput.recognition === recognition) state.audioInput = undefined
         setPresence(state, "error", { requestID: frame.requestID, subtitle: error instanceof Error ? error.message : String(error) })
         sendState(state, { type: "audio.error", requestID: frame.requestID, error: error instanceof Error ? error.message : String(error) }, false)
       })
+  }
+
+  function startNemotronAudioInput(state: ClientState, frame: AvatarSpeechFrame) {
+    const runtime = options.nemotronVoice
+    if (!runtime) return
+    cancelAudioInput(state, "superseded")
+    cancelTurn(state, frame.requestID)
+    const unsubscribe = runtime.subscribe((event) => {
+      if (!("requestID" in event) || event.requestID !== frame.requestID) return
+      const current = state.audioInput
+      if (current?.kind !== "nemotron") return
+      if (event.type === "transcript.delta") {
+        state.partialTranscript = (state.partialTranscript ?? "") + event.delta
+        setPresence(state, "listening", { requestID: frame.requestID, subtitle: state.partialTranscript })
+        sendState(state, { type: "user.transcript.partial", requestID: frame.requestID, text: state.partialTranscript }, false)
+        return
+      }
+      if (event.type === "text.delta") {
+        if (!current.textStarted) {
+          current.textStarted = true
+          sendState(state, { type: "assistant.text.start", requestID: frame.requestID, sessionID: state.sessionID, model: "NemotronLabs VoiceChat 11B MXFP8", engine: "nemotron" })
+        }
+        sendState(state, { type: "assistant.text.delta", requestID: frame.requestID, delta: event.delta, engine: "nemotron" })
+        setPresence(state, "responding", { requestID: frame.requestID })
+        return
+      }
+      if (event.type === "audio.delta") {
+        current.audio.push(Buffer.from(event.audio))
+        return
+      }
+      if (event.type === "function.delta") {
+        writeLog("avatar", "Nemotron function candidate ignored", { clientID: state.clientID, requestID: frame.requestID, bytes: event.delta.length })
+        return
+      }
+      if (event.type === "done") {
+        state.audioInput = undefined
+        current.unsubscribe()
+        state.partialTranscript = event.transcript
+        sendState(state, { type: "user.transcript.final", requestID: frame.requestID, text: event.transcript }, false)
+        sendState(state, { type: "assistant.text.done", requestID: frame.requestID, sessionID: state.sessionID, text: event.text, model: "NemotronLabs VoiceChat 11B MXFP8", engine: "nemotron" })
+        if (current.audio.length) sendAudio(state, frame.requestID, state.sessionID ?? "", event.text, "audio/wav", pcm16Wav(Buffer.concat(current.audio), 22050))
+        sendState(state, { type: "assistant.done", requestID: frame.requestID, sessionID: state.sessionID, engine: "nemotron" })
+        setPresence(state, "idle", { subtitle: event.text, requestID: undefined })
+        const connection = serverConnection.current
+        if (connection && state.sessionID && event.transcript.trim() && event.text.trim())
+          void request(connection, `/api/session/${encodeURIComponent(state.sessionID)}/external-turn`, {
+            method: "POST",
+            body: JSON.stringify({
+              idempotencyKey: `nemotron:${state.clientID}:${frame.requestID}`,
+              userText: event.transcript,
+              assistantText: event.text,
+              model: { providerID: "nemotron", id: "OsaurusAI/NemotronLabs-VoiceChat-11B-MXFP8" },
+            }),
+          }).catch((error) => writeLog("avatar", "Nemotron external turn was not recorded", {
+            clientID: state.clientID,
+            requestID: frame.requestID,
+            error: error instanceof Error ? error.message : String(error),
+          }, "warn"))
+        return
+      }
+      if (event.type === "cancelled") {
+        state.audioInput = undefined
+        current.unsubscribe()
+        sendState(state, { type: "assistant.cancelled", requestID: frame.requestID })
+        setPresence(state, "idle", { requestID: undefined, subtitle: undefined })
+        return
+      }
+      if (event.type === "error") {
+        state.audioInput = undefined
+        current.unsubscribe()
+        sendState(state, { type: "assistant.error", requestID: frame.requestID, error: event.error })
+        setPresence(state, "error", { requestID: frame.requestID, subtitle: undefined })
+      }
+    })
+    state.audioInput = { kind: "nemotron", frame, bytes: 0, paused: false, startedAt: Date.now(), textStarted: false, audio: [], unsubscribe }
+    state.partialTranscript = undefined
+    setPresence(state, "listening", { requestID: frame.requestID, subtitle: undefined })
+    void (async () => {
+      const connection = serverConnection.current
+      if (!connection) throw new Error("OpenCode server is not connected")
+      if (!state.sessionID || !(await sessionExists(connection, state.sessionID, AbortSignal.timeout(10_000)))) {
+        state.sessionID = await createChatSession(connection, state, AbortSignal.timeout(30_000))
+        state.stream.sessionID = state.sessionID
+        sendState(state, { type: "session.adopted", sessionID: state.sessionID }, false)
+      }
+      await runtime.begin({ owner: "unity", requestID: frame.requestID })
+      if (state.audioInput?.kind !== "nemotron" || state.audioInput.frame.requestID !== frame.requestID) return
+      sendState(state, {
+        type: "audio.accepted",
+        requestID: frame.requestID,
+        maxBytes: AUDIO_INPUT_MAX_BYTES,
+        engine: "nemotron",
+      }, false)
+    })().catch((error) => {
+      if (state.audioInput?.kind === "nemotron" && state.audioInput.frame.requestID === frame.requestID) {
+        state.audioInput.unsubscribe()
+        state.audioInput = undefined
+      }
+      sendState(state, { type: "assistant.error", requestID: frame.requestID, error: error instanceof Error ? error.message : String(error) })
+    })
   }
 
   function cancelAudioInput(state: ClientState, reason: string) {
     const input = state.audioInput
     if (!input) return
     state.audioInput = undefined
-    input.recognition.cancel()
+    if (input.kind === "cascade") input.recognition.cancel()
+    else {
+      input.unsubscribe()
+      void options.nemotronVoice?.cancel(input.frame.requestID)
+    }
     sendState(state, { type: "audio.cancelled", requestID: input.frame.requestID, reason }, false)
   }
 
@@ -955,66 +1281,176 @@ export async function startAvatarBridge(
     state.turnRequestID = message.requestID
     setPresence(state, "thinking", { requestID: message.requestID, subtitle: message.text })
     sendState(state, { type: "assistant.started", requestID: message.requestID })
-    const started = Date.now()
-    const sessionID = state.sessionID ?? (await createChatSession(connection, state, controller.signal))
+    writeLog("avatar", "Unity transcript accepted", {
+      clientID: state.clientID,
+      characterID: state.characterID,
+      requestID: message.requestID,
+      responseMode: message.responseMode ?? "voice",
+    })
+    const route = await selectTurnModel(connection, state, message.text, controller.signal)
+    const existing = state.sessionID ? await sessionExists(connection, state.sessionID, controller.signal) : false
+    const sessionID = existing ? state.sessionID! : await createChatSession(connection, state, controller.signal)
     state.sessionID = sessionID
     state.stream.sessionID = sessionID
-    const context = gameContext(state)
-    const route = await selectTurnModel(connection, state, message.text, controller.signal)
+    writeLog("avatar", existing ? "Unity session adopted" : "Unity session created", {
+      clientID: state.clientID,
+      characterID: state.characterID,
+      sessionID,
+    })
+    const context = gameContext(state, message.text)
     modelRuntime.activeRole = route.role
-    modelRuntime.selectedModel = undefined
+    modelRuntime.selectedModel = route.model
     modelRuntime.reason = route.reason
-    writeLog("avatar", "selected local Jarvis model role", {
+    writeLog("avatar", "Unity model verified", {
       characterID: state.characterID,
       role: route.role,
-      model: "server Jarvis dialogue role",
+      model: route.model ? `${route.model.providerID}/${route.model.modelID}` : "server default",
       reason: route.reason,
     })
-    await request(connection, `/api/session/${encodeURIComponent(sessionID)}/prompt`, {
+    let stream = await assistantStream(
+      connection,
+      sessionID,
+      AbortSignal.any([controller.signal, AbortSignal.timeout(TURN_TIMEOUT)]),
+      {
+        start: (assistantMessageID, model) => {
+          writeLog("avatar", "Unity provider started", {
+            characterID: state.characterID,
+            requestID: message.requestID,
+            sessionID,
+            model: model ?? "server default",
+          })
+          if ((state.protocolMinor ?? 0) < 4) return
+          sendState(state, {
+            type: "assistant.text.start",
+            requestID: message.requestID,
+            sessionID,
+            assistantMessageID,
+            model: model ?? (route.model ? `${route.model.providerID}/${route.model.modelID}` : undefined),
+          })
+        },
+        delta: (delta, assistantMessageID, ttftMs) => {
+          setPresence(state, "responding", { requestID: message.requestID, subtitle: undefined })
+          if ((state.protocolMinor ?? 0) < 4) return
+          sendState(state, {
+            type: "assistant.text.delta",
+            requestID: message.requestID,
+            sessionID,
+            assistantMessageID,
+            delta,
+            ttftMs,
+          })
+        },
+      },
+    )
+    const prompt = {
       method: "POST",
-      body: JSON.stringify({
-        agent: "chat",
-        parts: [
-          { type: "text", text: message.text },
-          ...(context ? [{ type: "text", text: context }] : []),
-        ],
-      }),
+      body: JSON.stringify({ prompt: { text: context ? `${message.text}\n\n${context}` : message.text } }),
       signal: AbortSignal.any([controller.signal, AbortSignal.timeout(TURN_TIMEOUT)]),
+    } satisfies RequestInit
+    const admittedSessionID = await request(connection, `/api/session/${encodeURIComponent(sessionID)}/prompt`, prompt)
+      .then(() => sessionID)
+      .catch(async (error) => {
+        if (!(error instanceof OpenCodeHttpError) || error.status !== 404) throw error
+        stream.cancel()
+        const recovered = await createChatSession(connection, state, controller.signal)
+        state.sessionID = recovered
+        state.stream.sessionID = recovered
+        writeLog("avatar", "Unity session recovered", {
+          clientID: state.clientID,
+          characterID: state.characterID,
+          previousSessionID: sessionID,
+          sessionID: recovered,
+        })
+        stream = await assistantStream(
+          connection,
+          recovered,
+          AbortSignal.any([controller.signal, AbortSignal.timeout(TURN_TIMEOUT)]),
+          {
+            start: (assistantMessageID, model) => {
+              writeLog("avatar", "Unity provider started", {
+                characterID: state.characterID,
+                requestID: message.requestID,
+                sessionID: recovered,
+                model: model ?? "server default",
+              })
+              if ((state.protocolMinor ?? 0) < 4) return
+              sendState(state, {
+                type: "assistant.text.start",
+                requestID: message.requestID,
+                sessionID: recovered,
+                assistantMessageID,
+                model: model ?? (route.model ? `${route.model.providerID}/${route.model.modelID}` : undefined),
+              })
+            },
+            delta: (delta, assistantMessageID, ttftMs) => {
+              setPresence(state, "responding", { requestID: message.requestID, subtitle: undefined })
+              if ((state.protocolMinor ?? 0) < 4) return
+              sendState(state, {
+                type: "assistant.text.delta",
+                requestID: message.requestID,
+                sessionID: recovered,
+                assistantMessageID,
+                delta,
+                ttftMs,
+              })
+            },
+          },
+        )
+        await request(connection, `/api/session/${encodeURIComponent(recovered)}/prompt`, prompt)
+        return recovered
+      })
+    writeLog("avatar", "Unity prompt admitted", {
+      characterID: state.characterID,
+      requestID: message.requestID,
+      sessionID: admittedSessionID,
     })
-    await request(connection, `/api/session/${encodeURIComponent(sessionID)}/wait`, {
-      method: "POST",
-      signal: AbortSignal.any([controller.signal, AbortSignal.timeout(TURN_TIMEOUT)]),
+    const streamed = await stream.wait
+    const text = streamed.text
+    writeLog("avatar", "Unity assistant received", {
+      characterID: state.characterID,
+      requestID: message.requestID,
+      sessionID: admittedSessionID,
     })
-    const response = await request(connection, `/api/session/${encodeURIComponent(sessionID)}/message?limit=40&order=desc`, {
-      signal: AbortSignal.any([controller.signal, AbortSignal.timeout(30_000)]),
-    })
-    const text = assistantText(await response.json(), started)
-    if (!text) throw new Error("The agent completed without a text response")
-    setPresence(state, state.voice ? "speaking" : "idle", {
+    const shouldSpeak = message.responseMode !== "text" && !!state.voice
+    setPresence(state, shouldSpeak ? "speaking" : "idle", {
       requestID: message.requestID,
       subtitle: text,
       emotion: inferSpeechEmotion(text),
       intensity: Math.min(1, 0.35 + Math.min(0.5, (text.match(/[!?]/g)?.length ?? 0) * 0.12)),
     })
-    sendState(state, { type: "assistant.text", requestID: message.requestID, sessionID, text })
-    if (state.voice) {
+    if ((state.protocolMinor ?? 0) >= 4) {
+      sendState(state, {
+        type: "assistant.text.done",
+        requestID: message.requestID,
+        sessionID: admittedSessionID,
+        text,
+        ttftMs: streamed.ttftMs,
+        generationMs: streamed.totalMs,
+        model: streamed.model ?? (route.model ? `${route.model.providerID}/${route.model.modelID}` : undefined),
+        fallback:
+          streamed.model && route.model && streamed.model !== `${route.model.providerID}/${route.model.modelID}`
+            ? `Verified reactor fallback selected ${streamed.model}.`
+            : route.reason,
+      })
+    } else sendState(state, { type: "assistant.text", requestID: message.requestID, sessionID: admittedSessionID, text })
+    if (shouldSpeak && state.voice) {
       if (!options.synthesize) throw new Error("Local voice synthesis is unavailable")
       const audio = await options.synthesize({ ...state.voice, text }, controller.signal)
       if (state.protocol === 1) {
         send(state.socket, {
           type: "assistant.audio",
           requestID: message.requestID,
-          sessionID,
+          sessionID: admittedSessionID,
           contentType: audio.contentType,
           data: Buffer.from(new Uint8Array(audio.audio)).toString("base64"),
         })
-      } else sendAudio(state, message.requestID, sessionID, text, audio.contentType, Buffer.from(audio.audio))
+      } else sendAudio(state, message.requestID, admittedSessionID, text, audio.contentType, Buffer.from(audio.audio))
     }
     if (state.turn === controller) {
       state.turn = undefined
       state.turnRequestID = undefined
     }
-    sendState(state, { type: "assistant.done", requestID: message.requestID, sessionID })
+    sendState(state, { type: "assistant.done", requestID: message.requestID, sessionID: admittedSessionID })
     setPresence(state, "idle", { subtitle: text, requestID: undefined })
   }
 
@@ -1056,14 +1492,80 @@ export async function startAvatarBridge(
     text: string,
     signal: AbortSignal,
   ) {
-    void connection
     void state
     void text
-    void signal
+    const status = await request(connection, "/api/jarvis/status", { signal }).then((response) => response.json())
+    const config = isRecord(status) && isRecord(status.config) ? status.config : undefined
+    const models = config && isRecord(config.models) ? config.models : undefined
+    const model = models && isRecord(models.dialogue) &&
+      typeof models.dialogue.providerID === "string" && typeof models.dialogue.modelID === "string"
+      ? { providerID: models.dialogue.providerID, modelID: models.dialogue.modelID }
+      : undefined
+    if (!model) throw new Error("Dialogue model is not configured in Settings → Jarvis.")
+    const probePath = model.providerID === "lmstudio"
+      ? "/provider/lmstudio/probe"
+      : model.providerID === "llama-server"
+        ? "/provider/llama-server/probe"
+        : undefined
+    if (probePath) {
+      const probe = await request(connection, probePath, { signal }).then((response) => response.json())
+      const probeStatus = isRecord(probe) && typeof probe.status === "string" ? probe.status : "offline"
+      if (probeStatus === "unauthorized") throw new Error(`${model.providerID} rejected authorization. Check its API key in Providers.`)
+      if (probeStatus === "offline" || probeStatus === "unconfigured")
+        throw new Error(`${model.providerID === "lmstudio" ? "LM Studio" : "llama-server"} is offline. Start the backend and refresh Settings → Jarvis.`)
+      const discovered = isRecord(probe) && Array.isArray(probe.models) ? probe.models : []
+      const found = discovered.find((candidate) =>
+        isRecord(candidate) && (candidate.id === model.modelID || (Array.isArray(candidate.instances) && candidate.instances.includes(model.modelID))))
+      if (!found) throw new Error(`The configured model is not available in ${model.providerID}: ${model.modelID}.`)
+      const loading = isRecord(found) && found.loaded === false
+      writeLog("avatar", loading ? "Unity model loading delegated to backend" : "Unity provider ready", {
+        providerID: model.providerID,
+        modelID: model.modelID,
+        status: probeStatus,
+      })
+    }
+    const catalogModels = async () => {
+      const catalog = await request(connection, "/api/model", { signal }).then((response) => response.json())
+      return isRecord(catalog) && Array.isArray(catalog.data) ? catalog.data : []
+    }
+    const reconcileCatalog = async (attempt = 0): Promise<unknown[]> => {
+      const available = await catalogModels()
+      if (available.some(
+        (candidate) => isRecord(candidate) && candidate.providerID === model.providerID && candidate.id === model.modelID,
+      )) return available
+      if (!probePath || attempt >= 4) return available
+      await new Promise<void>((resolve, reject) => {
+        const aborted = () => {
+          clearTimeout(timer)
+          reject(signal.reason)
+        }
+        const timer = setTimeout(() => {
+          signal.removeEventListener("abort", aborted)
+          resolve()
+        }, 250 * 2 ** attempt)
+        signal.addEventListener("abort", aborted, { once: true })
+      })
+      await request(connection, probePath, { signal })
+      return reconcileCatalog(attempt + 1)
+    }
+    const available = await reconcileCatalog()
+    if (!available.some((candidate) => isRecord(candidate) && candidate.providerID === model.providerID && candidate.id === model.modelID)) {
+      throw new Error(`Dialogue model is missing from the active runtime catalog: ${model.providerID}/${model.modelID}. Refresh Models or re-save it in Settings → Jarvis.`)
+    }
     return {
       role: "dialogue" as const,
-      reason: "server Jarvis runtime owns hidden planner escalation",
+      model,
+      reason: "V2 runtime catalog and provider probe verified",
     }
+  }
+
+  async function sessionExists(connection: ServerConnection, sessionID: string, signal: AbortSignal) {
+    return request(connection, `/api/session/${encodeURIComponent(sessionID)}`, { signal })
+      .then(() => true)
+      .catch((error) => {
+        if (error instanceof OpenCodeHttpError && error.status === 404) return false
+        throw error
+      })
   }
 
   function cancelTurn(state: ClientState, requestID: string) {
@@ -1173,9 +1675,26 @@ export async function startAvatarBridge(
     })
   }
 
-  function gameContext(state: ClientState) {
+function gameContext(state: ClientState, query: string) {
     if (state.protocol !== 2) return ""
     const world = worlds.get(state.characterID)
+    const needsWorld =
+      /(?:бач|кімнат|де |знайд|оглян|довкола|поруч|предмет|двер|npc|квест|інвентар|іди|підійди|візьми|поклади|відкрий|observe|look|see|room|where|find|nearby|item|door|quest|inventory|move|follow|pick|drop|open)/iu.test(
+        query,
+      )
+    if (!needsWorld) {
+      return [
+        "Connected game surface:",
+        JSON.stringify({
+          gameID: state.gameID,
+          saveSlotID: state.saveSlotID,
+          characterID: state.characterID,
+          worldRevision: world?.revision,
+          entityCount: world?.entities.length ?? 0,
+        }),
+        "This is compact untrusted scene state. Do not infer unseen world details from it.",
+      ].join("\n")
+    }
     const capabilities = [...state.capabilities.values()].map((capability) => ({
       id: capability.id,
       description: capability.description,
@@ -1250,18 +1769,10 @@ export async function startAvatarBridge(
       body: JSON.stringify({
         agent: "chat",
         mode: "chat",
-        metadata: {
-          jarvis: {
-            profileID: state.profileID,
-            profileRevision: state.profileRevision,
-            mode: "unity",
-          },
-          avatarBridge: {
-            protocol: state.protocol,
-            gameID: state.gameID,
-            saveSlotID: state.saveSlotID,
-            characterID: state.characterID,
-          },
+        jarvis: {
+          profileID: state.profileID,
+          profileRevision: state.profileRevision,
+          mode: "unity",
         },
         ...(state.model ? { model: state.model } : {}),
       }),
@@ -1357,6 +1868,7 @@ export async function startAvatarBridge(
       }
       sockets.close()
       await stopLan()
+      await closeServer(bootstrap)
       await closeServer(local)
       await persistent.flush()
     },
@@ -1469,6 +1981,24 @@ export async function startAvatarBridge(
   }
 }
 
+function pcm16Wav(pcm: Buffer, sampleRate: number) {
+  const header = Buffer.alloc(44)
+  header.write("RIFF", 0, "ascii")
+  header.writeUInt32LE(36 + pcm.byteLength, 4)
+  header.write("WAVE", 8, "ascii")
+  header.write("fmt ", 12, "ascii")
+  header.writeUInt32LE(16, 16)
+  header.writeUInt16LE(1, 20)
+  header.writeUInt16LE(1, 22)
+  header.writeUInt32LE(sampleRate, 24)
+  header.writeUInt32LE(sampleRate * 2, 28)
+  header.writeUInt16LE(2, 32)
+  header.writeUInt16LE(16, 34)
+  header.write("data", 36, "ascii")
+  header.writeUInt32LE(pcm.byteLength, 40)
+  return Buffer.concat([header, pcm])
+}
+
 type GameActionResult = {
   ok: boolean
   code: string
@@ -1522,6 +2052,111 @@ function normalizeServerURL(value: string) {
   return url.toString()
 }
 
+type AssistantStreamCallbacks = {
+  start: (assistantMessageID: string, model?: string) => void
+  delta: (delta: string, assistantMessageID: string, ttftMs: number) => void
+}
+
+async function assistantStream(
+  connection: ServerConnection,
+  sessionID: string,
+  outerSignal: AbortSignal,
+  callbacks: AssistantStreamCallbacks,
+) {
+  const controller = new AbortController()
+  const signal = AbortSignal.any([outerSignal, controller.signal])
+  const response = await request(connection, "/api/event", {
+    headers: { accept: "text/event-stream" },
+    signal,
+  })
+  if (!response.body) throw new Error("OpenCode event stream returned no response body")
+  const subscribedAt = Date.now()
+  const wait = (async () => {
+    const reader = response.body!.getReader()
+    const decoder = new TextDecoder()
+    const text = new Map<string, string>()
+    let buffer = ""
+    let assistantMessageID: string | undefined
+    let ttftMs: number | undefined
+    let model: string | undefined
+
+    const accept = (value: unknown) => {
+      if (!isRecord(value) || typeof value.type !== "string") return
+      const data = isRecord(value.data) ? value.data : isRecord(value.properties) ? value.properties : undefined
+      if (!data || data.sessionID !== sessionID) return
+      const messageID = typeof data.assistantMessageID === "string" ? data.assistantMessageID : undefined
+      if (value.type === "session.next.step.started") {
+        const selected = isRecord(data.model) ? data.model : undefined
+        const providerID = typeof selected?.providerID === "string" ? selected.providerID : undefined
+        const modelID = typeof selected?.id === "string" ? selected.id : undefined
+        if (providerID && modelID) model = `${providerID}/${modelID}`
+        return
+      }
+      if (value.type === "session.next.step.failed" && (!assistantMessageID || assistantMessageID === messageID)) {
+        throw new Error(readableAssistantError(data.error) ?? "The model failed before producing a response.")
+      }
+      if (value.type === "session.next.text.started" && messageID && typeof data.textID === "string") {
+        assistantMessageID = messageID
+        text.set(data.textID, "")
+        callbacks.start(messageID, model)
+        return
+      }
+      if (
+        value.type === "session.next.text.delta" &&
+        messageID &&
+        assistantMessageID === messageID &&
+        typeof data.textID === "string" &&
+        typeof data.delta === "string"
+      ) {
+        if (ttftMs === undefined) ttftMs = Date.now() - subscribedAt
+        text.set(data.textID, `${text.get(data.textID) ?? ""}${data.delta}`)
+        callbacks.delta(data.delta, messageID, ttftMs)
+        return
+      }
+      if (
+        value.type === "session.next.text.ended" &&
+        messageID &&
+        assistantMessageID === messageID &&
+        typeof data.textID === "string" &&
+        typeof data.text === "string"
+      ) {
+        const streamed = text.get(data.textID) ?? ""
+        if (!streamed && data.text) {
+          if (ttftMs === undefined) ttftMs = Date.now() - subscribedAt
+          callbacks.delta(data.text, messageID, ttftMs)
+        }
+        text.set(data.textID, data.text)
+        return
+      }
+      if (value.type !== "session.next.step.ended" || !messageID || assistantMessageID !== messageID) return
+      const output = [...text.values()].join("").trim()
+      if (!output) return
+      return { text: output, ttftMs: ttftMs ?? Date.now() - subscribedAt, totalMs: Date.now() - subscribedAt, model }
+    }
+
+    while (!signal.aborted) {
+      const chunk = await reader.read()
+      if (chunk.done) throw new Error("OpenCode event stream closed before the assistant response completed")
+      buffer += decoder.decode(chunk.value, { stream: true })
+      const frames = buffer.split(/\r?\n\r?\n/u)
+      buffer = frames.pop() ?? ""
+      for (const frame of frames) {
+        const payload = frame
+          .split(/\r?\n/u)
+          .filter((line) => line.startsWith("data:"))
+          .map((line) => line.slice(5).trimStart())
+          .join("\n")
+        if (!payload) continue
+        const settled = accept(JSON.parse(payload) as unknown)
+        if (settled) return settled
+      }
+    }
+    throw signal.reason
+  })().finally(() => controller.abort())
+  void wait.catch(() => undefined)
+  return { wait, cancel: () => controller.abort() }
+}
+
 async function request(connection: ServerConnection, path: string, init: RequestInit = {}) {
   const headers = new Headers(init.headers)
   headers.set("content-type", "application/json")
@@ -1531,22 +2166,21 @@ async function request(connection: ServerConnection, path: string, init: Request
   const response = await fetch(new URL(path, connection.url), { ...init, headers })
   if (response.ok) return response
   const detail = (await response.text()).slice(0, 1_000)
-  throw new Error(`OpenCode request failed with HTTP ${response.status}${detail ? `: ${detail}` : ""}`)
+  throw new OpenCodeHttpError(response.status, detail)
 }
 
-function assistantText(value: unknown, started: number) {
-  if (!isRecord(value) || !Array.isArray(value.data)) return
-  const assistant = value.data.find((message) => {
-    if (!isRecord(message) || message.type !== "assistant" || message.error !== undefined) return false
-    if (!isRecord(message.time) || typeof message.time.created !== "number") return false
-    return message.time.created >= started - 2_000 && Array.isArray(message.content)
-  })
-  if (!isRecord(assistant) || !Array.isArray(assistant.content)) return
-  const text = assistant.content
-    .flatMap((part) => (isRecord(part) && part.type === "text" && typeof part.text === "string" ? [part.text] : []))
-    .join("")
-    .trim()
-  return text || undefined
+function readableAssistantError(value: unknown): string | undefined {
+  if (typeof value === "string") return value
+  if (!isRecord(value)) return
+  if (typeof value.message === "string") return value.message
+  if (isRecord(value.data) && typeof value.data.message === "string") return value.data.message
+  if (typeof value._tag === "string") return value._tag
+}
+
+function isExpectedTurnCancellation(error: unknown) {
+  if (error instanceof DOMException && error.name === "AbortError") return true
+  if (!(error instanceof Error)) return false
+  return error.name === "AbortError" || /\b(?:aborted|cancelled|canceled|superseded)\b/iu.test(error.message)
 }
 
 function admitClientMessage(stream: StreamState, id: string) {
@@ -1650,6 +2284,42 @@ function localAddress(value?: string) {
   return value === "127.0.0.1" || value === "::1" || value === "::ffff:127.0.0.1"
 }
 
+function validBootstrapHost(value?: string) {
+  if (!value) return false
+  try {
+    const hostname = new URL(`http://${value}`).hostname
+    return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "[::1]"
+  } catch {
+    return false
+  }
+}
+
+function parseBootstrapIdentity(value: unknown) {
+  if (!isRecord(value) || value.protocol !== 2) return
+  if (
+    !bootstrapID(value.clientID) ||
+    !bootstrapID(value.characterID) ||
+    !bootstrapID(value.gameID) ||
+    !bootstrapID(value.saveSlotID)
+  )
+    return
+  if (
+    value.protocolMinor !== undefined &&
+    (!Number.isInteger(value.protocolMinor) || (value.protocolMinor as number) < 0 || (value.protocolMinor as number) > 99)
+  )
+    return
+  return {
+    clientID: value.clientID,
+    characterID: value.characterID,
+    gameID: value.gameID,
+    saveSlotID: value.saveSlotID,
+  }
+}
+
+function bootstrapID(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value)
+}
+
 function listen(
   server: {
     listen(port: number, host: string, listener: () => void): unknown
@@ -1657,10 +2327,11 @@ function listen(
     off(event: "error", listener: (error: Error) => void): unknown
   },
   host: string,
+  port = 0,
 ) {
   return new Promise<void>((resolve, reject) => {
     server.once("error", reject)
-    server.listen(0, host, () => {
+    server.listen(port, host, () => {
       server.off("error", reject)
       resolve()
     })

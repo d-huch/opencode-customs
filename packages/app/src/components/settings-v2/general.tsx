@@ -1,4 +1,4 @@
-import { Component, For, Show, createMemo, createResource, createSignal, onMount } from "solid-js"
+import { Component, For, Show, createMemo, createResource, createSignal, onCleanup, onMount } from "solid-js"
 import { createMediaQuery } from "@solid-primitives/media"
 import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
 import { SelectV2 } from "@opencode-ai/ui/v2/select-v2"
@@ -7,7 +7,7 @@ import { TextInputV2 } from "@opencode-ai/ui/v2/text-input-v2"
 import { TextareaV2 } from "@opencode-ai/ui/v2/textarea-v2"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { useLanguage } from "@/context/language"
-import { usePlatform } from "@/context/platform"
+import { usePlatform, type NemotronVoiceStatus } from "@/context/platform"
 import { useUpdaterAction } from "../updater-action"
 import { useSettings } from "@/context/settings"
 import { detachFishVoicePreset } from "@/utils/agent-personalization"
@@ -297,6 +297,9 @@ export const SettingsGeneralV2: Component<{
   const mobile = createMediaQuery("(max-width: 767px)")
   const updater = useUpdaterAction()
   const [voiceTest, setVoiceTest] = createSignal<"idle" | "running" | string>("idle")
+  const [nemotronStatus, setNemotronStatus] = createSignal<NemotronVoiceStatus>()
+  const [nemotronAction, setNemotronAction] = createSignal<"idle" | "installing" | "starting" | "stopping" | "testing">("idle")
+  const [nemotronError, setNemotronError] = createSignal("")
   const [fishVoiceTranscript, setFishVoiceTranscript] = createSignal("")
   const [fishVoiceState, setFishVoiceState] = createSignal<"idle" | "saving" | string>("idle")
   const [fishReferenceFile, setFishReferenceFile] = createSignal<File>()
@@ -323,6 +326,10 @@ export const SettingsGeneralV2: Component<{
     { value: "local" as const, label: language.t("settings.general.voice.provider.local") },
     { value: "fish-local" as const, label: language.t("settings.general.voice.provider.fish") },
   ]
+  const voiceEngines = [
+    { value: "cascade" as const, label: language.t("settings.general.voice.engine.cascade") },
+    { value: "nemotron" as const, label: language.t("settings.general.voice.engine.nemotron") },
+  ]
   const fishLatencies = [
     { value: "balanced" as const, label: language.t("settings.general.voice.fish.latency.balanced") },
     { value: "normal" as const, label: language.t("settings.general.voice.fish.latency.normal") },
@@ -348,6 +355,49 @@ export const SettingsGeneralV2: Component<{
   ]
   const fastVoices = [{ value: "ukrainian_tts", label: language.t("settings.general.voice.voice.piper") }]
   const voiceOptions = createMemo(() => (settings.voice.ttsMode() === "quality" ? qualityVoices : fastVoices))
+
+  const runNemotronAction = async (action: "install" | "start" | "stop" | "test") => {
+    const operation =
+      action === "install"
+        ? platform.installNemotronVoice
+        : action === "stop"
+          ? platform.stopNemotronVoice
+          : platform.startNemotronVoice
+    if (!operation) return
+    setNemotronAction(action === "install" ? "installing" : action === "stop" ? "stopping" : action === "test" ? "testing" : "starting")
+    setNemotronError("")
+    await operation().then(
+      (status) => {
+        if (status) setNemotronStatus(status)
+      },
+      (error: unknown) => setNemotronError(error instanceof Error ? error.message : String(error)),
+    )
+    setNemotronAction("idle")
+  }
+
+  const selectVoiceEngine = async (engine: "cascade" | "nemotron") => {
+    if (!platform.configureNemotronVoice) {
+      settings.voice.setEngine(engine)
+      return
+    }
+    setNemotronError("")
+    await platform.configureNemotronVoice({ engine }).then(
+      (status) => {
+        settings.voice.setEngine(engine)
+        setNemotronStatus(status)
+      },
+      (error: unknown) => setNemotronError(error instanceof Error ? error.message : String(error)),
+    )
+  }
+
+  onMount(() => {
+    void platform.configureNemotronVoice?.({ engine: settings.voice.engine() }).then(setNemotronStatus, () => undefined)
+    const unsubscribe = platform.onNemotronVoiceEvent?.((event) => {
+      if (event.type === "status") setNemotronStatus(event.status)
+      if (event.type === "error") setNemotronError(event.error)
+    })
+    onCleanup(() => unsubscribe?.())
+  })
 
   const checkFishServer = async () => {
     if (!platform.getFishAudioLocalStatus) {
@@ -804,6 +854,87 @@ export const SettingsGeneralV2: Component<{
 
       <SettingsListV2>
         <SettingsRowV2
+          title={language.t("settings.general.voice.engine.title")}
+          description={language.t("settings.general.voice.engine.description")}
+        >
+          <SelectV2
+            appearance="inline"
+            data-action="settings-voice-engine"
+            options={voiceEngines}
+            current={voiceEngines.find((option) => option.value === settings.voice.engine())}
+            placement="bottom-end"
+            gutter={6}
+            value={(option) => option.value}
+            label={(option) => option.label}
+            onSelect={(option) => option && void selectVoiceEngine(option.value)}
+          />
+        </SettingsRowV2>
+
+        <Show when={settings.voice.engine() === "nemotron"}>
+          <SettingsRowV2
+            title={language.t("settings.general.voice.nemotron.runtime.title")}
+            description={language.t("settings.general.voice.nemotron.runtime.description")}
+          >
+            <div class="flex max-w-[620px] flex-col items-end gap-2">
+              <div class="flex flex-wrap justify-end gap-2">
+                <ButtonV2
+                  data-action="settings-nemotron-install"
+                  variant="neutral"
+                  disabled={nemotronAction() !== "idle" || nemotronStatus()?.phase === "busy"}
+                  onClick={() => void runNemotronAction("install")}
+                >
+                  {language.t("settings.general.voice.nemotron.install")}
+                </ButtonV2>
+                <ButtonV2
+                  data-action="settings-nemotron-start"
+                  variant="neutral"
+                  disabled={nemotronAction() !== "idle" || nemotronStatus()?.phase === "busy"}
+                  onClick={() => void runNemotronAction("start")}
+                >
+                  {language.t("settings.general.voice.nemotron.start")}
+                </ButtonV2>
+                <ButtonV2
+                  data-action="settings-nemotron-stop"
+                  variant="ghost"
+                  disabled={nemotronAction() !== "idle" || nemotronStatus()?.phase === "busy"}
+                  onClick={() => void runNemotronAction("stop")}
+                >
+                  {language.t("settings.general.voice.nemotron.stop")}
+                </ButtonV2>
+                <ButtonV2
+                  data-action="settings-nemotron-test"
+                  variant="ghost"
+                  disabled={nemotronAction() !== "idle" || nemotronStatus()?.phase === "busy"}
+                  onClick={() => void runNemotronAction("test")}
+                >
+                  {language.t("settings.general.voice.nemotron.test")}
+                </ButtonV2>
+              </div>
+              <span class="text-12-regular text-text-weak">
+                {nemotronStatus()?.model ?? language.t("settings.general.voice.nemotron.modelMissing")} · {nemotronStatus()?.phase ?? "missing"} · 16 kHz → 22.05 kHz
+              </span>
+              <Show when={nemotronStatus()?.loadMs !== undefined || nemotronStatus()?.generationMs !== undefined}>
+                <span class="text-12-regular text-text-weak">
+                  load {nemotronStatus()?.loadMs ?? "—"} ms · transcript {nemotronStatus()?.transcriptLatencyMs ?? "—"} ms · text {nemotronStatus()?.firstTextMs ?? "—"} ms · audio {nemotronStatus()?.firstAudioMs ?? "—"} ms · RTF {nemotronStatus()?.realTimeFactor?.toFixed(2) ?? "—"} · dropped {nemotronStatus()?.droppedChunks ?? 0}
+                </span>
+              </Show>
+              <Show when={nemotronStatus()?.incompleteDownload}>
+                <span class="text-12-regular text-icon-warning-base">{language.t("settings.general.voice.nemotron.incomplete")}</span>
+              </Show>
+              <Show when={nemotronError() || nemotronStatus()?.message}>
+                <span class="text-12-regular text-icon-critical-base">{nemotronError() || nemotronStatus()?.message}</span>
+              </Show>
+            </div>
+          </SettingsRowV2>
+          <SettingsRowV2
+            title={language.t("settings.general.voice.nemotron.notice.title")}
+            description={language.t("settings.general.voice.nemotron.notice.description")}
+          >
+            <span class="text-12-regular text-icon-warning-base">Experimental</span>
+          </SettingsRowV2>
+        </Show>
+
+        <SettingsRowV2
           title={language.t("settings.general.row.showFileTree.title")}
           description={language.t("settings.general.row.showFileTree.description")}
         >
@@ -987,7 +1118,7 @@ export const SettingsGeneralV2: Component<{
           />
         </SettingsRowV2>
 
-        <Show when={settings.voice.speakResponses()}>
+        <Show when={settings.voice.speakResponses() && settings.voice.engine() === "cascade"}>
           <SettingsRowV2
             title={language.t("settings.general.voice.provider.title")}
             description={language.t("settings.general.voice.provider.description")}

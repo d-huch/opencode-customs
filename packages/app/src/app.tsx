@@ -64,6 +64,7 @@ import { ErrorPage } from "./pages/error"
 import { useCheckServerHealth } from "./utils/server-health"
 import { legacySessionHref, legacySessionServer, requireServerKey, sessionHref } from "./utils/session-route"
 import { createSessionLineage } from "@/pages/session/session-lineage"
+import { agentPersonalizationInstruction } from "@/utils/agent-personalization"
 
 import { SessionPage, SessionRouteErrorBoundary, TargetSessionRouteContent } from "@/pages/session"
 import { NewHome } from "@/pages/home"
@@ -555,6 +556,23 @@ function ServerKey(props: ParentProps) {
   )
 }
 
+function VoiceEngineBridge() {
+  const settings = useSettings()
+  const platform = usePlatform()
+
+  createEffect(() => {
+    const engine = settings.voice.engine()
+    const primary = settings.personalization.presets().find(
+      (preset) => preset.id === settings.personalization.defaultPresetID(),
+    )
+    const systemPrompt = primary
+      ? agentPersonalizationInstruction({ enabled: true, ...primary })
+      : undefined
+    void platform.configureNemotronVoice?.({ engine, systemPrompt }).catch(() => undefined)
+  })
+  return null
+}
+
 export function AppInterface(props: {
   children?: JSX.Element
   defaultServer: ServerConnection.Key
@@ -585,6 +603,7 @@ export function AppInterface(props: {
     >
       <GlobalProvider>
         <SettingsProvider>
+          <VoiceEngineBridge />
           <ConnectionGate disableHealthCheck={props.disableHealthCheck} startup={props.startup}>
             <Show when={useSettings().general.newLayoutDesigns().toString()} keyed>
               <Dynamic

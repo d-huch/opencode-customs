@@ -19,18 +19,18 @@ const legacyDesktopEntryFpm = `${legacyDesktopEntry}=/usr/share/applications/ope
 const metainfoFpm = (appId: string) =>
   `${path.join(packageDir, "resources", `${appId}.metainfo.xml`)}=/usr/share/metainfo/${appId}.metainfo.xml`
 
-async function repairMacSignature(appPath: string) {
+async function repairMacSignature(appPath: string, force = false) {
   const valid = await execFileAsync("codesign", ["--verify", "--deep", "--strict", appPath]).then(
     () => true,
     () => false,
   )
-  if (valid) return
+  if (valid && !force) return
   // Local Customs builds often have an Apple Development identity whose trust
   // chain is unavailable outside Xcode. Selecting it implicitly produces an app
   // that can pass once through the codesign cache and fail later. Only use a
   // certificate when the caller explicitly selected one; otherwise create a
   // stable ad-hoc signature for the personal build.
-  const identity = process.env.CSC_NAME?.trim() || "-"
+  const identity = process.env.OPENCODE_SIGN_IDENTITY?.trim() || "-"
   await execFileAsync("codesign", [
     "--force",
     "--deep",
@@ -107,7 +107,10 @@ const getBase = (appId: string): Configuration => ({
   ],
   afterSign: async (context) => {
     if (context.electronPlatformName !== "darwin") return
-    await repairMacSignature(path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`))
+    await repairMacSignature(
+      path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`),
+      channel === "dev" && customIcons,
+    )
   },
   afterAllArtifactBuild: async (result) => {
     if (process.platform !== "darwin") return []
@@ -118,7 +121,7 @@ const getBase = (appId: string): Configuration => ({
     const appPath = await Promise.all(candidates.map((candidate) => access(candidate).then(() => candidate, () => undefined))).then(
       (values) => values.find((value): value is string => !!value),
     )
-    if (appPath) await repairMacSignature(appPath)
+    if (appPath) await repairMacSignature(appPath, channel === "dev" && customIcons)
     return []
   },
   mac: {

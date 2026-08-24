@@ -147,6 +147,10 @@ function localAddresses() {
     .toSorted()
 }
 
+export function avatarBridgeLanAddresses(port: number) {
+  return localAddresses().map((address) => `wss://${address}:${port}/avatar`)
+}
+
 function privateIPv4(address: string) {
   const octets = address.split(".").map(Number)
   if (octets.length !== 4 || octets.some((octet) => !Number.isInteger(octet) || octet < 0 || octet > 255)) return false

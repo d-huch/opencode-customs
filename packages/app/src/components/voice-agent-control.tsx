@@ -9,6 +9,8 @@ import { useLocal } from "@/context/local"
 import { useSDK } from "@/context/sdk"
 import { useSync } from "@/context/sync"
 import { createLocalDuplexSpeech, type DuplexSpeechEvent } from "@/utils/duplex-speech"
+import { createNemotronDuplex } from "@/utils/nemotron-duplex"
+import { agentPersonalizationInstruction } from "@/utils/agent-personalization"
 import { createGaplessAudioPlayer } from "@/utils/gapless-audio-player"
 import { createLocalSpeechStream } from "@/utils/streaming-tts"
 import { showToast } from "@/utils/toast"
@@ -155,6 +157,7 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
   let speechFinal = false
   let speechBusy = false
   let duplex: ReturnType<typeof createLocalDuplexSpeech> | undefined
+  let nemotronDuplex: ReturnType<typeof createNemotronDuplex> | undefined
   let duplexStarting: Promise<void> | undefined
   let bargeInActive = false
   let observedSessionID: string | undefined
@@ -1097,6 +1100,8 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
   }
 
   function stopDuplex() {
+    nemotronDuplex?.stop()
+    nemotronDuplex = undefined
     duplex?.stop()
     duplex = undefined
     duplexStarting = undefined
@@ -1137,6 +1142,12 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
 
   async function start(preserveWake = false) {
     if (preserveWake && state() !== "idle") return
+    if (settings.voice.engine() === "nemotron" && nemotronDuplex && (state() === "listening" || state() === "transcribing")) {
+      handsFree = false
+      move("thinking", "nemotron_commit")
+      await nemotronDuplex.commit().catch(failRecognition)
+      return
+    }
     if (state() === "listening" || state() === "transcribing" || state() === "interrupted") {
       handsFree = false
       interrupt("user_interrupt")
@@ -1195,6 +1206,55 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
         language: voiceLanguage(document.documentElement.lang, navigator.language),
       },
     })
+    if (settings.voice.engine() === "nemotron") {
+      const requestID = crypto.randomUUID()
+      nemotronDuplex = createNemotronDuplex({
+        platform,
+        requestID,
+        systemPrompt: (() => {
+          const profile = local.personality.current()
+          if (!profile) return
+          return agentPersonalizationInstruction({ enabled: true, ...profile })
+        })(),
+        onLevel: setMicrophoneLevel,
+        onEvent: (event) => {
+          if (event.type === "transcript.delta") {
+            setLiveTranscript((value) => value + event.delta)
+            move("transcribing", "nemotron_transcript")
+            return
+          }
+          if (event.type === "text.delta") {
+            move("speaking", "nemotron_response")
+            return
+          }
+          if (event.type === "done") {
+            setLiveTranscript(event.transcript)
+            const sessionID = props.sessionID()
+            if (sessionID && event.transcript.trim() && event.text.trim())
+              void sdk().client.v2.session.externalTurn({
+                sessionID,
+                idempotencyKey: `nemotron:desktop:${requestID}`,
+                userText: event.transcript,
+                assistantText: event.text,
+                model: { providerID: "nemotron", id: "OsaurusAI/NemotronLabs-VoiceChat-11B-MXFP8" },
+              })
+            nemotronDuplex?.stop()
+            nemotronDuplex = undefined
+            move("idle", "nemotron_done")
+            return
+          }
+          if (event.type === "cancelled") {
+            nemotronDuplex?.stop()
+            nemotronDuplex = undefined
+            move("idle", "nemotron_cancelled")
+            return
+          }
+          if (event.type === "error") failRecognition(new Error(event.error))
+        },
+      })
+      await nemotronDuplex.start().catch(failRecognition)
+      return
+    }
     await ensureDuplex().catch(failRecognition)
     if (!orchestrator.isCurrent(turn)) return
     duplex?.setTurn(turn)

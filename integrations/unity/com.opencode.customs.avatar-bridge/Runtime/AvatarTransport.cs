@@ -13,6 +13,8 @@ namespace OpenCode.Customs.AvatarBridge
     public interface IAvatarTransport : IDisposable
     {
         WebSocketState State { get; }
+        int? CloseStatusCode { get; }
+        string CloseStatusDescription { get; }
         Task ConnectAsync(Uri uri, string certificateFingerprint, CancellationToken cancellation);
         Task SendTextAsync(string value, CancellationToken cancellation);
         Task SendBinaryAsync(byte[] value, CancellationToken cancellation);
@@ -32,10 +34,13 @@ namespace OpenCode.Customs.AvatarBridge
         readonly SemaphoreSlim sendLock = new SemaphoreSlim(1, 1);
         ClientWebSocket socket;
         public WebSocketState State => socket == null ? WebSocketState.None : socket.State;
+        public int? CloseStatusCode => socket?.CloseStatus == null ? null : (int)socket.CloseStatus.Value;
+        public string CloseStatusDescription => socket?.CloseStatusDescription;
 
         public async Task ConnectAsync(Uri uri, string certificateFingerprint, CancellationToken cancellation)
         {
             socket = new ClientWebSocket();
+            if (uri.IsLoopback) socket.Options.Proxy = null;
             if (uri.Scheme == "wss")
             {
                 if (string.IsNullOrWhiteSpace(certificateFingerprint))
@@ -44,7 +49,9 @@ namespace OpenCode.Customs.AvatarBridge
                 socket.Options.RemoteCertificateValidationCallback = (_, certificate, _, errors) =>
                     ValidateCertificate(certificate, errors, expected);
             }
-            await socket.ConnectAsync(uri, cancellation);
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+            timeout.CancelAfter(TimeSpan.FromSeconds(5));
+            await socket.ConnectAsync(uri, timeout.Token);
         }
 
         public async Task SendTextAsync(string value, CancellationToken cancellation)

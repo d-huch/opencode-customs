@@ -254,6 +254,32 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
             summary: "Send message",
             description: "Durably admit one session input and schedule agent-loop execution unless resume is false.",
           }),
+      ),
+    )
+    .add(
+      HttpApiEndpoint.post("session.externalTurn", "/api/session/:sessionID/external-turn", {
+        params: { sessionID: Session.ID },
+        payload: Schema.Struct({
+          idempotencyKey: Schema.String,
+          userText: Schema.String,
+          assistantText: Schema.String,
+          model: Model.Ref.pipe(Schema.optional),
+        }),
+        success: Schema.Struct({
+          data: Schema.Struct({
+            userMessageID: SessionMessage.ID,
+            assistantMessageID: SessionMessage.ID,
+          }),
+        }),
+        error: [ConflictError, SessionNotFoundError],
+      })
+        .middleware(sessionLocationMiddleware)
+        .annotateMerge(
+          OpenApi.annotations({
+            identifier: "v2.session.externalTurn",
+            summary: "Record an external realtime turn",
+            description: "Idempotently record a completed external user/assistant turn without provider execution.",
+          }),
         ),
     )
     .add(

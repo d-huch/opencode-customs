@@ -94,6 +94,34 @@ export type VoiceDiagnosticInput = {
 }
 export type VoiceDiagnosticEntry = VoiceDiagnosticInput & { timestamp: string }
 export type VoiceTurnAudioInput = { sessionID: string; turnID: string; pcm: ArrayBuffer; sampleRate: number }
+export type NemotronVoiceEngine = "cascade" | "nemotron"
+export type NemotronVoiceStatus = {
+  engine: NemotronVoiceEngine
+  phase: "missing" | "installing" | "starting" | "ready" | "busy" | "error"
+  model?: string
+  modelPath?: string
+  runtimeInstalled: boolean
+  incompleteDownload: boolean
+  inputSampleRate: 16000
+  outputSampleRate: 22050
+  owner?: "desktop" | "unity"
+  message?: string
+  loadMs?: number
+  transcriptLatencyMs?: number
+  firstTextMs?: number
+  firstAudioMs?: number
+  droppedChunks: number
+  cancelLatencyMs?: number
+  generationMs?: number
+  realTimeFactor?: number
+}
+export type NemotronVoiceEvent =
+  | { type: "status"; status: NemotronVoiceStatus }
+  | { type: "transcript.delta" | "text.delta" | "function.delta"; requestID: string; delta: string }
+  | { type: "audio.delta"; requestID: string; audio: ArrayBuffer; sampleRate: 22050 }
+  | { type: "done"; requestID: string; transcript: string; text: string }
+  | { type: "cancelled"; requestID: string }
+  | { type: "error"; requestID?: string; error: string }
 export type TitlebarTheme = {
   mode: "light" | "dark"
   scheme?: "system" | "light" | "dark"
@@ -125,12 +153,17 @@ export type AvatarBridgeStatus = {
   url?: string
   token?: string
   message?: string
+  bootstrap?: {
+    available: boolean
+    port?: number
+    error?: string
+  }
   presence?: {
     characterID: string
     sessionID?: string
     profileID?: string
     surface: "desktop" | "unity"
-    state: "idle" | "listening" | "thinking" | "planning" | "speaking" | "acting" | "uncertain" | "error"
+    state: "idle" | "listening" | "thinking" | "planning" | "responding" | "speaking" | "acting" | "uncertain" | "error"
     emotion: string
     intensity: number
     subtitle?: string
@@ -171,6 +204,11 @@ export type AvatarBridgeStatus = {
       expiresAt: number
       addresses: string[]
       certificateFingerprint: string
+    }
+    discovery?: {
+      available: boolean
+      port?: number
+      error?: string
     }
   }
   pairedDevices?: Array<{
@@ -344,6 +382,16 @@ export type ElectronAPI = {
     sessionID: string,
     turnID: string,
   ) => Promise<{ path: string; contentType: string; audio: ArrayBuffer } | undefined>
+  getNemotronVoiceStatus: () => Promise<NemotronVoiceStatus>
+  configureNemotronVoice: (input: { engine: NemotronVoiceEngine; systemPrompt?: string }) => Promise<NemotronVoiceStatus>
+  installNemotronVoice: () => Promise<NemotronVoiceStatus>
+  startNemotronVoice: () => Promise<NemotronVoiceStatus>
+  stopNemotronVoice: () => Promise<void>
+  beginNemotronVoice: (input: { owner: "desktop" | "unity"; requestID: string; systemPrompt?: string }) => Promise<void>
+  appendNemotronVoice: (input: { requestID: string; pcm: ArrayBuffer; sampleRate: number }) => void
+  commitNemotronVoice: (requestID: string) => Promise<void>
+  cancelNemotronVoice: (requestID?: string) => Promise<void>
+  onNemotronVoiceEvent: (cb: (event: NemotronVoiceEvent) => void) => () => void
   getResearchBrowserStatus: () => Promise<ResearchBrowserStatus>
   showResearchBrowser: () => Promise<void>
   clearResearchBrowserData: () => Promise<void>

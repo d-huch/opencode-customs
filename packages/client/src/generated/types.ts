@@ -630,6 +630,38 @@ export type SessionsPromptOutput = {
   }
 }["data"]
 
+export type SessionsExternalTurnInput = {
+  readonly sessionID: { readonly sessionID: string }["sessionID"]
+  readonly idempotencyKey: {
+    readonly idempotencyKey: string
+    readonly userText: string
+    readonly assistantText: string
+    readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string } | null
+  }["idempotencyKey"]
+  readonly userText: {
+    readonly idempotencyKey: string
+    readonly userText: string
+    readonly assistantText: string
+    readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string } | null
+  }["userText"]
+  readonly assistantText: {
+    readonly idempotencyKey: string
+    readonly userText: string
+    readonly assistantText: string
+    readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string } | null
+  }["assistantText"]
+  readonly model?: {
+    readonly idempotencyKey: string
+    readonly userText: string
+    readonly assistantText: string
+    readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string } | null
+  }["model"]
+}
+
+export type SessionsExternalTurnOutput = {
+  readonly data: { readonly userMessageID: string; readonly assistantMessageID: string }
+}["data"]
+
 export type SessionsCompactInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
 
 export type SessionsCompactOutput = void
@@ -2130,6 +2162,7 @@ export type ModelsListOutput = {
     }>
     readonly status: "alpha" | "beta" | "deprecated" | "active"
     readonly enabled: boolean
+    readonly runtime?: { readonly instanceID?: string; readonly sizeBytes?: number | "Infinity" | "-Infinity" | "NaN" }
     readonly limit: { readonly context: number; readonly input?: number; readonly output: number }
   }>
 }
@@ -3440,6 +3473,41 @@ export type ServerJarvisStatusOutput = {
     readonly plannerTimeoutMs: number
     readonly plannerIdleUnloadMs: number
     readonly plannerEscalationMinWords: number
+    readonly reactor: {
+      readonly profile: "fast" | "balanced" | "quality"
+      readonly dialogueReasoning: "off" | "on"
+      readonly plannerReasoning: "off" | "on"
+      readonly allowFallback: boolean
+    }
+    readonly benchmark: {
+      readonly status: "idle" | "running" | "completed" | "cancelled" | "error"
+      readonly profile: "fast" | "balanced" | "quality"
+      readonly startedAt?: number
+      readonly completedAt?: number
+      readonly activeModel?: { readonly providerID: string; readonly modelID: string }
+      readonly results: ReadonlyArray<{
+        readonly model: { readonly providerID: string; readonly modelID: string }
+        readonly endpoint: string
+        readonly instance: string
+        readonly testedAt: number
+        readonly expiresAt: number
+        readonly ttftMs: number
+        readonly totalMs: number
+        readonly tokensPerSecond: number | "Infinity" | "-Infinity" | "NaN"
+        readonly outputTokens: number
+        readonly context: number
+        readonly memoryBytes?: number
+        readonly ukrainian: boolean
+        readonly instructions: boolean
+        readonly toolCalling: boolean
+        readonly accepted: boolean
+        readonly score: number | "Infinity" | "-Infinity" | "NaN"
+        readonly error?: string
+      }>
+      readonly selected?: { readonly providerID: string; readonly modelID: string }
+      readonly fallback: ReadonlyArray<{ readonly providerID: string; readonly modelID: string }>
+      readonly error?: string
+    }
     readonly initiative: {
       readonly enabled: boolean
       readonly quietStart: string
@@ -3487,6 +3555,41 @@ export type ServerJarvisConfigOutput = {
   readonly plannerTimeoutMs: number
   readonly plannerIdleUnloadMs: number
   readonly plannerEscalationMinWords: number
+  readonly reactor: {
+    readonly profile: "fast" | "balanced" | "quality"
+    readonly dialogueReasoning: "off" | "on"
+    readonly plannerReasoning: "off" | "on"
+    readonly allowFallback: boolean
+  }
+  readonly benchmark: {
+    readonly status: "idle" | "running" | "completed" | "cancelled" | "error"
+    readonly profile: "fast" | "balanced" | "quality"
+    readonly startedAt?: number
+    readonly completedAt?: number
+    readonly activeModel?: { readonly providerID: string; readonly modelID: string }
+    readonly results: ReadonlyArray<{
+      readonly model: { readonly providerID: string; readonly modelID: string }
+      readonly endpoint: string
+      readonly instance: string
+      readonly testedAt: number
+      readonly expiresAt: number
+      readonly ttftMs: number
+      readonly totalMs: number
+      readonly tokensPerSecond: number | "Infinity" | "-Infinity" | "NaN"
+      readonly outputTokens: number
+      readonly context: number
+      readonly memoryBytes?: number
+      readonly ukrainian: boolean
+      readonly instructions: boolean
+      readonly toolCalling: boolean
+      readonly accepted: boolean
+      readonly score: number | "Infinity" | "-Infinity" | "NaN"
+      readonly error?: string
+    }>
+    readonly selected?: { readonly providerID: string; readonly modelID: string }
+    readonly fallback: ReadonlyArray<{ readonly providerID: string; readonly modelID: string }>
+    readonly error?: string
+  }
   readonly initiative: {
     readonly enabled: boolean
     readonly quietStart: string
@@ -3510,6 +3613,41 @@ export type ServerJarvisUpdateConfigInput = {
     readonly plannerTimeoutMs: number
     readonly plannerIdleUnloadMs: number
     readonly plannerEscalationMinWords: number
+    readonly reactor: {
+      readonly profile: "fast" | "balanced" | "quality"
+      readonly dialogueReasoning: "off" | "on"
+      readonly plannerReasoning: "off" | "on"
+      readonly allowFallback: boolean
+    }
+    readonly benchmark: {
+      readonly status: "idle" | "running" | "completed" | "cancelled" | "error"
+      readonly profile: "fast" | "balanced" | "quality"
+      readonly startedAt?: number
+      readonly completedAt?: number
+      readonly activeModel?: { readonly providerID: string; readonly modelID: string }
+      readonly results: ReadonlyArray<{
+        readonly model: { readonly providerID: string; readonly modelID: string }
+        readonly endpoint: string
+        readonly instance: string
+        readonly testedAt: number
+        readonly expiresAt: number
+        readonly ttftMs: number
+        readonly totalMs: number
+        readonly tokensPerSecond: number | "Infinity" | "-Infinity" | "NaN"
+        readonly outputTokens: number
+        readonly context: number
+        readonly memoryBytes?: number
+        readonly ukrainian: boolean
+        readonly instructions: boolean
+        readonly toolCalling: boolean
+        readonly accepted: boolean
+        readonly score: number | "Infinity" | "-Infinity" | "NaN"
+        readonly error?: string
+      }>
+      readonly selected?: { readonly providerID: string; readonly modelID: string }
+      readonly fallback: ReadonlyArray<{ readonly providerID: string; readonly modelID: string }>
+      readonly error?: string
+    }
     readonly initiative: {
       readonly enabled: boolean
       readonly quietStart: string
@@ -3531,6 +3669,41 @@ export type ServerJarvisUpdateConfigInput = {
     readonly plannerTimeoutMs: number
     readonly plannerIdleUnloadMs: number
     readonly plannerEscalationMinWords: number
+    readonly reactor: {
+      readonly profile: "fast" | "balanced" | "quality"
+      readonly dialogueReasoning: "off" | "on"
+      readonly plannerReasoning: "off" | "on"
+      readonly allowFallback: boolean
+    }
+    readonly benchmark: {
+      readonly status: "idle" | "running" | "completed" | "cancelled" | "error"
+      readonly profile: "fast" | "balanced" | "quality"
+      readonly startedAt?: number
+      readonly completedAt?: number
+      readonly activeModel?: { readonly providerID: string; readonly modelID: string }
+      readonly results: ReadonlyArray<{
+        readonly model: { readonly providerID: string; readonly modelID: string }
+        readonly endpoint: string
+        readonly instance: string
+        readonly testedAt: number
+        readonly expiresAt: number
+        readonly ttftMs: number
+        readonly totalMs: number
+        readonly tokensPerSecond: number | "Infinity" | "-Infinity" | "NaN"
+        readonly outputTokens: number
+        readonly context: number
+        readonly memoryBytes?: number
+        readonly ukrainian: boolean
+        readonly instructions: boolean
+        readonly toolCalling: boolean
+        readonly accepted: boolean
+        readonly score: number | "Infinity" | "-Infinity" | "NaN"
+        readonly error?: string
+      }>
+      readonly selected?: { readonly providerID: string; readonly modelID: string }
+      readonly fallback: ReadonlyArray<{ readonly providerID: string; readonly modelID: string }>
+      readonly error?: string
+    }
     readonly initiative: {
       readonly enabled: boolean
       readonly quietStart: string
@@ -3552,6 +3725,41 @@ export type ServerJarvisUpdateConfigInput = {
     readonly plannerTimeoutMs: number
     readonly plannerIdleUnloadMs: number
     readonly plannerEscalationMinWords: number
+    readonly reactor: {
+      readonly profile: "fast" | "balanced" | "quality"
+      readonly dialogueReasoning: "off" | "on"
+      readonly plannerReasoning: "off" | "on"
+      readonly allowFallback: boolean
+    }
+    readonly benchmark: {
+      readonly status: "idle" | "running" | "completed" | "cancelled" | "error"
+      readonly profile: "fast" | "balanced" | "quality"
+      readonly startedAt?: number
+      readonly completedAt?: number
+      readonly activeModel?: { readonly providerID: string; readonly modelID: string }
+      readonly results: ReadonlyArray<{
+        readonly model: { readonly providerID: string; readonly modelID: string }
+        readonly endpoint: string
+        readonly instance: string
+        readonly testedAt: number
+        readonly expiresAt: number
+        readonly ttftMs: number
+        readonly totalMs: number
+        readonly tokensPerSecond: number | "Infinity" | "-Infinity" | "NaN"
+        readonly outputTokens: number
+        readonly context: number
+        readonly memoryBytes?: number
+        readonly ukrainian: boolean
+        readonly instructions: boolean
+        readonly toolCalling: boolean
+        readonly accepted: boolean
+        readonly score: number | "Infinity" | "-Infinity" | "NaN"
+        readonly error?: string
+      }>
+      readonly selected?: { readonly providerID: string; readonly modelID: string }
+      readonly fallback: ReadonlyArray<{ readonly providerID: string; readonly modelID: string }>
+      readonly error?: string
+    }
     readonly initiative: {
       readonly enabled: boolean
       readonly quietStart: string
@@ -3573,6 +3781,41 @@ export type ServerJarvisUpdateConfigInput = {
     readonly plannerTimeoutMs: number
     readonly plannerIdleUnloadMs: number
     readonly plannerEscalationMinWords: number
+    readonly reactor: {
+      readonly profile: "fast" | "balanced" | "quality"
+      readonly dialogueReasoning: "off" | "on"
+      readonly plannerReasoning: "off" | "on"
+      readonly allowFallback: boolean
+    }
+    readonly benchmark: {
+      readonly status: "idle" | "running" | "completed" | "cancelled" | "error"
+      readonly profile: "fast" | "balanced" | "quality"
+      readonly startedAt?: number
+      readonly completedAt?: number
+      readonly activeModel?: { readonly providerID: string; readonly modelID: string }
+      readonly results: ReadonlyArray<{
+        readonly model: { readonly providerID: string; readonly modelID: string }
+        readonly endpoint: string
+        readonly instance: string
+        readonly testedAt: number
+        readonly expiresAt: number
+        readonly ttftMs: number
+        readonly totalMs: number
+        readonly tokensPerSecond: number | "Infinity" | "-Infinity" | "NaN"
+        readonly outputTokens: number
+        readonly context: number
+        readonly memoryBytes?: number
+        readonly ukrainian: boolean
+        readonly instructions: boolean
+        readonly toolCalling: boolean
+        readonly accepted: boolean
+        readonly score: number | "Infinity" | "-Infinity" | "NaN"
+        readonly error?: string
+      }>
+      readonly selected?: { readonly providerID: string; readonly modelID: string }
+      readonly fallback: ReadonlyArray<{ readonly providerID: string; readonly modelID: string }>
+      readonly error?: string
+    }
     readonly initiative: {
       readonly enabled: boolean
       readonly quietStart: string
@@ -3594,6 +3837,41 @@ export type ServerJarvisUpdateConfigInput = {
     readonly plannerTimeoutMs: number
     readonly plannerIdleUnloadMs: number
     readonly plannerEscalationMinWords: number
+    readonly reactor: {
+      readonly profile: "fast" | "balanced" | "quality"
+      readonly dialogueReasoning: "off" | "on"
+      readonly plannerReasoning: "off" | "on"
+      readonly allowFallback: boolean
+    }
+    readonly benchmark: {
+      readonly status: "idle" | "running" | "completed" | "cancelled" | "error"
+      readonly profile: "fast" | "balanced" | "quality"
+      readonly startedAt?: number
+      readonly completedAt?: number
+      readonly activeModel?: { readonly providerID: string; readonly modelID: string }
+      readonly results: ReadonlyArray<{
+        readonly model: { readonly providerID: string; readonly modelID: string }
+        readonly endpoint: string
+        readonly instance: string
+        readonly testedAt: number
+        readonly expiresAt: number
+        readonly ttftMs: number
+        readonly totalMs: number
+        readonly tokensPerSecond: number | "Infinity" | "-Infinity" | "NaN"
+        readonly outputTokens: number
+        readonly context: number
+        readonly memoryBytes?: number
+        readonly ukrainian: boolean
+        readonly instructions: boolean
+        readonly toolCalling: boolean
+        readonly accepted: boolean
+        readonly score: number | "Infinity" | "-Infinity" | "NaN"
+        readonly error?: string
+      }>
+      readonly selected?: { readonly providerID: string; readonly modelID: string }
+      readonly fallback: ReadonlyArray<{ readonly providerID: string; readonly modelID: string }>
+      readonly error?: string
+    }
     readonly initiative: {
       readonly enabled: boolean
       readonly quietStart: string
@@ -3615,6 +3893,41 @@ export type ServerJarvisUpdateConfigInput = {
     readonly plannerTimeoutMs: number
     readonly plannerIdleUnloadMs: number
     readonly plannerEscalationMinWords: number
+    readonly reactor: {
+      readonly profile: "fast" | "balanced" | "quality"
+      readonly dialogueReasoning: "off" | "on"
+      readonly plannerReasoning: "off" | "on"
+      readonly allowFallback: boolean
+    }
+    readonly benchmark: {
+      readonly status: "idle" | "running" | "completed" | "cancelled" | "error"
+      readonly profile: "fast" | "balanced" | "quality"
+      readonly startedAt?: number
+      readonly completedAt?: number
+      readonly activeModel?: { readonly providerID: string; readonly modelID: string }
+      readonly results: ReadonlyArray<{
+        readonly model: { readonly providerID: string; readonly modelID: string }
+        readonly endpoint: string
+        readonly instance: string
+        readonly testedAt: number
+        readonly expiresAt: number
+        readonly ttftMs: number
+        readonly totalMs: number
+        readonly tokensPerSecond: number | "Infinity" | "-Infinity" | "NaN"
+        readonly outputTokens: number
+        readonly context: number
+        readonly memoryBytes?: number
+        readonly ukrainian: boolean
+        readonly instructions: boolean
+        readonly toolCalling: boolean
+        readonly accepted: boolean
+        readonly score: number | "Infinity" | "-Infinity" | "NaN"
+        readonly error?: string
+      }>
+      readonly selected?: { readonly providerID: string; readonly modelID: string }
+      readonly fallback: ReadonlyArray<{ readonly providerID: string; readonly modelID: string }>
+      readonly error?: string
+    }
     readonly initiative: {
       readonly enabled: boolean
       readonly quietStart: string
@@ -3625,6 +3938,118 @@ export type ServerJarvisUpdateConfigInput = {
     }
     readonly updatedAt: number
   }["plannerEscalationMinWords"]
+  readonly reactor: {
+    readonly primaryProfileID?: string
+    readonly inboxSessionID?: string
+    readonly models: {
+      readonly dialogue?: { readonly providerID: string; readonly modelID: string }
+      readonly planner?: { readonly providerID: string; readonly modelID: string }
+      readonly embedding?: { readonly providerID: string; readonly modelID: string }
+    }
+    readonly plannerTimeoutMs: number
+    readonly plannerIdleUnloadMs: number
+    readonly plannerEscalationMinWords: number
+    readonly reactor: {
+      readonly profile: "fast" | "balanced" | "quality"
+      readonly dialogueReasoning: "off" | "on"
+      readonly plannerReasoning: "off" | "on"
+      readonly allowFallback: boolean
+    }
+    readonly benchmark: {
+      readonly status: "idle" | "running" | "completed" | "cancelled" | "error"
+      readonly profile: "fast" | "balanced" | "quality"
+      readonly startedAt?: number
+      readonly completedAt?: number
+      readonly activeModel?: { readonly providerID: string; readonly modelID: string }
+      readonly results: ReadonlyArray<{
+        readonly model: { readonly providerID: string; readonly modelID: string }
+        readonly endpoint: string
+        readonly instance: string
+        readonly testedAt: number
+        readonly expiresAt: number
+        readonly ttftMs: number
+        readonly totalMs: number
+        readonly tokensPerSecond: number | "Infinity" | "-Infinity" | "NaN"
+        readonly outputTokens: number
+        readonly context: number
+        readonly memoryBytes?: number
+        readonly ukrainian: boolean
+        readonly instructions: boolean
+        readonly toolCalling: boolean
+        readonly accepted: boolean
+        readonly score: number | "Infinity" | "-Infinity" | "NaN"
+        readonly error?: string
+      }>
+      readonly selected?: { readonly providerID: string; readonly modelID: string }
+      readonly fallback: ReadonlyArray<{ readonly providerID: string; readonly modelID: string }>
+      readonly error?: string
+    }
+    readonly initiative: {
+      readonly enabled: boolean
+      readonly quietStart: string
+      readonly quietEnd: string
+      readonly reflectionLimit: number
+      readonly eventLimit: number
+      readonly topicCooldownMinutes: number
+    }
+    readonly updatedAt: number
+  }["reactor"]
+  readonly benchmark: {
+    readonly primaryProfileID?: string
+    readonly inboxSessionID?: string
+    readonly models: {
+      readonly dialogue?: { readonly providerID: string; readonly modelID: string }
+      readonly planner?: { readonly providerID: string; readonly modelID: string }
+      readonly embedding?: { readonly providerID: string; readonly modelID: string }
+    }
+    readonly plannerTimeoutMs: number
+    readonly plannerIdleUnloadMs: number
+    readonly plannerEscalationMinWords: number
+    readonly reactor: {
+      readonly profile: "fast" | "balanced" | "quality"
+      readonly dialogueReasoning: "off" | "on"
+      readonly plannerReasoning: "off" | "on"
+      readonly allowFallback: boolean
+    }
+    readonly benchmark: {
+      readonly status: "idle" | "running" | "completed" | "cancelled" | "error"
+      readonly profile: "fast" | "balanced" | "quality"
+      readonly startedAt?: number
+      readonly completedAt?: number
+      readonly activeModel?: { readonly providerID: string; readonly modelID: string }
+      readonly results: ReadonlyArray<{
+        readonly model: { readonly providerID: string; readonly modelID: string }
+        readonly endpoint: string
+        readonly instance: string
+        readonly testedAt: number
+        readonly expiresAt: number
+        readonly ttftMs: number
+        readonly totalMs: number
+        readonly tokensPerSecond: number | "Infinity" | "-Infinity" | "NaN"
+        readonly outputTokens: number
+        readonly context: number
+        readonly memoryBytes?: number
+        readonly ukrainian: boolean
+        readonly instructions: boolean
+        readonly toolCalling: boolean
+        readonly accepted: boolean
+        readonly score: number | "Infinity" | "-Infinity" | "NaN"
+        readonly error?: string
+      }>
+      readonly selected?: { readonly providerID: string; readonly modelID: string }
+      readonly fallback: ReadonlyArray<{ readonly providerID: string; readonly modelID: string }>
+      readonly error?: string
+    }
+    readonly initiative: {
+      readonly enabled: boolean
+      readonly quietStart: string
+      readonly quietEnd: string
+      readonly reflectionLimit: number
+      readonly eventLimit: number
+      readonly topicCooldownMinutes: number
+    }
+    readonly updatedAt: number
+  }["benchmark"]
   readonly initiative: {
     readonly primaryProfileID?: string
     readonly inboxSessionID?: string
@@ -3636,6 +4061,41 @@ export type ServerJarvisUpdateConfigInput = {
     readonly plannerTimeoutMs: number
     readonly plannerIdleUnloadMs: number
     readonly plannerEscalationMinWords: number
+    readonly reactor: {
+      readonly profile: "fast" | "balanced" | "quality"
+      readonly dialogueReasoning: "off" | "on"
+      readonly plannerReasoning: "off" | "on"
+      readonly allowFallback: boolean
+    }
+    readonly benchmark: {
+      readonly status: "idle" | "running" | "completed" | "cancelled" | "error"
+      readonly profile: "fast" | "balanced" | "quality"
+      readonly startedAt?: number
+      readonly completedAt?: number
+      readonly activeModel?: { readonly providerID: string; readonly modelID: string }
+      readonly results: ReadonlyArray<{
+        readonly model: { readonly providerID: string; readonly modelID: string }
+        readonly endpoint: string
+        readonly instance: string
+        readonly testedAt: number
+        readonly expiresAt: number
+        readonly ttftMs: number
+        readonly totalMs: number
+        readonly tokensPerSecond: number | "Infinity" | "-Infinity" | "NaN"
+        readonly outputTokens: number
+        readonly context: number
+        readonly memoryBytes?: number
+        readonly ukrainian: boolean
+        readonly instructions: boolean
+        readonly toolCalling: boolean
+        readonly accepted: boolean
+        readonly score: number | "Infinity" | "-Infinity" | "NaN"
+        readonly error?: string
+      }>
+      readonly selected?: { readonly providerID: string; readonly modelID: string }
+      readonly fallback: ReadonlyArray<{ readonly providerID: string; readonly modelID: string }>
+      readonly error?: string
+    }
     readonly initiative: {
       readonly enabled: boolean
       readonly quietStart: string
@@ -3657,6 +4117,41 @@ export type ServerJarvisUpdateConfigInput = {
     readonly plannerTimeoutMs: number
     readonly plannerIdleUnloadMs: number
     readonly plannerEscalationMinWords: number
+    readonly reactor: {
+      readonly profile: "fast" | "balanced" | "quality"
+      readonly dialogueReasoning: "off" | "on"
+      readonly plannerReasoning: "off" | "on"
+      readonly allowFallback: boolean
+    }
+    readonly benchmark: {
+      readonly status: "idle" | "running" | "completed" | "cancelled" | "error"
+      readonly profile: "fast" | "balanced" | "quality"
+      readonly startedAt?: number
+      readonly completedAt?: number
+      readonly activeModel?: { readonly providerID: string; readonly modelID: string }
+      readonly results: ReadonlyArray<{
+        readonly model: { readonly providerID: string; readonly modelID: string }
+        readonly endpoint: string
+        readonly instance: string
+        readonly testedAt: number
+        readonly expiresAt: number
+        readonly ttftMs: number
+        readonly totalMs: number
+        readonly tokensPerSecond: number | "Infinity" | "-Infinity" | "NaN"
+        readonly outputTokens: number
+        readonly context: number
+        readonly memoryBytes?: number
+        readonly ukrainian: boolean
+        readonly instructions: boolean
+        readonly toolCalling: boolean
+        readonly accepted: boolean
+        readonly score: number | "Infinity" | "-Infinity" | "NaN"
+        readonly error?: string
+      }>
+      readonly selected?: { readonly providerID: string; readonly modelID: string }
+      readonly fallback: ReadonlyArray<{ readonly providerID: string; readonly modelID: string }>
+      readonly error?: string
+    }
     readonly initiative: {
       readonly enabled: boolean
       readonly quietStart: string
@@ -3680,6 +4175,41 @@ export type ServerJarvisUpdateConfigOutput = {
   readonly plannerTimeoutMs: number
   readonly plannerIdleUnloadMs: number
   readonly plannerEscalationMinWords: number
+  readonly reactor: {
+    readonly profile: "fast" | "balanced" | "quality"
+    readonly dialogueReasoning: "off" | "on"
+    readonly plannerReasoning: "off" | "on"
+    readonly allowFallback: boolean
+  }
+  readonly benchmark: {
+    readonly status: "idle" | "running" | "completed" | "cancelled" | "error"
+    readonly profile: "fast" | "balanced" | "quality"
+    readonly startedAt?: number
+    readonly completedAt?: number
+    readonly activeModel?: { readonly providerID: string; readonly modelID: string }
+    readonly results: ReadonlyArray<{
+      readonly model: { readonly providerID: string; readonly modelID: string }
+      readonly endpoint: string
+      readonly instance: string
+      readonly testedAt: number
+      readonly expiresAt: number
+      readonly ttftMs: number
+      readonly totalMs: number
+      readonly tokensPerSecond: number | "Infinity" | "-Infinity" | "NaN"
+      readonly outputTokens: number
+      readonly context: number
+      readonly memoryBytes?: number
+      readonly ukrainian: boolean
+      readonly instructions: boolean
+      readonly toolCalling: boolean
+      readonly accepted: boolean
+      readonly score: number | "Infinity" | "-Infinity" | "NaN"
+      readonly error?: string
+    }>
+    readonly selected?: { readonly providerID: string; readonly modelID: string }
+    readonly fallback: ReadonlyArray<{ readonly providerID: string; readonly modelID: string }>
+    readonly error?: string
+  }
   readonly initiative: {
     readonly enabled: boolean
     readonly quietStart: string
@@ -3689,6 +4219,100 @@ export type ServerJarvisUpdateConfigOutput = {
     readonly topicCooldownMinutes: number
   }
   readonly updatedAt: number
+}
+
+export type ServerJarvisBenchmarkStatusOutput = {
+  readonly status: "idle" | "running" | "completed" | "cancelled" | "error"
+  readonly profile: "fast" | "balanced" | "quality"
+  readonly startedAt?: number
+  readonly completedAt?: number
+  readonly activeModel?: { readonly providerID: string; readonly modelID: string }
+  readonly results: ReadonlyArray<{
+    readonly model: { readonly providerID: string; readonly modelID: string }
+    readonly endpoint: string
+    readonly instance: string
+    readonly testedAt: number
+    readonly expiresAt: number
+    readonly ttftMs: number
+    readonly totalMs: number
+    readonly tokensPerSecond: number | "Infinity" | "-Infinity" | "NaN"
+    readonly outputTokens: number
+    readonly context: number
+    readonly memoryBytes?: number
+    readonly ukrainian: boolean
+    readonly instructions: boolean
+    readonly toolCalling: boolean
+    readonly accepted: boolean
+    readonly score: number | "Infinity" | "-Infinity" | "NaN"
+    readonly error?: string
+  }>
+  readonly selected?: { readonly providerID: string; readonly modelID: string }
+  readonly fallback: ReadonlyArray<{ readonly providerID: string; readonly modelID: string }>
+  readonly error?: string
+}
+
+export type ServerJarvisRunBenchmarkInput = {
+  readonly profile: { readonly profile: "fast" | "balanced" | "quality" }["profile"]
+}
+
+export type ServerJarvisRunBenchmarkOutput = {
+  readonly status: "idle" | "running" | "completed" | "cancelled" | "error"
+  readonly profile: "fast" | "balanced" | "quality"
+  readonly startedAt?: number
+  readonly completedAt?: number
+  readonly activeModel?: { readonly providerID: string; readonly modelID: string }
+  readonly results: ReadonlyArray<{
+    readonly model: { readonly providerID: string; readonly modelID: string }
+    readonly endpoint: string
+    readonly instance: string
+    readonly testedAt: number
+    readonly expiresAt: number
+    readonly ttftMs: number
+    readonly totalMs: number
+    readonly tokensPerSecond: number | "Infinity" | "-Infinity" | "NaN"
+    readonly outputTokens: number
+    readonly context: number
+    readonly memoryBytes?: number
+    readonly ukrainian: boolean
+    readonly instructions: boolean
+    readonly toolCalling: boolean
+    readonly accepted: boolean
+    readonly score: number | "Infinity" | "-Infinity" | "NaN"
+    readonly error?: string
+  }>
+  readonly selected?: { readonly providerID: string; readonly modelID: string }
+  readonly fallback: ReadonlyArray<{ readonly providerID: string; readonly modelID: string }>
+  readonly error?: string
+}
+
+export type ServerJarvisCancelBenchmarkOutput = {
+  readonly status: "idle" | "running" | "completed" | "cancelled" | "error"
+  readonly profile: "fast" | "balanced" | "quality"
+  readonly startedAt?: number
+  readonly completedAt?: number
+  readonly activeModel?: { readonly providerID: string; readonly modelID: string }
+  readonly results: ReadonlyArray<{
+    readonly model: { readonly providerID: string; readonly modelID: string }
+    readonly endpoint: string
+    readonly instance: string
+    readonly testedAt: number
+    readonly expiresAt: number
+    readonly ttftMs: number
+    readonly totalMs: number
+    readonly tokensPerSecond: number | "Infinity" | "-Infinity" | "NaN"
+    readonly outputTokens: number
+    readonly context: number
+    readonly memoryBytes?: number
+    readonly ukrainian: boolean
+    readonly instructions: boolean
+    readonly toolCalling: boolean
+    readonly accepted: boolean
+    readonly score: number | "Infinity" | "-Infinity" | "NaN"
+    readonly error?: string
+  }>
+  readonly selected?: { readonly providerID: string; readonly modelID: string }
+  readonly fallback: ReadonlyArray<{ readonly providerID: string; readonly modelID: string }>
+  readonly error?: string
 }
 
 export type ServerJarvisProfilesOutput = ReadonlyArray<{

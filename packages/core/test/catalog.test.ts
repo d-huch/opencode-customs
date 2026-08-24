@@ -154,6 +154,30 @@ describe("CatalogV2", () => {
     }),
   )
 
+  it.effect("keeps explicitly configured local endpoint models available without credentials", () =>
+    Effect.gen(function* () {
+      const catalog = yield* Catalog.Service
+      const integrations = yield* Integration.Service
+      const providerID = ProviderV2.ID.make("lmstudio")
+      const modelID = ModelV2.ID.make("qwen/local")
+      yield* integrations.transform((editor) => editor.update(Integration.ID.make(providerID), () => {}))
+      yield* catalog.transform((editor) => {
+        editor.provider.update(providerID, (provider) => {
+          provider.api = {
+            type: "aisdk",
+            package: "@ai-sdk/openai-compatible",
+            url: "http://127.0.0.1:1234/v1",
+          }
+        })
+        editor.model.update(providerID, modelID, () => {})
+      })
+
+      expect((yield* catalog.model.available()).map((model) => `${model.providerID}/${model.id}`)).toContain(
+        "lmstudio/qwen/local",
+      )
+    }),
+  )
+
   it.effect("normalizes model baseURL into api url", () =>
     Effect.gen(function* () {
       const catalog = yield* Catalog.Service

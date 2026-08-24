@@ -120,11 +120,11 @@ export const SettingsAvatarBridgeV2: Component<{ onNavigate?: (tab: string) => v
           <SettingsListV2>
             <SettingsRowV2
               title={status()?.available ? language.t("settings.avatarBridge.status.ready") : language.t("settings.avatarBridge.status.unavailable")}
-              description={status()?.message ?? status()?.url ?? language.t("settings.avatarBridge.status.loading")}
+              description={status()?.bootstrap?.available
+                ? language.t("settings.avatarBridge.bootstrap.ready", { port: status()?.bootstrap?.port ?? 57112 })
+                : status()?.bootstrap?.error ?? status()?.message ?? language.t("settings.avatarBridge.status.loading")}
             >
-              <ButtonV2 size="normal" variant="neutral" disabled={!status()?.url || !status()?.token} onClick={() => void copy()}>
-                {copied() ? language.t("settings.avatarBridge.copy.done") : language.t("settings.avatarBridge.copy.action")}
-              </ButtonV2>
+              <span />
             </SettingsRowV2>
             <Show when={error()}>{(value) => <SettingsRowV2 title={value()} description=""><span /></SettingsRowV2>}</Show>
             <Show when={status()?.sync}>
@@ -268,6 +268,17 @@ export const SettingsAvatarBridgeV2: Component<{ onNavigate?: (tab: string) => v
                 )}
               </For>
             </Show>
+          </SettingsListV2>
+        </div>
+
+        <div class="settings-v2-section">
+          <h3 class="settings-v2-section-title">{language.t("settings.avatarBridge.advanced.connection.title")}</h3>
+          <SettingsListV2>
+            <SettingsRowV2 title={language.t("settings.avatarBridge.copy.action")} description={language.t("settings.avatarBridge.copy.description")}>
+              <ButtonV2 size="normal" variant="neutral" disabled={!status()?.url || !status()?.token} onClick={() => void copy()}>
+                {copied() ? language.t("settings.avatarBridge.copy.done") : language.t("settings.avatarBridge.copy.action")}
+              </ButtonV2>
+            </SettingsRowV2>
           </SettingsListV2>
         </div>
 

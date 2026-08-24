@@ -10,7 +10,7 @@ namespace OpenCode.Customs.AvatarBridge
     public static class AvatarProtocol
     {
         public const int Version = 2;
-        public const int Minor = 3;
+        public const int Minor = 5;
         public const int MaxCapabilities = 128;
         public const int MaxEntities = 256;
         public const int MaxPayloadBytes = 64 * 1024;
@@ -31,6 +31,7 @@ namespace OpenCode.Customs.AvatarBridge
     }
 
     public enum AvatarRisk { Ambient, Interaction, Critical }
+    public enum AvatarConnectionMode { Auto, Manual, QuestPaired }
 
     [Serializable]
     public sealed class AvatarConnectionProfile
@@ -45,6 +46,31 @@ namespace OpenCode.Customs.AvatarBridge
         public string sessionID;
         public string profileID;
         public int profileRevision;
+        public long expiresAt;
+    }
+
+    [Serializable]
+    public sealed class AvatarBootstrapRequest
+    {
+        public string clientID;
+        public string characterID;
+        public string gameID;
+        public string saveSlotID;
+        public int protocol = AvatarProtocol.Version;
+        public int protocolMinor = AvatarProtocol.Minor;
+    }
+
+    [Serializable]
+    public sealed class AvatarDiscoveryAnnouncement
+    {
+        public string service;
+        public int version;
+        public string instanceID;
+        public int protocol;
+        public int protocolMinor;
+        public string[] addresses = Array.Empty<string>();
+        public string certificateFingerprint;
+        public long timestamp;
     }
 
     public sealed class AvatarCapabilityManifest

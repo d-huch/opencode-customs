@@ -205,6 +205,23 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
         }),
       )
       .handle(
+        "session.externalTurn",
+        Effect.fn(function* (ctx) {
+          if (!ctx.payload.idempotencyKey.trim() || ctx.payload.idempotencyKey.length > 128)
+            return yield* new ConflictError({ message: "Invalid external turn idempotency key", resource: ctx.payload.idempotencyKey.slice(0, 128) })
+          return {
+            data: yield* session.externalTurn({ sessionID: ctx.params.sessionID, ...ctx.payload }).pipe(
+              Effect.catchTag("Session.NotFoundError", (error) =>
+                Effect.fail(new SessionNotFoundError({ sessionID: error.sessionID, message: `Session not found: ${error.sessionID}` })),
+              ),
+              Effect.catchTag("Session.PromptConflictError", (error) =>
+                Effect.fail(new ConflictError({ message: "External turn idempotency conflict", resource: error.messageID })),
+              ),
+            ),
+          }
+        }),
+      )
+      .handle(
         "session.compact",
         Effect.fn(function* (ctx) {
           yield* session.compact({ sessionID: ctx.params.sessionID }).pipe(

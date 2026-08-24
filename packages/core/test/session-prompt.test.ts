@@ -99,6 +99,34 @@ const eventCount = (type: string) =>
   )
 
 describe("SessionV2.prompt", () => {
+  it.effect("records an external realtime turn exactly once without waking execution", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      wakeCalls.length = 0
+      const first = yield* session.externalTurn({
+        sessionID,
+        idempotencyKey: "nemotron-test-turn",
+        userText: "Привіт",
+        assistantText: "Вітаю!",
+      })
+      const retry = yield* session.externalTurn({
+        sessionID,
+        idempotencyKey: "nemotron-test-turn",
+        userText: "Привіт",
+        assistantText: "Вітаю!",
+      })
+      expect(retry).toEqual(first)
+      expect(wakeCalls).toEqual([])
+      expect((yield* session.message({ sessionID, messageID: first.userMessageID }))?.type).toBe("user")
+      expect(yield* session.message({ sessionID, messageID: first.assistantMessageID })).toMatchObject({
+        type: "assistant",
+        finish: "stop",
+        content: [{ type: "text", text: "Вітаю!" }],
+      })
+    }),
+  )
+
   it.effect("exposes the execution registry", () =>
     Effect.gen(function* () {
       activeSessions.add(sessionID)

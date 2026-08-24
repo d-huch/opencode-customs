@@ -20,12 +20,25 @@ const MAX_PLAN_STEPS = 8
 const MAX_ACTIONS = 8
 const MAX_CYCLE_MS = 60_000
 const plannerRuntime = { activeRequests: 0, lastUsedAt: undefined as number | undefined }
+const dialogueRuntime = { activeRequests: 0 }
 
 export const defaultConfig = (): Jarvis.Config => ({
   models: {},
   plannerTimeoutMs: 8_000,
   plannerIdleUnloadMs: 10 * 60_000,
   plannerEscalationMinWords: 18,
+  reactor: {
+    profile: "fast",
+    dialogueReasoning: "off",
+    plannerReasoning: "on",
+    allowFallback: true,
+  },
+  benchmark: {
+    status: "idle",
+    profile: "fast",
+    results: [],
+    fallback: [],
+  },
   initiative: {
     enabled: true,
     quietStart: "22:00",
@@ -39,7 +52,15 @@ export const defaultConfig = (): Jarvis.Config => ({
 
 export const getConfig = Effect.fn("JarvisRuntime.getConfig")(function* (db: Database.Interface["db"]) {
   const stored = (yield* db.select().from(JarvisConfigTable).where(eq(JarvisConfigTable.id, CONFIG_ID)).get())?.data
-  return stored ? { ...defaultConfig(), ...stored, initiative: { ...defaultConfig().initiative, ...stored.initiative } } : defaultConfig()
+  return stored
+    ? {
+        ...defaultConfig(),
+        ...stored,
+        reactor: { ...defaultConfig().reactor, ...stored.reactor },
+        benchmark: { ...defaultConfig().benchmark, ...stored.benchmark },
+        initiative: { ...defaultConfig().initiative, ...stored.initiative },
+      }
+    : defaultConfig()
 })
 
 export const updateConfig = Effect.fn("JarvisRuntime.updateConfig")(function* (
@@ -51,6 +72,11 @@ export const updateConfig = Effect.fn("JarvisRuntime.updateConfig")(function* (
     plannerTimeoutMs: Math.min(60_000, Math.max(2_000, input.plannerTimeoutMs)),
     plannerIdleUnloadMs: input.plannerIdleUnloadMs === 0 ? 0 : Math.min(60 * 60_000, Math.max(30_000, input.plannerIdleUnloadMs)),
     plannerEscalationMinWords: Math.min(100, Math.max(4, input.plannerEscalationMinWords)),
+    reactor: {
+      ...input.reactor,
+      dialogueReasoning: "off",
+      plannerReasoning: "on",
+    },
     initiative: {
       ...input.initiative,
       quietStart: validTime(input.initiative.quietStart) ? input.initiative.quietStart : "22:00",
@@ -635,6 +661,14 @@ export const cancelGoal = Effect.fn("JarvisRuntime.cancelGoal")(function* (
 
 export const status = Effect.fn("JarvisRuntime.status")(function* (db: Database.Interface["db"]) {
   const config = yield* getConfig(db)
+  const dialogueBenchmark = config.models.dialogue
+    ? config.benchmark.results.find(
+        (result) =>
+          result.model.providerID === config.models.dialogue?.providerID &&
+          result.model.modelID === config.models.dialogue.modelID,
+      )
+    : undefined
+  const dialogueVerified = !!dialogueBenchmark?.accepted && dialogueBenchmark.expiresAt > Date.now()
   const [primaryProfile, active, suspended, pending, memories] = yield* Effect.all(
     [
       profile(db, config.primaryProfileID),
@@ -648,15 +682,25 @@ export const status = Effect.fn("JarvisRuntime.status")(function* (db: Database.
   const degradedReasons = [
     ...(primaryProfile ? [] : ["No Primary Jarvis profile is configured."]),
     ...(config.models.dialogue ? [] : ["Dialogue model is not configured."]),
+    ...(config.models.dialogue && !dialogueVerified ? ["Dialogue model has not passed a current local benchmark."] : []),
     ...(config.models.planner ? [] : ["Planner model is not configured; multi-step goals will be suspended."]),
   ]
-  const modelRoles = (["dialogue", "planner", "embedding"] as const).map((role) => ({
-    role,
-    status: config.models[role] ? ("degraded" as const) : ("unconfigured" as const),
-    model: config.models[role],
-    verified: false,
-    detail: config.models[role] ? "Configured manually; runtime availability has not been verified." : undefined,
-  }))
+  const modelRoles = (["dialogue", "planner", "embedding"] as const).map((role) => {
+    const verified = role === "dialogue" && dialogueVerified
+    return {
+      role,
+      status: config.models[role] ? (verified ? ("ready" as const) : ("degraded" as const)) : ("unconfigured" as const),
+      model: config.models[role],
+      verified,
+      detail: config.models[role]
+        ? verified
+          ? "Verified by the current local model benchmark."
+          : role === "dialogue" && dialogueBenchmark?.expiresAt && dialogueBenchmark.expiresAt <= Date.now()
+            ? "The local model benchmark has expired."
+            : "Configured manually; runtime availability has not been verified."
+        : undefined,
+    }
+  })
   const remaining = yield* memoryBackfillStatus(db)
   return {
     state: degradedReasons.length === 0 ? ("ready" as const) : ("degraded" as const),
@@ -693,6 +737,18 @@ export function plannerFinished() {
   plannerRuntime.lastUsedAt = Date.now()
 }
 
+export function dialogueStarted() {
+  dialogueRuntime.activeRequests++
+}
+
+export function dialogueFinished() {
+  dialogueRuntime.activeRequests = Math.max(0, dialogueRuntime.activeRequests - 1)
+}
+
+export function hasActiveTurn() {
+  return dialogueRuntime.activeRequests > 0 || plannerRuntime.activeRequests > 0
+}
+
 export function shouldPlan(input: {
   readonly text: string
   readonly failedAttempts?: number
@@ -705,8 +761,9 @@ export function shouldPlan(input: {
     (input.failedAttempts ?? 0) > 0 ||
     input.memoryConflict === true ||
     input.critical === true ||
-    /(?:склади|створи|побудуй|план|кілька крок|спочатку.+потім|plan|multiple steps|first.+then)/iu.test(text) ||
-    text.trim().split(/\s+/u).length >= Math.max(4, input.minWords ?? 18)
+    /(?:склади|створи|побудуй|план|кілька крок|спочатку.+потім|виконай.+(?:і|після).+|plan|multiple steps|first.+then|do.+then)/iu.test(
+      text,
+    )
   )
 }
 

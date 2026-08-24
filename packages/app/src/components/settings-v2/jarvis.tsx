@@ -7,7 +7,6 @@ import { useDialog } from "@opencode-ai/ui/context/dialog"
 import type { JarvisConfig, JarvisMemoryRecord } from "@opencode-ai/sdk/v2/client"
 import { ModelSelectorPopoverV2 } from "@/components/dialog-select-model"
 import { useLanguage } from "@/context/language"
-import { useModels } from "@/context/models"
 import { useServerSDK } from "@/context/server-sdk"
 import { useSettings } from "@/context/settings"
 import { agentCatchphrases } from "@/utils/agent-personalization"
@@ -20,10 +19,10 @@ export const SettingsJarvisV2: Component<{ onNavigate?: (value: string) => void 
   const language = useLanguage()
   const serverSDK = useServerSDK()
   const settings = useSettings()
-  const models = useModels()
   const dialog = useDialog()
   const [busy, setBusy] = createSignal(false)
   const [refreshing, setRefreshing] = createSignal(false)
+  const [benchmarking, setBenchmarking] = createSignal(false)
   const [message, setMessage] = createSignal("")
   const [goalFilter, setGoalFilter] = createSignal<"active" | "suspended" | "history">("active")
   const [memorySearch, setMemorySearch] = createSignal("")
@@ -58,6 +57,38 @@ export const SettingsJarvisV2: Component<{ onNavigate?: (value: string) => void 
       }
     },
   )
+
+  const [runtimeModels, { refetch: refetchModels }] = createResource(
+    () => serverSDK(),
+    async (sdk) => {
+      await Promise.allSettled([sdk.client.provider.lmstudio.probe(), sdk.client.provider.llamaServer.probe()])
+      return sdk.client.v2.model.list().then((result) => result.data?.data ?? [])
+    },
+  )
+  const modelCatalog = {
+    list: () =>
+      (runtimeModels() ?? []).map((model) => ({
+        id: model.id,
+        name: model.name,
+        family: model.family ?? "",
+        provider: { id: model.providerID, name: model.providerID },
+        latest: false,
+        cost: model.cost[0] ? { input: model.cost[0].input } : undefined,
+        capabilities: {
+          reasoning: model.capabilities.output.includes("reasoning"),
+          input: {
+            text: model.capabilities.input.includes("text"),
+            image: model.capabilities.input.includes("image"),
+            audio: model.capabilities.input.includes("audio"),
+            video: model.capabilities.input.includes("video"),
+            pdf: model.capabilities.input.includes("pdf"),
+          },
+        },
+        limit: model.limit,
+      })),
+    visible: (model: { providerID: string; modelID: string }) =>
+      (runtimeModels() ?? []).some((item) => item.providerID === model.providerID && item.id === model.modelID),
+  } as unknown as NonNullable<Parameters<typeof ModelSelectorPopoverV2>[0]["catalog"]>
 
   const snapshots = () =>
     settings.personalization.presets().map((preset) => ({
@@ -146,6 +177,10 @@ export const SettingsJarvisV2: Component<{ onNavigate?: (value: string) => void 
   const setModel = (role: "dialogue" | "planner" | "embedding", value?: { providerID: string; modelID: string }) => {
     const config = runtime()?.status?.config
     if (!config) return
+    if (value && !modelCatalog.visible(value)) {
+      setMessage(language.t("settings.jarvis.models.verify.missing"))
+      return
+    }
     updateConfig({ models: { ...config.models, [role]: value } })
   }
 
@@ -174,6 +209,24 @@ export const SettingsJarvisV2: Component<{ onNavigate?: (value: string) => void 
       throw new Error(language.t("settings.jarvis.models.verify.missing"))
     setMessage(language.t("settings.jarvis.models.verify.ready"))
   })
+
+  const runBenchmark = async () => {
+    const profile = runtime()?.status?.config.reactor.profile ?? "fast"
+    setBenchmarking(true)
+    setMessage("")
+    await serverSDK().client.v2.jarvis
+      .runBenchmark({ jarvisBenchmarkRun: { profile } })
+      .then(() => Promise.all([Promise.resolve(refetch()), Promise.resolve(refetchModels())]))
+      .catch((error: unknown) => setMessage(error instanceof Error ? error.message : String(error)))
+      .finally(() => setBenchmarking(false))
+  }
+
+  const cancelBenchmark = async () => {
+    await serverSDK().client.v2.jarvis
+      .cancelBenchmark()
+      .then(() => refetch())
+      .catch((error: unknown) => setMessage(error instanceof Error ? error.message : String(error)))
+  }
 
   const filteredGoals = createMemo(() =>
     (runtime()?.goals ?? []).filter((goal) =>
@@ -220,7 +273,7 @@ export const SettingsJarvisV2: Component<{ onNavigate?: (value: string) => void 
     if (refreshing()) return
     setRefreshing(true)
     setMessage("")
-    await Promise.resolve(refetch())
+    await Promise.all([Promise.resolve(refetch()), Promise.resolve(refetchModels())])
       .catch((error: unknown) => setMessage(error instanceof Error ? error.message : String(error)))
       .finally(() => setRefreshing(false))
   }
@@ -338,7 +391,7 @@ export const SettingsJarvisV2: Component<{ onNavigate?: (value: string) => void 
                       {language.t("settings.jarvis.models.manual")}
                     </ButtonV2>
                     <ModelSelectorPopoverV2
-                      catalog={models}
+                      catalog={modelCatalog}
                       value={() => runtime()?.status?.config.models[role]}
                       onSelect={(model) => setModel(role, model)}
                       onManage={() => props.onNavigate?.("models")}
@@ -355,6 +408,92 @@ export const SettingsJarvisV2: Component<{ onNavigate?: (value: string) => void 
                       )}
                     />
                   </div>
+                </SettingsRowV2>
+              )}
+            </For>
+          </SettingsListV2>
+        </div>
+
+        <div class="settings-v2-section">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 class="settings-v2-section-title">{language.t("settings.jarvis.benchmark.title")}</h3>
+              <p class="settings-v2-tab-description">{language.t("settings.jarvis.benchmark.description")}</p>
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <Show when={runtime()?.status?.config.benchmark.status === "running" || benchmarking()}>
+                <ButtonV2 size="normal" variant="ghost" onClick={() => void cancelBenchmark()}>
+                  {language.t("common.cancel")}
+                </ButtonV2>
+              </Show>
+              <ButtonV2
+                size="normal"
+                variant={benchmarking() ? "loading" : "contrast"}
+                disabled={busy() || benchmarking() || runtime()?.status?.config.benchmark.status === "running"}
+                onClick={() => void runBenchmark()}
+              >
+                {benchmarking() ? language.t("settings.jarvis.benchmark.running") : language.t("settings.jarvis.benchmark.run")}
+              </ButtonV2>
+            </div>
+          </div>
+          <SettingsListV2>
+            <SettingsRowV2
+              title={language.t("settings.jarvis.benchmark.profile")}
+              description={language.t(`settings.jarvis.benchmark.profile.${runtime()?.status?.config.reactor.profile ?? "fast"}.description`)}
+            >
+              <div class="flex flex-wrap gap-2">
+                <For each={["fast", "balanced", "quality"] as const}>
+                  {(profile) => (
+                    <ButtonV2
+                      size="normal"
+                      variant={runtime()?.status?.config.reactor.profile === profile ? "contrast" : "ghost"}
+                      disabled={busy() || benchmarking()}
+                      onClick={() => {
+                        const config = runtime()?.status?.config
+                        if (config) updateConfig({ reactor: { ...config.reactor, profile } })
+                      }}
+                    >
+                      {language.t(`settings.jarvis.benchmark.profile.${profile}`)}
+                    </ButtonV2>
+                  )}
+                </For>
+              </div>
+            </SettingsRowV2>
+            <Show when={runtime()?.status?.config.benchmark.activeModel}>
+              {(model) => (
+                <SettingsRowV2
+                  title={language.t("settings.jarvis.benchmark.testing")}
+                  description={`${model().providerID}/${model().modelID}`}
+                >
+                  <span class="text-12-regular text-v2-text-text-muted">{language.t("settings.jarvis.benchmark.running")}</span>
+                </SettingsRowV2>
+              )}
+            </Show>
+            <For each={[...(runtime()?.status?.config.benchmark.results ?? [])].sort((a, b) => Number(b.score) - Number(a.score))}>
+              {(result, index) => (
+                <SettingsRowV2
+                  title={`${index() + 1}. ${result.model.providerID}/${result.model.modelID}`}
+                  description={
+                    result.accepted
+                      ? language.t("settings.jarvis.benchmark.metrics", {
+                          ttft: result.ttftMs,
+                          speed: Number(result.tokensPerSecond).toFixed(1),
+                          total: result.totalMs,
+                          memory: result.memoryBytes
+                            ? formatMemory(Number(result.memoryBytes))
+                            : language.t("settings.jarvis.benchmark.memory.unknown"),
+                        })
+                      : result.error ?? language.t("settings.jarvis.benchmark.rejected")
+                  }
+                >
+                  <span class={`text-12-medium ${result.accepted ? "text-v2-text-text-success" : "text-v2-text-text-warning"}`}>
+                    {result.accepted
+                      ? runtime()?.status?.config.benchmark.selected?.providerID === result.model.providerID &&
+                        runtime()?.status?.config.benchmark.selected?.modelID === result.model.modelID
+                        ? language.t("settings.jarvis.benchmark.active")
+                        : language.t("settings.jarvis.benchmark.verified")
+                      : language.t("settings.jarvis.benchmark.rejected")}
+                  </span>
                 </SettingsRowV2>
               )}
             </For>
@@ -674,4 +813,9 @@ function ConflictDialog(props: { resolve: (action: "keep_both" | "choose_current
     await props.resolve(action).then(() => dialog.close()).finally(() => setBusy(false))
   }
   return <DialogV2 fit><DialogHeader><DialogTitle>{language.t("settings.jarvis.memory.resolve")}</DialogTitle></DialogHeader><DialogBody><p class="text-13-regular text-v2-text-text-muted">{language.t("settings.jarvis.memory.resolve.description")}</p></DialogBody><DialogFooter><ButtonV2 variant="ghost" disabled={busy()} onClick={() => void resolve("keep_both")}>{language.t("settings.jarvis.memory.resolve.both")}</ButtonV2><ButtonV2 variant="neutral" disabled={busy()} onClick={() => void resolve("choose_other")}>{language.t("settings.jarvis.memory.resolve.other")}</ButtonV2><ButtonV2 variant={busy() ? "loading" : "contrast"} disabled={busy()} onClick={() => void resolve("choose_current")}>{language.t("settings.jarvis.memory.resolve.current")}</ButtonV2></DialogFooter></DialogV2>
+}
+
+function formatMemory(bytes: number) {
+  if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(0)} MB`
+  return `${(bytes / 1024 ** 3).toFixed(1)} GB`
 }

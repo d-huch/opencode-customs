@@ -216,7 +216,8 @@ describe("Jarvis deterministic routing", () => {
     Effect.sync(() => {
       expect(JarvisRuntime.shouldPlan({ text: "Спочатку знайди ключ, потім відкрий двері" })).toBe(true)
       expect(JarvisRuntime.shouldPlan({ text: "Як тебе звати?" })).toBe(false)
-      expect(JarvisRuntime.shouldPlan({ text: "один два три чотири", minWords: 4 })).toBe(true)
+      expect(JarvisRuntime.shouldPlan({ text: "один два три чотири", minWords: 4 })).toBe(false)
+      expect(JarvisRuntime.shouldPlan({ text: "Склади план і виконай його крок за кроком" })).toBe(true)
       expect(JarvisRuntime.plannerAcknowledgement(profile)).toContain("Прораховую")
     }),
   )

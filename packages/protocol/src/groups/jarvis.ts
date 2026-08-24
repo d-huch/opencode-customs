@@ -24,6 +24,22 @@ export const JarvisGroup = HttpApiGroup.make("server.jarvis")
     }).annotateMerge(OpenApi.annotations({ identifier: "v2.jarvis.updateConfig", summary: "Update Jarvis configuration" })),
   )
   .add(
+    HttpApiEndpoint.get("jarvis.benchmarkStatus", "/api/jarvis/benchmark", {
+      success: Jarvis.BenchmarkState,
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.jarvis.benchmarkStatus", summary: "Get Jarvis model benchmark status" })),
+  )
+  .add(
+    HttpApiEndpoint.post("jarvis.runBenchmark", "/api/jarvis/benchmark", {
+      payload: Jarvis.BenchmarkRun,
+      success: Jarvis.BenchmarkState,
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.jarvis.runBenchmark", summary: "Benchmark local Jarvis models sequentially" })),
+  )
+  .add(
+    HttpApiEndpoint.post("jarvis.cancelBenchmark", "/api/jarvis/benchmark/cancel", {
+      success: Jarvis.BenchmarkState,
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.jarvis.cancelBenchmark", summary: "Cancel a running Jarvis model benchmark" })),
+  )
+  .add(
     HttpApiEndpoint.get("jarvis.profiles", "/api/jarvis/profiles", {
       success: Schema.Array(Jarvis.ProfileSnapshot),
     }).annotateMerge(OpenApi.annotations({ identifier: "v2.jarvis.profiles", summary: "List synchronized Jarvis profiles" })),

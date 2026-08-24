@@ -20,6 +20,20 @@ namespace OpenCode.Customs.AvatarBridge
             string characterID,
             CancellationToken cancellation = default)
         {
+            return AvatarJson.Serialize(await PairProfileAsync(
+                wssAddress, pin, deviceName, certificateFingerprint, gameID, saveSlotID, characterID, cancellation));
+        }
+
+        public static async Task<AvatarConnectionProfile> PairProfileAsync(
+            string wssAddress,
+            string pin,
+            string deviceName,
+            string certificateFingerprint,
+            string gameID,
+            string saveSlotID,
+            string characterID,
+            CancellationToken cancellation = default)
+        {
             var websocket = new Uri(wssAddress);
             if (websocket.Scheme != "wss") throw new ArgumentException("Quest pairing requires a WSS address.");
             var builder = new UriBuilder(websocket) { Scheme = "https", Path = "/pair" };
@@ -42,7 +56,7 @@ namespace OpenCode.Customs.AvatarBridge
             var addresses = result["addresses"]?.ToObject<string[]>() ?? Array.Empty<string>();
             if (addresses.Length == 0 || string.IsNullOrWhiteSpace(result.Value<string>("token")))
                 throw new InvalidOperationException("Quest pairing returned an invalid device credential.");
-            return AvatarJson.Serialize(new AvatarConnectionProfile
+            var profile = new AvatarConnectionProfile
             {
                 url = addresses[0],
                 token = result.Value<string>("token"),
@@ -51,7 +65,8 @@ namespace OpenCode.Customs.AvatarBridge
                 characterID = characterID,
                 gameID = gameID,
                 saveSlotID = saveSlotID,
-            });
+            };
+            return profile;
         }
 
         sealed class PinnedCertificateHandler : CertificateHandler

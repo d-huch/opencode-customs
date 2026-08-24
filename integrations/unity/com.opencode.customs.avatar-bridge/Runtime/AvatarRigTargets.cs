@@ -4,9 +4,7 @@ using UnityEngine.Animations.Rigging;
 namespace OpenCode.Customs.AvatarBridge
 {
     /// <summary>
-    /// Stable targets for Unity Animation Rigging constraints. Assign headLookTarget to a
-    /// Multi-Aim Constraint and hand targets to Two-Bone IK constraints in the character rig.
-    /// The Bridge moves targets only; the project's rig keeps ownership of weights and anatomy.
+    /// Stable targets for humanoid gaze and Unity Animation Rigging hand constraints.
     /// </summary>
     public sealed class AvatarRigTargets : MonoBehaviour
     {
@@ -14,6 +12,8 @@ namespace OpenCode.Customs.AvatarBridge
         public Transform leftHandTarget;
         public Transform rightHandTarget;
         public Transform defaultLookTarget;
+        public AvatarHumanoidGaze gaze;
+        [HideInInspector]
         public Rig headRig;
         public Rig leftHandRig;
         public Rig rightHandRig;
@@ -41,15 +41,16 @@ namespace OpenCode.Customs.AvatarBridge
         void LateUpdate()
         {
             var delta = 1f - Mathf.Exp(-targetSmoothing * Time.unscaledDeltaTime);
-            if (Time.unscaledTime >= lookOverrideUntil && defaultLookTarget != null)
+            if (gaze == null && Time.unscaledTime >= lookOverrideUntil && defaultLookTarget != null)
             {
                 desiredLookPosition = defaultLookTarget.position;
                 CurrentGazeTarget = "player";
             }
-            if (headLookTarget != null) headLookTarget.position = Vector3.Lerp(headLookTarget.position, desiredLookPosition, delta);
+            if (gaze != null) CurrentGazeTarget = gaze.CurrentTarget;
+            if (gaze == null && headLookTarget != null) headLookTarget.position = Vector3.Lerp(headLookTarget.position, desiredLookPosition, delta);
             if (leftHandTarget != null) leftHandTarget.position = Vector3.Lerp(leftHandTarget.position, desiredLeftHandPosition, delta);
             if (rightHandTarget != null) rightHandTarget.position = Vector3.Lerp(rightHandTarget.position, desiredRightHandPosition, delta);
-            if (headRig != null) headRig.weight = Mathf.MoveTowards(headRig.weight, 1f, delta);
+            if (headRig != null) headRig.weight = gaze == null ? Mathf.MoveTowards(headRig.weight, 1f, delta) : 0f;
             UpdateHandRig(leftHandRig, Time.unscaledTime < leftPointUntil, delta);
             UpdateHandRig(rightHandRig, Time.unscaledTime < rightPointUntil, delta);
             if (Time.unscaledTime >= leftPointUntil && Time.unscaledTime >= rightPointUntil) ActiveGesture = "—";
@@ -57,6 +58,12 @@ namespace OpenCode.Customs.AvatarBridge
 
         public void LookAt(Vector3 position)
         {
+            if (gaze != null)
+            {
+                gaze.LookAt(position, lookOverrideSeconds);
+                CurrentGazeTarget = gaze.CurrentTarget;
+                return;
+            }
             desiredLookPosition = position;
             lookOverrideUntil = Time.unscaledTime + lookOverrideSeconds;
             CurrentGazeTarget = position.ToString("F2");
@@ -82,6 +89,7 @@ namespace OpenCode.Customs.AvatarBridge
             lookOverrideUntil = 0f;
             leftPointUntil = 0f;
             rightPointUntil = 0f;
+            if (gaze != null) gaze.ResetTarget();
             ActiveGesture = "—";
         }
 

@@ -5145,6 +5145,10 @@ export type ModelV2Info = {
   cost: Array<ModelCost>
   status: "alpha" | "beta" | "deprecated" | "active"
   enabled: boolean
+  runtime?: {
+    instanceID?: string
+    sizeBytes?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  }
   limit: {
     context: number
     input?: number
@@ -6746,6 +6750,49 @@ export type JarvisModelRoles = {
   embedding?: JarvisModelRef
 }
 
+export type JarvisReactorProfile = "fast" | "balanced" | "quality"
+
+export type JarvisReasoningMode = "off" | "on"
+
+export type JarvisReactorPolicy = {
+  profile: JarvisReactorProfile
+  dialogueReasoning: JarvisReasoningMode
+  plannerReasoning: JarvisReasoningMode
+  allowFallback: boolean
+}
+
+export type JarvisBenchmarkResult = {
+  model: JarvisModelRef
+  endpoint: string
+  instance: string
+  testedAt: number
+  expiresAt: number
+  ttftMs: number
+  totalMs: number
+  tokensPerSecond: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  outputTokens: number
+  context: number
+  memoryBytes?: number
+  ukrainian: boolean
+  instructions: boolean
+  toolCalling: boolean
+  accepted: boolean
+  score: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  error?: string
+}
+
+export type JarvisBenchmarkState = {
+  status: "idle" | "running" | "completed" | "cancelled" | "error"
+  profile: JarvisReactorProfile
+  startedAt?: number
+  completedAt?: number
+  activeModel?: JarvisModelRef
+  results: Array<JarvisBenchmarkResult>
+  selected?: JarvisModelRef
+  fallback: Array<JarvisModelRef>
+  error?: string
+}
+
 export type JarvisInitiativePolicy = {
   enabled: boolean
   quietStart: string
@@ -6762,6 +6809,8 @@ export type JarvisConfig = {
   plannerTimeoutMs: number
   plannerIdleUnloadMs: number
   plannerEscalationMinWords: number
+  reactor: JarvisReactorPolicy
+  benchmark: JarvisBenchmarkState
   initiative: JarvisInitiativePolicy
   updatedAt: number
 }
@@ -6800,6 +6849,10 @@ export type JarvisRuntimeStatus = {
   modelRoles: Array<JarvisModelRoleStatus>
   planner: JarvisPlannerLifecycle
   embeddings: JarvisEmbeddingBackfill
+}
+
+export type JarvisBenchmarkRun = {
+  profile: JarvisReactorProfile
 }
 
 export type JarvisProfileSync = {
@@ -12950,6 +13003,55 @@ export type V2SessionPromptResponses = {
 
 export type V2SessionPromptResponse = V2SessionPromptResponses[keyof V2SessionPromptResponses]
 
+export type V2SessionExternalTurnData = {
+  body: {
+    idempotencyKey: string
+    userText: string
+    assistantText: string
+    model?: ModelRef
+  }
+  path: {
+    sessionID: string
+  }
+  query?: never
+  url: "/api/session/{sessionID}/external-turn"
+}
+
+export type V2SessionExternalTurnErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * SessionNotFoundError
+   */
+  404: SessionNotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+}
+
+export type V2SessionExternalTurnError = V2SessionExternalTurnErrors[keyof V2SessionExternalTurnErrors]
+
+export type V2SessionExternalTurnResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: {
+      userMessageID: string
+      assistantMessageID: string
+    }
+  }
+}
+
+export type V2SessionExternalTurnResponse = V2SessionExternalTurnResponses[keyof V2SessionExternalTurnResponses]
+
 export type V2SessionCompactData = {
   body?: never
   path: {
@@ -15459,6 +15561,93 @@ export type V2JarvisUpdateConfigResponses = {
 }
 
 export type V2JarvisUpdateConfigResponse = V2JarvisUpdateConfigResponses[keyof V2JarvisUpdateConfigResponses]
+
+export type V2JarvisBenchmarkStatusData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/api/jarvis/benchmark"
+}
+
+export type V2JarvisBenchmarkStatusErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2JarvisBenchmarkStatusError = V2JarvisBenchmarkStatusErrors[keyof V2JarvisBenchmarkStatusErrors]
+
+export type V2JarvisBenchmarkStatusResponses = {
+  /**
+   * Jarvis.BenchmarkState
+   */
+  200: JarvisBenchmarkState
+}
+
+export type V2JarvisBenchmarkStatusResponse = V2JarvisBenchmarkStatusResponses[keyof V2JarvisBenchmarkStatusResponses]
+
+export type V2JarvisRunBenchmarkData = {
+  body: JarvisBenchmarkRun
+  path?: never
+  query?: never
+  url: "/api/jarvis/benchmark"
+}
+
+export type V2JarvisRunBenchmarkErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2JarvisRunBenchmarkError = V2JarvisRunBenchmarkErrors[keyof V2JarvisRunBenchmarkErrors]
+
+export type V2JarvisRunBenchmarkResponses = {
+  /**
+   * Jarvis.BenchmarkState
+   */
+  200: JarvisBenchmarkState
+}
+
+export type V2JarvisRunBenchmarkResponse = V2JarvisRunBenchmarkResponses[keyof V2JarvisRunBenchmarkResponses]
+
+export type V2JarvisCancelBenchmarkData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/api/jarvis/benchmark/cancel"
+}
+
+export type V2JarvisCancelBenchmarkErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2JarvisCancelBenchmarkError = V2JarvisCancelBenchmarkErrors[keyof V2JarvisCancelBenchmarkErrors]
+
+export type V2JarvisCancelBenchmarkResponses = {
+  /**
+   * Jarvis.BenchmarkState
+   */
+  200: JarvisBenchmarkState
+}
+
+export type V2JarvisCancelBenchmarkResponse = V2JarvisCancelBenchmarkResponses[keyof V2JarvisCancelBenchmarkResponses]
 
 export type V2JarvisProfilesData = {
   body?: never

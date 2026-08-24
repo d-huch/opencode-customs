@@ -56,7 +56,7 @@ const makeApiFromGroup = <
     .add(ReferenceGroup.middleware(locationMiddleware))
     .add(ProjectCopyGroup.middleware(locationMiddleware))
     .add(RepositoryMapGroup.middleware(locationMiddleware))
-    .add(JarvisGroup)
+    .add(JarvisGroup.middleware(locationMiddleware))
     .annotateMerge(
       OpenApi.annotations({
         title: "opencode HttpApi",

@@ -5,7 +5,12 @@
     "Unity.AI.Navigation",
     "Unity.Animation.Rigging",
     "Unity.InputSystem",
-    "Unity.Newtonsoft.Json"
+    "Unity.Newtonsoft.Json",
+    "Unity.TextMeshPro",
+    "Unity.ugui",
+    "Unity.XR.Hands",
+    "Unity.XR.Interaction.Toolkit",
+    "Unity.XR.Management"
   ],
   "autoReferenced": true
 }

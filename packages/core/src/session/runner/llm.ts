@@ -1,6 +1,5 @@
 import {
   LLM,
-  LLMClient,
   LLMError,
   LLMEvent,
   Message,
@@ -8,6 +7,7 @@ import {
   isContextOverflowFailure,
   type ProviderErrorEvent,
 } from "@opencode-ai/llm"
+import { LLMClient } from "@opencode-ai/llm/route"
 import { Cause, DateTime, Effect, FiberSet, Layer, Option, Schema, Semaphore, Stream } from "effect"
 import { AgentV2 } from "../../agent"
 import { Config } from "../../config"
@@ -304,27 +304,66 @@ const layer = Layer.effect(
         ? yield* JarvisRuntime.profile(db, session.jarvis?.profileID).pipe(Effect.orDie)
         : undefined
       const dialogueModel = chat ? jarvisConfig?.models.dialogue : undefined
-      const model = yield* models.resolve(
-        dialogueModel
-          ? {
-              ...session,
-              model: {
-                providerID: ProviderV2.ID.make(dialogueModel.providerID),
-                id: ModelV2.ID.make(dialogueModel.modelID),
-                variant: ModelV2.VariantID.make("default"),
-              },
-            }
-          : session,
-      )
+      const dialogueCandidates = dialogueModel
+        ? [
+            dialogueModel,
+            ...((jarvisConfig?.reactor.allowFallback ? jarvisConfig.benchmark.fallback : []) ?? []).filter(
+              (candidate) =>
+                (candidate.providerID !== dialogueModel.providerID || candidate.modelID !== dialogueModel.modelID) &&
+                jarvisConfig?.benchmark.results.some(
+                  (result) =>
+                    result.accepted &&
+                    result.expiresAt > Date.now() &&
+                    result.model.providerID === candidate.providerID &&
+                    result.model.modelID === candidate.modelID,
+                ),
+            ),
+          ]
+        : []
+      const resolvedDialogue = dialogueCandidates.length
+        ? (yield* Effect.forEach(
+            dialogueCandidates,
+            (candidate) =>
+              models
+                .resolve({
+                  ...session,
+                  model: {
+                    providerID: ProviderV2.ID.make(candidate.providerID),
+                    id: ModelV2.ID.make(candidate.modelID),
+                    variant: ModelV2.VariantID.make("default"),
+                  },
+                })
+                .pipe(Effect.option),
+            { concurrency: 1 },
+          )).find(Option.isSome)
+        : undefined
+      const model = resolvedDialogue
+        ? resolvedDialogue.value
+        : yield* models.resolve(
+            dialogueModel
+              ? {
+                  ...session,
+                  model: {
+                    providerID: ProviderV2.ID.make(dialogueModel.providerID),
+                    id: ModelV2.ID.make(dialogueModel.modelID),
+                    variant: ModelV2.VariantID.make("default"),
+                  },
+                }
+              : session,
+          )
       const entries = yield* SessionHistory.entriesForRunner(db, session.id, system.baselineSeq)
       const context = entries.map((entry) => entry.message)
       const latestUser = context.findLast((message) => message.type === "user")
+      const complexJarvisIntent =
+        chat && latestUser?.type === "user"
+          ? JarvisRuntime.shouldPlan({ text: latestUser.text, minWords: jarvisConfig?.plannerEscalationMinWords })
+          : false
       const jarvisMemory =
         chat && latestUser?.type === "user" && jarvisProfile
           ? yield* JarvisRuntime.searchMemory(db, {
               query: latestUser.text,
               profileID: jarvisProfile.id,
-              limit: 12,
+              limit: complexJarvisIntent ? 12 : 4,
             }).pipe(Effect.orDie)
           : []
       const jarvisGoals = chat
@@ -338,7 +377,7 @@ const layer = Layer.effect(
         chat &&
         latestUser?.type === "user" &&
         jarvisProfile &&
-        JarvisRuntime.shouldPlan({ text: latestUser.text, minWords: jarvisConfig?.plannerEscalationMinWords }) &&
+        complexJarvisIntent &&
         !jarvisGoals.some((goal) => goal.objective === latestUser.text)
           ? yield* Effect.gen(function* () {
               const goal = yield* JarvisRuntime.createGoal(db, {
@@ -374,6 +413,10 @@ const layer = Layer.effect(
               const planned = yield* LLM.generateObject({
                 model: plannerModel.value,
                 schema: PlannerOutput,
+                generation: { maxTokens: 1_024, temperature: 0.1 },
+                providerOptions: {
+                  openai: { reasoningEffort: jarvisConfig?.reactor.plannerReasoning === "on" ? "high" : "none" },
+                },
                 system: [
                   "You are the hidden Jarvis planner. Never address the user and never execute actions.",
                   "Return a bounded plan with one to eight steps. Each step names one capability-like action, JSON arguments, and observable postconditions.",
@@ -389,6 +432,11 @@ const layer = Layer.effect(
                   ),
                 ],
               }).pipe(
+                // The runner closes over its location-scoped client when the service is built.
+                // `LLM.generateObject` resolves that client from the Effect environment, so
+                // provide the captured instance explicitly when this method runs later from
+                // the process-global Session coordinator.
+                Effect.provideService(LLMClient.Service, llm),
                 Effect.timeout(jarvisConfig?.plannerTimeoutMs ?? 8_000),
                 Effect.option,
                 Effect.ensuring(Effect.sync(JarvisRuntime.plannerFinished)),
@@ -469,14 +517,22 @@ const layer = Layer.effect(
       const promptCacheKey = /^ses_[0-9a-f]{64}$/.test(session.id) ? session.id.slice(4) : session.id
       const request = LLM.request({
         model,
-        providerOptions: { openai: { promptCacheKey } },
+        generation: chat && !plannedGoal ? { maxTokens: 384 } : undefined,
+        providerOptions: {
+          openai: {
+            promptCacheKey,
+            ...(chat
+              ? { reasoningEffort: jarvisConfig?.reactor.dialogueReasoning === "on" ? "high" : "none" }
+              : {}),
+          },
+        },
         system: [
-          responseControl,
           chat ? CHAT_SYSTEM_PROMPT : agent.info?.system,
           system.baseline,
           renderJarvisMemory(jarvisMemory),
           renderJarvisGoals(currentJarvisGoals),
           routed?.text,
+          responseControl,
         ]
           .filter((part): part is string => part !== undefined && part.length > 0)
           .map(SystemPart.make),
@@ -502,6 +558,7 @@ const layer = Layer.effect(
       const publish = (event: LLMEvent, outputPaths: ReadonlyArray<string> = []) =>
         withPublication(publisher.publish(event, outputPaths))
       let overflowFailure: ProviderErrorEvent | undefined
+      if (chat) JarvisRuntime.dialogueStarted()
       const providerStream = llm.stream(request).pipe(
         Stream.runForEach((event) =>
           Effect.gen(function* () {
@@ -550,6 +607,7 @@ const layer = Layer.effect(
           }),
         ),
         Effect.ensuring(withPublication(publisher.flush())),
+        Effect.ensuring(chat ? Effect.sync(JarvisRuntime.dialogueFinished) : Effect.void),
       )
 
       return yield* Effect.uninterruptibleMask((restore) =>

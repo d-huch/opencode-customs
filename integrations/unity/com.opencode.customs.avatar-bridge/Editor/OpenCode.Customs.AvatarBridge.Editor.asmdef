@@ -1,0 +1,9 @@
+{
+  "name": "OpenCode.Customs.AvatarBridge.Editor",
+  "rootNamespace": "OpenCode.Customs.AvatarBridge.Editor",
+  "references": [
+    "OpenCode.Customs.AvatarBridge"
+  ],
+  "includePlatforms": ["Editor"],
+  "autoReferenced": true
+}

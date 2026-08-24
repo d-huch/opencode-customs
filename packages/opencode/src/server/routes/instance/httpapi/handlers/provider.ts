@@ -12,11 +12,17 @@ import { ProviderAuthApiError } from "../groups/provider"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { probeLmStudio } from "@/local-agent-runtime/lmstudio"
 import { probeLlamaServer } from "@/local-agent-runtime/llama-server"
+import { syncLlamaServerCatalog, syncLmStudioCatalog } from "@/local-agent-runtime/model-catalog"
 import { snapshot } from "@/local-agent-runtime/resource-governor"
 import { CapabilityRouter } from "@/local-agent-runtime/capability-router"
 import { Database } from "@opencode-ai/core/database/database"
 import { SessionExecutionCheckpoint } from "@opencode-ai/core/session/execution-checkpoint"
 import { SessionExecutionBudget } from "@/session/execution-budget"
+import { Catalog } from "@opencode-ai/core/catalog"
+import { LocationServiceMap } from "@opencode-ai/core/location-services"
+import { Location } from "@opencode-ai/core/location"
+import { AbsolutePath } from "@opencode-ai/core/schema"
+import * as InstanceState from "@/effect/instance-state"
 
 function mapProviderAuthError<A, R>(self: Effect.Effect<A, ProviderAuth.Error, R>) {
   return self.pipe(
@@ -44,6 +50,15 @@ export const providerHandlers = HttpApiBuilder.group(InstanceHttpApi, "provider"
     const provider = yield* Provider.Service
     const svc = yield* ProviderAuth.Service
     const database = yield* Database.Service
+    const locations = yield* LocationServiceMap.Service
+
+    const locationCatalog = Effect.fnUntraced(function* <A, E, R>(effect: Effect.Effect<A, E, R>) {
+      return yield* effect.pipe(
+        Effect.provide(
+          locations.get(Location.Ref.make({ directory: AbsolutePath.make((yield* InstanceState.context).directory) })),
+        ),
+      )
+    })
 
     const list = Effect.fn("ProviderHttpApi.list")(function* () {
       const config = yield* cfg.get()
@@ -84,23 +99,40 @@ export const providerHandlers = HttpApiBuilder.group(InstanceHttpApi, "provider"
     const lmStudioProbe = Effect.fn("ProviderHttpApi.lmStudioProbe")(function* () {
       const config = yield* cfg.get()
       const info = config.provider?.lmstudio
-      return yield* Effect.promise(() =>
+      const probe = yield* Effect.promise(() =>
         probeLmStudio({
           baseURL: info?.options?.baseURL,
           apiKey: info?.options?.apiKey,
+          refresh: true,
         }),
       )
+      if (probe.status === "ready" || probe.status === "degraded") {
+        yield* locationCatalog(
+          Effect.gen(function* () {
+            yield* syncLmStudioCatalog(yield* Catalog.Service, probe)
+          }),
+        )
+      }
+      return probe
     })
 
     const llamaServerProbe = Effect.fn("ProviderHttpApi.llamaServerProbe")(function* () {
       const config = yield* cfg.get()
       const info = config.provider?.["llama-server"]
-      return yield* Effect.promise(() =>
+      const probe = yield* Effect.promise(() =>
         probeLlamaServer({
           baseURL: info?.options?.baseURL,
           apiKey: info?.options?.apiKey,
         }),
       )
+      if (["ready", "degraded", "loading"].includes(probe.status)) {
+        yield* locationCatalog(
+          Effect.gen(function* () {
+            yield* syncLlamaServerCatalog(yield* Catalog.Service, probe)
+          }),
+        )
+      }
+      return probe
     })
 
     const resourceGovernor = Effect.fn("ProviderHttpApi.resourceGovernor")(function* () {

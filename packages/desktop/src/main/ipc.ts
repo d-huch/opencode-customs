@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process"
-import { copyFile, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
+import { stat } from "node:fs/promises"
 import { basename, join } from "node:path"
 import { app, BrowserWindow, Notification, clipboard, dialog, ipcMain, shell, systemPreferences } from "electron"
 import type { IpcMainEvent, IpcMainInvokeEvent } from "electron"
@@ -54,6 +54,8 @@ import {
 } from "./voice-diagnostics"
 import { createDesktopDraftStore } from "./draft-store"
 import { nativeT } from "./native-translations"
+import { createAvatarModelStore } from "./avatar-model"
+import type { NemotronVoiceController, NemotronVoiceEngine, NemotronVoiceStatus } from "./nemotron-voice"
 
 const pickerFilters = (ext?: string[]) => {
   if (!ext || ext.length === 0) return undefined
@@ -61,10 +63,6 @@ const pickerFilters = (ext?: string[]) => {
 }
 
 const pickedFiles = createPickedFileAuthorizations()
-
-const avatarModelDirectory = () => join(app.getPath("userData"), "avatar")
-const avatarModelPath = () => join(avatarModelDirectory(), "jarvis.vrm")
-const avatarModelMetadataPath = () => join(avatarModelDirectory(), "jarvis.json")
 
 type Deps = {
   killSidecar: () => Promise<void> | void
@@ -120,16 +118,32 @@ type Deps = {
     input: string | { text?: string; pinned?: boolean; confidence?: number; importance?: number },
   ) => Promise<unknown>
   clearAvatarBridgeMemories: (filter?: { gameID?: string; saveSlotID?: string; characterID?: string }) => Promise<unknown>
+  getNemotronVoiceStatus: () => Promise<NemotronVoiceStatus>
+  configureNemotronVoice: (input: { engine: NemotronVoiceEngine; systemPrompt?: string }) => Promise<NemotronVoiceStatus>
+  installNemotronVoice: () => Promise<NemotronVoiceStatus>
+  startNemotronVoice: () => Promise<NemotronVoiceStatus>
+  stopNemotronVoice: () => Promise<void>
+  beginNemotronVoice: Parameters<NemotronVoiceController["begin"]>[0] extends infer Input ? (input: Input) => Promise<void> : never
+  appendNemotronVoice: Parameters<NemotronVoiceController["append"]>[0] extends infer Input ? (input: Input) => boolean : never
+  commitNemotronVoice: (requestID: string) => Promise<void>
+  cancelNemotronVoice: (requestID?: string) => Promise<void>
+  subscribeNemotronVoice: NemotronVoiceController["subscribe"]
 }
 
 export function registerIpcHandlers(deps: Deps) {
   const drafts = createDesktopDraftStore(join(app.getPath("userData"), "drafts.sqlite"))
+  const avatarModels = createAvatarModelStore({
+    userDataPath: app.getPath("userData"),
+    bundledModelPath: join(app.getAppPath(), "resources", "avatar", "Vita.vrm"),
+  })
   const updaterSubscriptions = createUpdaterSubscriptions()
   const nativeVoice = createNativeVoiceController()
   const localSpeech = new Map<number, AbortController>()
   app.once("will-quit", updaterSubscriptions.clear)
   app.once("will-quit", () => nativeVoice.stopAll())
   app.once("will-quit", () => localSpeech.forEach((request) => request.abort()))
+  const nemotronSubscriptions = new Map<number, () => void>()
+  app.once("will-quit", () => nemotronSubscriptions.forEach((unsubscribe) => unsubscribe()))
   app.on("before-quit", () => drafts.flush())
   app.once("will-quit", () => drafts.close())
   app.on("browser-window-created", (_event, win) => win.on("session-end", () => drafts.flush()))
@@ -173,6 +187,37 @@ export function registerIpcHandlers(deps: Deps) {
   ipcMain.handle("show-research-browser", () => deps.showResearchBrowser())
   ipcMain.handle("clear-research-browser-data", () => deps.clearResearchBrowserData())
   ipcMain.handle("get-avatar-bridge-status", () => deps.getAvatarBridgeStatus())
+  ipcMain.handle("get-nemotron-voice-status", () => deps.getNemotronVoiceStatus())
+  ipcMain.handle("configure-nemotron-voice", (_event, input: { engine: NemotronVoiceEngine; systemPrompt?: string }) =>
+    deps.configureNemotronVoice(input),
+  )
+  ipcMain.handle("install-nemotron-voice", () => deps.installNemotronVoice())
+  ipcMain.handle("start-nemotron-voice", () => deps.startNemotronVoice())
+  ipcMain.handle("stop-nemotron-voice", () => deps.stopNemotronVoice())
+  ipcMain.handle("begin-nemotron-voice", (_event, input: Parameters<NemotronVoiceController["begin"]>[0]) =>
+    deps.beginNemotronVoice(input),
+  )
+  ipcMain.on("append-nemotron-voice", (_event, input: Parameters<NemotronVoiceController["append"]>[0]) => {
+    deps.appendNemotronVoice(input)
+  })
+  ipcMain.handle("commit-nemotron-voice", (_event, requestID: string) => deps.commitNemotronVoice(requestID))
+  ipcMain.handle("cancel-nemotron-voice", (_event, requestID?: string) => deps.cancelNemotronVoice(requestID))
+  ipcMain.handle("subscribe-nemotron-voice", (event) => {
+    const id = event.sender.id
+    nemotronSubscriptions.get(id)?.()
+    nemotronSubscriptions.set(id, deps.subscribeNemotronVoice((value) => {
+      if (event.sender.isDestroyed()) return
+      event.sender.send("nemotron-voice-event", value)
+    }))
+    event.sender.once("destroyed", () => {
+      nemotronSubscriptions.get(id)?.()
+      nemotronSubscriptions.delete(id)
+    })
+  })
+  ipcMain.handle("unsubscribe-nemotron-voice", (event) => {
+    nemotronSubscriptions.get(event.sender.id)?.()
+    nemotronSubscriptions.delete(event.sender.id)
+  })
   ipcMain.handle("route-avatar-speech", (_event: IpcMainInvokeEvent, sessionID: string, text: string) => {
     if (!sessionID || !text || text.length > 100_000) throw new Error("Invalid avatar speech request")
     return deps.routeAvatarSpeech(sessionID, text)
@@ -186,37 +231,10 @@ export function registerIpcHandlers(deps: Deps) {
     if (result.canceled) return null
     const source = result.filePaths[0]
     if (!source) return null
-    const info = await stat(source)
-    if (info.size > 100 * 1024 * 1024) throw new Error("VRM model exceeds the 100 MB limit")
-    await mkdir(avatarModelDirectory(), { recursive: true })
-    const temporary = `${avatarModelPath()}.tmp`
-    await copyFile(source, temporary)
-    await rename(temporary, avatarModelPath())
-    const updatedAt = Date.now()
-    await writeFile(
-      avatarModelMetadataPath(),
-      JSON.stringify({ name: basename(source), bytes: info.size, updatedAt }),
-    )
-    return { name: basename(source), bytes: info.size, updatedAt }
+    return avatarModels.install(source)
   })
-  ipcMain.handle("get-avatar-model", async () => {
-    const [data, metadata] = await Promise.all([
-      readFile(avatarModelPath()).catch(() => undefined),
-      readFile(avatarModelMetadataPath(), "utf8")
-        .then((value) => JSON.parse(value) as { name: string; bytes: number; updatedAt: number })
-        .catch(() => undefined),
-    ])
-    if (!data) return null
-    return {
-      data: data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength),
-      name: metadata?.name ?? "Jarvis.vrm",
-      bytes: metadata?.bytes ?? data.byteLength,
-      updatedAt: metadata?.updatedAt ?? 0,
-    }
-  })
-  ipcMain.handle("clear-avatar-model", async () => {
-    await Promise.all([rm(avatarModelPath(), { force: true }), rm(avatarModelMetadataPath(), { force: true })])
-  })
+  ipcMain.handle("get-avatar-model", () => avatarModels.get())
+  ipcMain.handle("clear-avatar-model", () => avatarModels.clear())
   ipcMain.handle("update-avatar-bridge-config", (_event: IpcMainInvokeEvent, input) =>
     deps.updateAvatarBridgeConfig(input),
   )

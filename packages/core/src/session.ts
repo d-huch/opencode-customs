@@ -39,6 +39,7 @@ import { Revert } from "@opencode-ai/schema/revert"
 import { FSUtil } from "./fs-util"
 import { SessionDurable } from "@opencode-ai/schema/durable-event-manifest"
 import { Jarvis } from "@opencode-ai/schema/jarvis"
+import { Hash } from "./util/hash"
 
 export const RevertState = Revert.State
 export type RevertState = Revert.State
@@ -160,6 +161,16 @@ export interface Interface {
     delivery?: SessionInput.Delivery
     resume?: boolean
   }) => Effect.Effect<SessionInput.Admitted, NotFoundError | PromptConflictError>
+  readonly externalTurn: (input: {
+    sessionID: SessionSchema.ID
+    idempotencyKey: string
+    userText: string
+    assistantText: string
+    model?: ModelV2.Ref
+  }) => Effect.Effect<{
+    userMessageID: SessionMessage.ID
+    assistantMessageID: SessionMessage.ID
+  }, NotFoundError | PromptConflictError>
   readonly shell: (input: {
     id?: EventV2.ID
     sessionID: SessionSchema.ID
@@ -432,6 +443,70 @@ const layer = Layer.effect(
               return yield* new PromptConflictError({ sessionID: input.sessionID, messageID })
             if (input.resume !== false) yield* execution.wake(admitted.sessionID)
             return admitted
+          }),
+        ),
+      ),
+      externalTurn: Effect.fn("V2Session.externalTurn")((input) =>
+        Effect.uninterruptible(
+          Effect.gen(function* () {
+            yield* result.get(input.sessionID)
+            const suffix = Hash.sha256(`${input.sessionID}\u0000${input.idempotencyKey}`).slice(0, 40)
+            const userMessageID = SessionMessage.ID.make(`msg_external_user_${suffix}`)
+            const assistantMessageID = SessionMessage.ID.make(`msg_external_assistant_${suffix}`)
+            const existingUser = yield* result.message({ sessionID: input.sessionID, messageID: userMessageID })
+            const existingAssistant = yield* result.message({ sessionID: input.sessionID, messageID: assistantMessageID })
+            if (existingUser && (existingUser.type !== "user" || existingUser.text !== input.userText))
+              return yield* new PromptConflictError({ sessionID: input.sessionID, messageID: userMessageID })
+            if (
+              existingAssistant &&
+              (existingAssistant.type !== "assistant" ||
+                existingAssistant.content.find((part) => part.type === "text")?.text !== input.assistantText)
+            )
+              return yield* new PromptConflictError({ sessionID: input.sessionID, messageID: assistantMessageID })
+            if (!existingUser)
+              yield* events.publish(SessionEvent.Prompted, {
+                sessionID: input.sessionID,
+                messageID: userMessageID,
+                timestamp: yield* DateTime.now,
+                prompt: Prompt.make({ text: input.userText }),
+                delivery: "steer",
+              })
+            if (!existingAssistant) {
+              const model = input.model ?? ModelV2.Ref.make({
+                providerID: ProviderV2.ID.make("nemotron"),
+                id: ModelV2.ID.make("OsaurusAI/NemotronLabs-VoiceChat-11B-MXFP8"),
+              })
+              const textID = `text_external_${suffix}`
+              yield* events.publish(SessionEvent.Step.Started, {
+                sessionID: input.sessionID,
+                assistantMessageID,
+                timestamp: yield* DateTime.now,
+                agent: "chat",
+                model,
+              })
+              yield* events.publish(SessionEvent.Text.Started, {
+                sessionID: input.sessionID,
+                assistantMessageID,
+                timestamp: yield* DateTime.now,
+                textID,
+              })
+              yield* events.publish(SessionEvent.Text.Ended, {
+                sessionID: input.sessionID,
+                assistantMessageID,
+                timestamp: yield* DateTime.now,
+                textID,
+                text: input.assistantText,
+              })
+              yield* events.publish(SessionEvent.Step.Ended, {
+                sessionID: input.sessionID,
+                assistantMessageID,
+                timestamp: yield* DateTime.now,
+                finish: "stop",
+                cost: 0,
+                tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+              })
+            }
+            return { userMessageID, assistantMessageID }
           }),
         ),
       ),

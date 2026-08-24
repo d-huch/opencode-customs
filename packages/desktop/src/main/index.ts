@@ -60,6 +60,7 @@ import { startResearchBrowser, type ResearchBrowserController } from "./research
 import { startAvatarBridge, type AvatarBridgeController } from "./avatar-bridge"
 import { startPCMRecognition } from "./native-voice"
 import { synthesizeLocalSpeech } from "./local-tts"
+import { createNemotronVoiceController, type NemotronVoiceController } from "./nemotron-voice"
 
 const APP_NAMES: Record<string, string> = {
   dev: "OpenCode Dev",
@@ -79,6 +80,7 @@ let logger: ReturnType<typeof initLogging>
 let server: SidecarListener | null = null
 let researchBrowser: ResearchBrowserController | undefined
 let avatarBridge: AvatarBridgeController | undefined
+let nemotronVoice: NemotronVoiceController | undefined
 
 const pendingDeepLinks: string[] = []
 
@@ -183,6 +185,8 @@ const main = Effect.gen(function* () {
     researchBrowser = undefined
     await avatarBridge?.stop()
     avatarBridge = undefined
+    await nemotronVoice?.stop()
+    nemotronVoice = undefined
     wslServers.stopAll()
   }
   const relaunch = () => {
@@ -284,12 +288,17 @@ const main = Effect.gen(function* () {
     process.env.OPENCODE_RESEARCH_BROWSER_URL = researchBrowser.url
     process.env.OPENCODE_RESEARCH_BROWSER_TOKEN = researchBrowser.token
   }
+  nemotronVoice = createNemotronVoiceController({
+    stateDirectory: join(app.getPath("userData"), "nemotron-voice"),
+    log: writeLog,
+  })
   avatarBridge = yield* Effect.promise(() =>
     startAvatarBridge({
       stateDirectory: join(app.getPath("userData"), "avatar-bridge"),
       log: writeLog,
       synthesize: synthesizeLocalSpeech,
       startRecognition: startPCMRecognition,
+      nemotronVoice,
     }),
   ).pipe(
     Effect.catch((error) =>
@@ -396,6 +405,22 @@ const main = Effect.gen(function* () {
       avatarBridge?.updateMemory(id, text) ?? Promise.reject(new Error("Unity Avatar Bridge is unavailable")),
     clearAvatarBridgeMemories: (filter) =>
       avatarBridge?.clearMemories(filter) ?? Promise.reject(new Error("Unity Avatar Bridge is unavailable")),
+    getNemotronVoiceStatus: () =>
+      nemotronVoice?.status() ?? Promise.reject(new Error("Nemotron voice runtime is unavailable")),
+    configureNemotronVoice: (input) =>
+      nemotronVoice?.configure(input) ?? Promise.reject(new Error("Nemotron voice runtime is unavailable")),
+    installNemotronVoice: () =>
+      nemotronVoice?.install() ?? Promise.reject(new Error("Nemotron voice runtime is unavailable")),
+    startNemotronVoice: () =>
+      nemotronVoice?.start() ?? Promise.reject(new Error("Nemotron voice runtime is unavailable")),
+    stopNemotronVoice: () => nemotronVoice?.stop() ?? Promise.resolve(),
+    beginNemotronVoice: (input) =>
+      nemotronVoice?.begin(input) ?? Promise.reject(new Error("Nemotron voice runtime is unavailable")),
+    appendNemotronVoice: (input) => nemotronVoice?.append(input) ?? false,
+    commitNemotronVoice: (requestID) =>
+      nemotronVoice?.commit(requestID) ?? Promise.reject(new Error("Nemotron voice runtime is unavailable")),
+    cancelNemotronVoice: (requestID) => nemotronVoice?.cancel(requestID) ?? Promise.resolve(),
+    subscribeNemotronVoice: (listener) => nemotronVoice?.subscribe(listener) ?? (() => undefined),
     recordFatalRendererError: (error) => writeLog("renderer", "fatal renderer error", { ...error }, "error"),
     setNativeTranslations: (bundle) => {
       if (setNativeTranslations(bundle)) createMenu(menuDeps)

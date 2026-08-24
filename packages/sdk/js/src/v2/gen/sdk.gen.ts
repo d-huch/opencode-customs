@@ -92,6 +92,7 @@ import type {
   GlobalUpgradeResponses,
   InstanceDisposeErrors,
   InstanceDisposeResponses,
+  JarvisBenchmarkRun,
   JarvisConfig,
   JarvisGoalCancel,
   JarvisGoalCreate,
@@ -330,6 +331,10 @@ import type {
   V2IntegrationGetResponses,
   V2IntegrationListErrors,
   V2IntegrationListResponses,
+  V2JarvisBenchmarkStatusErrors,
+  V2JarvisBenchmarkStatusResponses,
+  V2JarvisCancelBenchmarkErrors,
+  V2JarvisCancelBenchmarkResponses,
   V2JarvisCancelGoalErrors,
   V2JarvisCancelGoalResponses,
   V2JarvisCompleteGoalErrors,
@@ -366,6 +371,8 @@ import type {
   V2JarvisResumeGoalResponses,
   V2JarvisRetryInboxErrors,
   V2JarvisRetryInboxResponses,
+  V2JarvisRunBenchmarkErrors,
+  V2JarvisRunBenchmarkResponses,
   V2JarvisSearchMemoryErrors,
   V2JarvisSearchMemoryResponses,
   V2JarvisStatusErrors,
@@ -448,6 +455,8 @@ import type {
   V2SessionDeleteResponses,
   V2SessionEventsErrors,
   V2SessionEventsResponses,
+  V2SessionExternalTurnErrors,
+  V2SessionExternalTurnResponses,
   V2SessionGetErrors,
   V2SessionGetResponses,
   V2SessionHistoryErrors,
@@ -6108,6 +6117,51 @@ export class Session3 extends HeyApiClient {
   }
 
   /**
+   * Record an external realtime turn
+   *
+   * Idempotently record a completed external user/assistant turn without provider execution.
+   */
+  public externalTurn<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      idempotencyKey?: string
+      userText?: string
+      assistantText?: string
+      model?: ModelRef
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "body", key: "idempotencyKey" },
+            { in: "body", key: "userText" },
+            { in: "body", key: "assistantText" },
+            { in: "body", key: "model" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      V2SessionExternalTurnResponses,
+      V2SessionExternalTurnErrors,
+      ThrowOnError
+    >({
+      url: "/api/session/{sessionID}/external-turn",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
    * Compact session
    *
    * Compact a session conversation.
@@ -7875,6 +7929,54 @@ export class Jarvis extends HeyApiClient {
         ...params.headers,
       },
     })
+  }
+
+  /**
+   * Get Jarvis model benchmark status
+   */
+  public benchmarkStatus<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<
+      V2JarvisBenchmarkStatusResponses,
+      V2JarvisBenchmarkStatusErrors,
+      ThrowOnError
+    >({ url: "/api/jarvis/benchmark", ...options })
+  }
+
+  /**
+   * Benchmark local Jarvis models sequentially
+   */
+  public runBenchmark<ThrowOnError extends boolean = false>(
+    parameters: {
+      jarvisBenchmarkRun: JarvisBenchmarkRun
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ key: "jarvisBenchmarkRun", map: "body" }] }])
+    return (options?.client ?? this.client).post<
+      V2JarvisRunBenchmarkResponses,
+      V2JarvisRunBenchmarkErrors,
+      ThrowOnError
+    >({
+      url: "/api/jarvis/benchmark",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Cancel a running Jarvis model benchmark
+   */
+  public cancelBenchmark<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).post<
+      V2JarvisCancelBenchmarkResponses,
+      V2JarvisCancelBenchmarkErrors,
+      ThrowOnError
+    >({ url: "/api/jarvis/benchmark/cancel", ...options })
   }
 
   /**

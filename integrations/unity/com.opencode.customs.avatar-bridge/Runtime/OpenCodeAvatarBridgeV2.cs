@@ -18,16 +18,24 @@ namespace OpenCode.Customs.AvatarBridge
 
     public sealed class OpenCodeAvatarBridgeV2 : MonoBehaviour
     {
-        [Header("Connection copied from OpenCode Customs > Avatar & VR")]
-        [TextArea(5, 14)] public string connectionJson;
+        [Header("Connection")]
+        public AvatarConnectionMode connectionMode = AvatarConnectionMode.Auto;
+        public string clientID = "jarvis-lab-pcvr";
+        public string characterID = "jarvis";
+        public string gameID = "jarvis-lab";
+        public string saveSlotID = "slot-1";
+        public string bootstrapUrl = AvatarBootstrap.DefaultUrl;
         public bool connectOnStart = true;
+
+        [Header("Advanced manual connection")]
+        [TextArea(5, 14)] public string connectionJson;
 
         [Header("World and capabilities")]
         public AvatarCapabilityRegistry capabilityRegistry;
         public AvatarWorldSensor worldSensor;
 
         [Header("Voice")]
-        public bool receiveVoice;
+        public bool receiveVoice = true;
         public AudioSource audioSource;
         public string voiceProvider = "fish-local";
         public string fishPresetID;
@@ -35,7 +43,7 @@ namespace OpenCode.Customs.AvatarBridge
         public string voiceModel = "fish-speech-s2-pro";
         public string voiceName = "default";
 
-        [Header("Quest microphone → Mac STT (protocol v2.3)")]
+        [Header("Quest microphone → Mac realtime voice (protocol v2.5)")]
         public bool enableMicrophoneStreaming = true;
         public bool handsFree;
         public string microphoneDevice;
@@ -45,21 +53,24 @@ namespace OpenCode.Customs.AvatarBridge
         public string speechLocale = "uk-UA";
 
         [Header("Events")]
-        public AvatarStringEvent onConnected;
-        public AvatarStringEvent onAssistantText;
-        public AvatarStringEvent onError;
-        public AvatarApprovalEvent onApprovalRequested;
-        public AvatarStringEvent onGoalChanged;
-        public AvatarVisemeEvent onViseme;
-        public AvatarEmotionEvent onSpeechEmotion;
-        public AvatarStringEvent onAssistantState;
-        public AvatarStringEvent onTranscriptPartial;
+        public AvatarStringEvent onConnected = new AvatarStringEvent();
+        public AvatarStringEvent onAssistantText = new AvatarStringEvent();
+        public AvatarStringEvent onAssistantDelta = new AvatarStringEvent();
+        public AvatarStringEvent onError = new AvatarStringEvent();
+        public AvatarApprovalEvent onApprovalRequested = new AvatarApprovalEvent();
+        public AvatarStringEvent onGoalChanged = new AvatarStringEvent();
+        public AvatarVisemeEvent onViseme = new AvatarVisemeEvent();
+        public AvatarEmotionEvent onSpeechEmotion = new AvatarEmotionEvent();
+        public AvatarStringEvent onAssistantState = new AvatarStringEvent();
+        public AvatarStringEvent onTranscriptPartial = new AvatarStringEvent();
+        public AvatarStringEvent onUserText = new AvatarStringEvent();
 
         readonly ConcurrentQueue<Action> mainThread = new ConcurrentQueue<Action>();
         readonly Dictionary<string, CancellationTokenSource> activeActions = new Dictionary<string, CancellationTokenSource>();
         readonly Dictionary<string, AvatarActionResult> completedActions = new Dictionary<string, AvatarActionResult>();
         readonly MemoryStream audioBuffer = new MemoryStream();
         CancellationTokenSource lifetime;
+        CancellationTokenSource transportLifetime;
         IAvatarTransport transport;
         AvatarConnectionProfile profile;
         ApprovalRequest currentApproval;
@@ -75,13 +86,30 @@ namespace OpenCode.Customs.AvatarBridge
         bool audioFlowPaused;
         float lastMicrophoneSpeechAt;
         readonly Queue<byte[]> audioSendQueue = new Queue<byte[]>();
+        readonly SemaphoreSlim connectionGate = new SemaphoreSlim(1, 1);
         bool audioSendActive;
+        Task connectionLoop;
+        Coroutine visemePlayback;
+        Coroutine audioPlaybackCompletion;
+        bool completeTurnAfterAudio;
+        bool welcomeReceived;
 
         public bool IsConnected => transport != null && transport.State == WebSocketState.Open;
         public string CurrentGoal { get; private set; }
         public AgentGoalState CurrentGoalState { get; private set; }
         public string LastAction { get; private set; }
         public long LastActionLatencyMs { get; private set; }
+        public string LastError { get; private set; }
+        public string LastTranscript { get; private set; }
+        public string LastAssistantText { get; private set; }
+        public string AudioPlaybackState { get; private set; } = "Idle";
+        public string ConnectionState { get; private set; } = "Idle";
+        public string ResponseModel { get; private set; }
+        public long ResponseTTFTMs { get; private set; }
+        public long ResponseGenerationMs { get; private set; }
+        public string ResponseFallback { get; private set; }
+        public string VoiceEngine { get; private set; } = "cascade";
+        public string RealtimeStage { get; private set; } = "idle";
         public ApprovalRequest CurrentApproval => currentApproval;
 
         async void Start()
@@ -100,11 +128,11 @@ namespace OpenCode.Customs.AvatarBridge
         async void OnDestroy()
         {
             lifetime?.Cancel();
+            transportLifetime?.Cancel();
             foreach (var action in activeActions.Values) action.Cancel();
-            if (transport != null)
+            if (connectionLoop != null)
             {
-                try { await transport.CloseAsync(CancellationToken.None); } catch { }
-                transport.Dispose();
+                try { await connectionLoop; } catch { }
             }
             lifetime?.Dispose();
             audioBuffer.Dispose();
@@ -113,19 +141,52 @@ namespace OpenCode.Customs.AvatarBridge
 
         public async Task ConnectAsync()
         {
-            profile = Newtonsoft.Json.JsonConvert.DeserializeObject<AvatarConnectionProfile>(connectionJson);
-            if (profile == null || string.IsNullOrWhiteSpace(profile.url) || string.IsNullOrWhiteSpace(profile.token))
-                throw new InvalidOperationException("Paste valid protocol v2 connection JSON from OpenCode Customs settings.");
-            profile.clientID = AvatarIDs.Normalize(profile.clientID, "unity-vr");
-            profile.characterID = AvatarIDs.Normalize(profile.characterID, "assistant");
-            profile.gameID = AvatarIDs.Normalize(profile.gameID, "game");
-            profile.saveSlotID = AvatarIDs.Normalize(profile.saveSlotID, "default");
+            await connectionGate.WaitAsync();
+            try
+            {
+                if (connectionLoop != null && !connectionLoop.IsCompleted && lifetime != null && !lifetime.IsCancellationRequested)
+                    return;
+                await StartConnectionAsync();
+            }
+            finally { connectionGate.Release(); }
+        }
+
+        public async Task ReconnectAsync()
+        {
+            await connectionGate.WaitAsync();
+            try
+            {
+                lifetime?.Cancel();
+                if (connectionLoop != null)
+                {
+                    try { await connectionLoop; }
+                    catch (OperationCanceledException) { }
+                }
+                await StartConnectionAsync();
+            }
+            finally { connectionGate.Release(); }
+        }
+
+        async Task StartConnectionAsync()
+        {
+            clientID = AvatarIDs.Normalize(clientID, $"unity-{Application.productName}-{SystemInfo.deviceUniqueIdentifier}");
+            characterID = AvatarIDs.Normalize(characterID, "jarvis");
+            gameID = AvatarIDs.Normalize(gameID, Application.productName);
+            saveSlotID = AvatarIDs.Normalize(saveSlotID, "slot-1");
+            if (EffectiveConnectionMode() == AvatarConnectionMode.Manual)
+            {
+                profile = Newtonsoft.Json.JsonConvert.DeserializeObject<AvatarConnectionProfile>(connectionJson);
+                if (profile == null || string.IsNullOrWhiteSpace(profile.url) || string.IsNullOrWhiteSpace(profile.token))
+                    throw new InvalidOperationException("Manual mode requires valid protocol v2 connection JSON.");
+                NormalizeProfile(profile);
+            }
             if (capabilityRegistry == null) capabilityRegistry = GetComponentInChildren<AvatarCapabilityRegistry>();
             if (worldSensor == null) worldSensor = GetComponentInChildren<AvatarWorldSensor>();
-            lifetime?.Cancel();
+            var previousLifetime = lifetime;
+            previousLifetime?.Cancel();
             lifetime = new CancellationTokenSource();
-            ConfigureSensor();
-            _ = ConnectionLoop(lifetime.Token);
+            previousLifetime?.Dispose();
+            connectionLoop = ConnectionLoop(lifetime.Token);
             await Task.Yield();
         }
 
@@ -148,6 +209,19 @@ namespace OpenCode.Customs.AvatarBridge
             if (string.IsNullOrWhiteSpace(text)) return;
             if (string.IsNullOrWhiteSpace(currentRequestID)) currentRequestID = Guid.NewGuid().ToString("N");
             await SendAsync(new { type = "speech.final", requestID = currentRequestID, text = text.Trim() });
+        }
+
+        public async void SubmitTypedText(string text)
+        {
+            if (!IsConnected || string.IsNullOrWhiteSpace(text)) return;
+            var clean = text.Trim();
+            currentRequestID = Guid.NewGuid().ToString("N");
+            ResetSpeechPresentation();
+            CancelActiveActions();
+            LastTranscript = clean;
+            onUserText?.Invoke(clean);
+            await SendAsync(new { type = "speech.start", requestID = currentRequestID, source = "vr_keyboard" });
+            await SendAsync(new { type = "speech.final", requestID = currentRequestID, text = clean, source = "vr_keyboard", responseMode = "text" });
         }
 
         public async void CancelSpeech()
@@ -194,27 +268,148 @@ namespace OpenCode.Customs.AvatarBridge
 
         async Task ConnectionLoop(CancellationToken cancellation)
         {
+            var delays = new[] { 0.5f, 1f, 2f, 5f, 10f };
+            var bootstrapAuthRetries = 0;
             while (!cancellation.IsCancellationRequested)
             {
+                IAvatarTransport attemptTransport = null;
+                CancellationTokenSource attemptLifetime = null;
                 try
                 {
-                    transport?.Dispose();
-                    transport = AvatarTransportFactory.Create();
-                    await transport.ConnectAsync(new Uri(profile.url), profile.certificateFingerprint, cancellation);
-                    reconnectAttempt = 0;
+                    var mode = EffectiveConnectionMode();
+                    if (mode == AvatarConnectionMode.Auto)
+                    {
+                        SetConnectionState("Bootstrapping");
+                        profile = await AvatarBootstrap.RequestAsync(bootstrapUrl, new AvatarBootstrapRequest
+                        {
+                            clientID = clientID,
+                            characterID = characterID,
+                            gameID = gameID,
+                            saveSlotID = saveSlotID,
+                        }, cancellation);
+                        NormalizeProfile(profile);
+                    }
+                    if (mode == AvatarConnectionMode.QuestPaired)
+                    {
+                        SetConnectionState("Searching");
+                        profile = await AvatarQuestConnection.ResolveAsync(clientID, characterID, gameID, saveSlotID, cancellation);
+                        NormalizeProfile(profile);
+                    }
+                    if (profile == null) throw new InvalidOperationException("Avatar connection profile is unavailable.");
+                    ConfigureSensor();
+                    SetConnectionState("Connecting");
+                    attemptTransport = AvatarTransportFactory.Create();
+                    attemptLifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+                    transport = attemptTransport;
+                    transportLifetime = attemptLifetime;
+                    welcomeReceived = false;
+                    await attemptTransport.ConnectAsync(new Uri(profile.url), profile.certificateFingerprint, attemptLifetime.Token);
                     await SendHello();
-                    await ReceiveLoop(cancellation);
+                    await ReceiveLoop(attemptTransport, attemptLifetime.Token);
+                    if (mode == AvatarConnectionMode.Auto && !welcomeReceived && attemptTransport.CloseStatusCode == 4401 && bootstrapAuthRetries == 0)
+                    {
+                        bootstrapAuthRetries++;
+                        profile = null;
+                        continue;
+                    }
+                    if (welcomeReceived) bootstrapAuthRetries = 0;
+                    if (mode == AvatarConnectionMode.QuestPaired && (attemptTransport.CloseStatusCode == 4401 || attemptTransport.CloseStatusCode == 4403))
+                    {
+                        AvatarQuestConnection.Clear();
+                        mainThread.Enqueue(() => GetComponent<AvatarQuestPairingPanel>()?.RequirePairing("Pairing was rejected or revoked. Enter a new PIN."));
+                        throw new InvalidOperationException("Quest pairing was rejected or revoked.");
+                    }
+                    if (attemptTransport.CloseStatusCode.HasValue && attemptTransport.CloseStatusCode != 1000)
+                        throw new InvalidOperationException("Avatar WebSocket closed with " + attemptTransport.CloseStatusCode +
+                            (string.IsNullOrWhiteSpace(attemptTransport.CloseStatusDescription) ? "." : ": " + attemptTransport.CloseStatusDescription));
                 }
                 catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { return; }
-                catch (Exception error) { RaiseError("Avatar Bridge disconnected: " + error.Message); }
+                catch (Exception) when (cancellation.IsCancellationRequested) { return; }
+                catch (OperationCanceledException) when (attemptLifetime != null && attemptLifetime.IsCancellationRequested)
+                {
+                    SetRetrying("Connection interrupted.", false);
+                }
+                catch (Exception error) when (IsTransportDisconnect(error))
+                {
+                    SetRetrying("Connection interrupted.", false);
+                }
+                catch (Exception error)
+                {
+                    SetRetrying("Avatar Bridge disconnected: " + error.Message, true);
+                }
+                finally
+                {
+                    attemptLifetime?.Cancel();
+                    if (ReferenceEquals(transportLifetime, attemptLifetime)) transportLifetime = null;
+                    if (ReferenceEquals(transport, attemptTransport))
+                    {
+                        transport = null;
+                        audioSendQueue.Clear();
+                        audioFlowPaused = false;
+                        microphoneStreaming = false;
+                        microphoneSpeechDetected = false;
+                    }
+                    attemptTransport?.Dispose();
+                    attemptLifetime?.Dispose();
+                }
                 reconnectAttempt++;
-                var delay = Mathf.Min(15f, Mathf.Pow(2f, Mathf.Min(reconnectAttempt, 4)));
-                await Task.Delay(TimeSpan.FromSeconds(delay), cancellation);
+                try { await Task.Delay(TimeSpan.FromSeconds(delays[Mathf.Min(reconnectAttempt - 1, delays.Length - 1)]), cancellation); }
+                catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { return; }
             }
+        }
+
+        void NormalizeProfile(AvatarConnectionProfile value)
+        {
+            value.clientID = AvatarIDs.Normalize(value.clientID, clientID);
+            value.characterID = AvatarIDs.Normalize(value.characterID, characterID);
+            value.gameID = AvatarIDs.Normalize(value.gameID, gameID);
+            value.saveSlotID = AvatarIDs.Normalize(value.saveSlotID, saveSlotID);
+        }
+
+        AvatarConnectionMode EffectiveConnectionMode()
+        {
+#if UNITY_ANDROID && !UNITY_EDITOR
+            return connectionMode == AvatarConnectionMode.Auto ? AvatarConnectionMode.QuestPaired : connectionMode;
+#else
+            return connectionMode;
+#endif
+        }
+
+        void SetConnectionState(string value)
+        {
+            mainThread.Enqueue(() => ConnectionState = value);
+        }
+
+        void SetRetrying(string reason, bool report)
+        {
+            mainThread.Enqueue(() =>
+            {
+                var visibleReason = report ? reason : null;
+                var changed = ConnectionState != "Retrying" || !string.Equals(LastError, visibleReason, StringComparison.Ordinal);
+                ConnectionState = "Retrying";
+                LastError = visibleReason;
+                if (!report || !changed) return;
+                Debug.LogWarning("OpenCode Customs Avatar Bridge: " + reason, this);
+                onError?.Invoke(reason);
+            });
         }
 
         async Task SendHello()
         {
+            JObject voice = null;
+            if (receiveVoice)
+            {
+                voice = new JObject
+                {
+                    ["provider"] = voiceProvider,
+                    ["endpoint"] = voiceEndpoint,
+                    ["model"] = voiceModel,
+                    ["voice"] = voiceName,
+                    ["mode"] = "quality",
+                    ["streaming"] = true,
+                };
+                if (!string.IsNullOrWhiteSpace(fishPresetID)) voice["fishPresetID"] = fishPresetID.Trim();
+            }
             await SendAsync(new
             {
                 type = "hello", protocol = AvatarProtocol.Version, protocolMinor = AvatarProtocol.Minor, token = profile.token,
@@ -223,19 +418,15 @@ namespace OpenCode.Customs.AvatarBridge
                 profileID = profile.profileID, profileRevision = profile.profileRevision,
                 resumeSequence = lastServerSequence,
                 actions = new[] { "animation.trigger", "emotion.set", "gesture.play", "look_at", "move_to", "speech.stop" },
-                voice = receiveVoice ? new
-                {
-                    provider = voiceProvider, fishPresetID, endpoint = voiceEndpoint, model = voiceModel,
-                    voice = voiceName, mode = "quality", streaming = true,
-                } : null,
+                voice,
             });
         }
 
-        async Task ReceiveLoop(CancellationToken cancellation)
+        async Task ReceiveLoop(IAvatarTransport currentTransport, CancellationToken cancellation)
         {
-            while (!cancellation.IsCancellationRequested && transport.State == WebSocketState.Open)
+            while (!cancellation.IsCancellationRequested && currentTransport.State == WebSocketState.Open)
             {
-                var message = await transport.ReceiveAsync(cancellation);
+                var message = await currentTransport.ReceiveAsync(cancellation);
                 if (message == null) return;
                 if (message.binary) { HandleAudioChunk(message.data); continue; }
                 if (System.Text.Encoding.UTF8.GetByteCount(message.text) > AvatarProtocol.MaxPayloadBytes) throw new InvalidDataException("Avatar Bridge JSON payload exceeded 64 KB.");
@@ -254,8 +445,16 @@ namespace OpenCode.Customs.AvatarBridge
             switch (message.Value<string>("type"))
             {
                 case "welcome":
+                    welcomeReceived = true;
                     profile.sessionID = message.Value<string>("sessionID") ?? profile.sessionID;
-                    mainThread.Enqueue(() => onConnected?.Invoke(profile.characterID));
+                    mainThread.Enqueue(() =>
+                    {
+                        reconnectAttempt = 0;
+                        ConnectionState = "Connected";
+                        VoiceEngine = message.Value<string>("voiceEngine") ?? VoiceEngine;
+                        LastError = null;
+                        onConnected?.Invoke(profile.characterID);
+                    });
                     _ = SendManifestAndSnapshot();
                     if (handsFree && enableMicrophoneStreaming) mainThread.Enqueue(EnsureMicrophoneCapture);
                     return;
@@ -264,20 +463,82 @@ namespace OpenCode.Customs.AvatarBridge
                 case "world.camera.request": mainThread.Enqueue(() => _ = CaptureCamera(message)); return;
                 case "assistant.text":
                     profile.sessionID = message.Value<string>("sessionID") ?? profile.sessionID;
-                    mainThread.Enqueue(() => onAssistantText?.Invoke(message.Value<string>("text")));
+                    mainThread.Enqueue(() =>
+                    {
+                        LastError = null;
+                        LastAssistantText = message.Value<string>("text");
+                        onAssistantText?.Invoke(LastAssistantText);
+                    });
+                    return;
+                case "assistant.text.start":
+                    profile.sessionID = message.Value<string>("sessionID") ?? profile.sessionID;
+                    mainThread.Enqueue(() =>
+                    {
+                        LastError = null;
+                        LastAssistantText = string.Empty;
+                        ResponseModel = message.Value<string>("model");
+                        ResponseTTFTMs = 0;
+                        ResponseGenerationMs = 0;
+                        ResponseFallback = null;
+                        VoiceEngine = message.Value<string>("engine") ?? VoiceEngine;
+                        RealtimeStage = VoiceEngine == "nemotron" ? "responding" : "generation";
+                        onAssistantState?.Invoke("responding");
+                    });
+                    return;
+                case "assistant.text.delta":
+                    var delta = message.Value<string>("delta") ?? string.Empty;
+                    mainThread.Enqueue(() =>
+                    {
+                        LastError = null;
+                        LastAssistantText = (LastAssistantText ?? string.Empty) + delta;
+                        ResponseTTFTMs = message.Value<long?>("ttftMs") ?? ResponseTTFTMs;
+                        VoiceEngine = message.Value<string>("engine") ?? VoiceEngine;
+                        RealtimeStage = "responding";
+                        onAssistantState?.Invoke("responding");
+                        if (!string.IsNullOrEmpty(delta)) onAssistantDelta?.Invoke(delta);
+                    });
+                    return;
+                case "assistant.text.done":
+                    profile.sessionID = message.Value<string>("sessionID") ?? profile.sessionID;
+                    mainThread.Enqueue(() =>
+                    {
+                        LastError = null;
+                        LastAssistantText = message.Value<string>("text") ?? LastAssistantText;
+                        ResponseModel = message.Value<string>("model") ?? ResponseModel;
+                        ResponseTTFTMs = message.Value<long?>("ttftMs") ?? ResponseTTFTMs;
+                        ResponseGenerationMs = message.Value<long?>("generationMs") ?? ResponseGenerationMs;
+                        ResponseFallback = message.Value<string>("fallback");
+                        VoiceEngine = message.Value<string>("engine") ?? VoiceEngine;
+                        RealtimeStage = "audio";
+                        onAssistantText?.Invoke(LastAssistantText);
+                    });
                     return;
                 case "assistant.started": mainThread.Enqueue(() => onAssistantState?.Invoke("thinking")); return;
                 case "assistant.audio.start":
                     audioBuffer.SetLength(0);
                     audioContentType = message.Value<string>("contentType");
                     pendingVisemes = message["visemes"]?.ToObject<VisemeCue[]>() ?? Array.Empty<VisemeCue>();
+                    completeTurnAfterAudio = false;
+                    mainThread.Enqueue(() => AudioPlaybackState = "Receiving");
                     var emotion = message.Value<string>("emotion") ?? "neutral";
                     var intensity = message.Value<float?>("intensity") ?? 0.4f;
                     mainThread.Enqueue(() => onSpeechEmotion?.Invoke(emotion, intensity));
                     mainThread.Enqueue(() => onAssistantState?.Invoke("speaking"));
                     return;
                 case "assistant.audio.end": _ = DecodeAndPlay(audioBuffer.ToArray(), audioContentType); return;
-                case "assistant.done": mainThread.Enqueue(() => { onViseme?.Invoke(null, 0f); onAssistantState?.Invoke("idle"); }); return;
+                case "assistant.done":
+                    mainThread.Enqueue(() =>
+                    {
+                        if (AudioPlaybackState == "Receiving" || AudioPlaybackState == "Decoding" || AudioPlaybackState == "Playing")
+                        {
+                            completeTurnAfterAudio = true;
+                            return;
+                        }
+                        RealtimeStage = "idle";
+                        onViseme?.Invoke(null, 0f);
+                        onAssistantState?.Invoke("idle");
+                    });
+                    return;
                 case "assistant.cancelled": mainThread.Enqueue(() => { ResetSpeechPresentation(); onAssistantState?.Invoke("listening"); }); return;
                 case "assistant.error": mainThread.Enqueue(() => onAssistantState?.Invoke("uncertain")); RaiseError(message.Value<string>("error")); return;
                 case "avatar.presentation":
@@ -288,13 +549,23 @@ namespace OpenCode.Customs.AvatarBridge
                     {
                         onAssistantState?.Invoke(presentation.state);
                         onSpeechEmotion?.Invoke(presentation.emotion ?? "neutral", presentation.intensity);
-                        if (!string.IsNullOrWhiteSpace(presentation.subtitle)) onAssistantText?.Invoke(presentation.subtitle);
                         if (!string.IsNullOrWhiteSpace(presentation.goal)) onGoalChanged?.Invoke(presentation.goal);
                     });
                     return;
                 case "user.transcript.partial":
+                    mainThread.Enqueue(() =>
+                    {
+                        LastTranscript = message.Value<string>("text");
+                        onTranscriptPartial?.Invoke(LastTranscript);
+                    });
+                    return;
                 case "user.transcript.final":
-                    mainThread.Enqueue(() => onTranscriptPartial?.Invoke(message.Value<string>("text")));
+                    mainThread.Enqueue(() =>
+                    {
+                        LastTranscript = message.Value<string>("text");
+                        onTranscriptPartial?.Invoke(LastTranscript);
+                        onUserText?.Invoke(LastTranscript);
+                    });
                     return;
                 case "audio.flow":
                 case "audio.ack":
@@ -456,14 +727,22 @@ namespace OpenCode.Customs.AvatarBridge
 
         async Task FlushAudioQueue()
         {
-            if (audioSendActive || audioFlowPaused || transport == null || transport.State != WebSocketState.Open) return;
+            var currentTransport = transport;
+            var currentLifetime = transportLifetime;
+            if (audioSendActive || audioFlowPaused || currentTransport == null || currentLifetime == null ||
+                currentTransport.State != WebSocketState.Open || currentLifetime.IsCancellationRequested) return;
             audioSendActive = true;
             try
             {
-                while (!audioFlowPaused && audioSendQueue.Count > 0)
-                    await transport.SendBinaryAsync(audioSendQueue.Dequeue(), lifetime.Token);
+                while (!audioFlowPaused && audioSendQueue.Count > 0 && ReferenceEquals(transport, currentTransport) &&
+                    !currentLifetime.IsCancellationRequested)
+                    await currentTransport.SendBinaryAsync(audioSendQueue.Dequeue(), currentLifetime.Token);
             }
-            catch (Exception error) when (!(error is OperationCanceledException)) { RaiseError(error.Message); }
+            catch (Exception error) when (IsTransportDisconnect(error) || currentLifetime.IsCancellationRequested)
+            {
+                CancelTransportAttempt(currentTransport, currentLifetime);
+            }
+            catch (Exception error) { RaiseError(error.Message); }
             finally { audioSendActive = false; }
         }
 
@@ -541,7 +820,13 @@ namespace OpenCode.Customs.AvatarBridge
 
         void ResetSpeechPresentation()
         {
+            if (visemePlayback != null) StopCoroutine(visemePlayback);
+            if (audioPlaybackCompletion != null) StopCoroutine(audioPlaybackCompletion);
+            visemePlayback = null;
+            audioPlaybackCompletion = null;
+            completeTurnAfterAudio = false;
             audioSource?.Stop();
+            AudioPlaybackState = "Idle";
             onViseme?.Invoke(null, 0f);
         }
 
@@ -579,9 +864,34 @@ namespace OpenCode.Customs.AvatarBridge
 
         async Task SendAsync(object value)
         {
-            if (transport == null || transport.State != WebSocketState.Open) return;
-            try { await transport.SendTextAsync(AvatarJson.Serialize(value), lifetime.Token); }
-            catch (Exception error) when (!(error is OperationCanceledException)) { RaiseError(error.Message); }
+            var currentTransport = transport;
+            var currentLifetime = transportLifetime;
+            if (currentTransport == null || currentLifetime == null || currentTransport.State != WebSocketState.Open ||
+                currentLifetime.IsCancellationRequested) return;
+            try { await currentTransport.SendTextAsync(AvatarJson.Serialize(value), currentLifetime.Token); }
+            catch (Exception error) when (IsTransportDisconnect(error) || currentLifetime.IsCancellationRequested)
+            {
+                CancelTransportAttempt(currentTransport, currentLifetime);
+            }
+            catch (Exception error) { RaiseError(error.Message); }
+        }
+
+        void CancelTransportAttempt(IAvatarTransport currentTransport, CancellationTokenSource currentLifetime)
+        {
+            if (!ReferenceEquals(transport, currentTransport) || !ReferenceEquals(transportLifetime, currentLifetime)) return;
+            currentLifetime.Cancel();
+            SetRetrying("Connection interrupted.", false);
+        }
+
+        static bool IsTransportDisconnect(Exception error)
+        {
+            if (error is OperationCanceledException || error is WebSocketException || error is ObjectDisposedException) return true;
+            if (error is IOException && error.InnerException != null) return IsTransportDisconnect(error.InnerException);
+            if (error.InnerException != null && IsTransportDisconnect(error.InnerException)) return true;
+            return error is InvalidOperationException &&
+                (error.Message.IndexOf("transport is not connected", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                 error.Message.IndexOf("websocket is in an invalid state", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                 error.Message.IndexOf("operation was aborted", StringComparison.OrdinalIgnoreCase) >= 0);
         }
 
         Task SendAsync(AvatarSpeechFrame frame, string type) => SendAsync(new
@@ -603,21 +913,57 @@ namespace OpenCode.Customs.AvatarBridge
 
         async Task DecodeAndPlay(byte[] bytes, string contentType)
         {
-            if (audioSource == null || bytes.Length == 0 || (contentType != null && !contentType.Contains("wav"))) return;
+            if (audioSource == null)
+            {
+                mainThread.Enqueue(() => AudioPlaybackState = "Error");
+                RaiseError("Agent voice cannot play because the character AudioSource is missing.");
+                return;
+            }
+            if (bytes.Length == 0)
+            {
+                mainThread.Enqueue(() => AudioPlaybackState = "Error");
+                RaiseError("Agent voice response contained no audio data.");
+                return;
+            }
+            if (contentType != null && contentType.IndexOf("wav", StringComparison.OrdinalIgnoreCase) < 0)
+            {
+                mainThread.Enqueue(() => AudioPlaybackState = "Error");
+                RaiseError("Agent voice returned unsupported audio type: " + contentType + ".");
+                return;
+            }
             try
             {
+                mainThread.Enqueue(() => AudioPlaybackState = "Decoding");
                 var wav = await Task.Run(() => AvatarWav.Decode(bytes));
                 mainThread.Enqueue(() =>
                 {
                     var clip = AudioClip.Create("OpenCode Agent", wav.samples.Length / wav.channels, wav.channels, wav.rate, false);
-                    clip.SetData(wav.samples, 0); audioSource.clip = clip; audioSource.Play();
-                    StartCoroutine(PlayVisemes(pendingVisemes));
+                    clip.SetData(wav.samples, 0);
+                    audioSource.Stop();
+                    audioSource.mute = false;
+                    audioSource.volume = 1f;
+                    audioSource.clip = clip;
+                    audioSource.Play();
+                    AudioPlaybackState = "Playing";
+                    if (visemePlayback != null) StopCoroutine(visemePlayback);
+                    if (audioPlaybackCompletion != null) StopCoroutine(audioPlaybackCompletion);
+                    visemePlayback = StartCoroutine(PlayVisemes(pendingVisemes));
+                    audioPlaybackCompletion = StartCoroutine(FinishAudioPlayback());
                 });
             }
-            catch (Exception error) { RaiseError("Could not play agent voice: " + error.Message); }
+            catch (Exception error)
+            {
+                mainThread.Enqueue(() => AudioPlaybackState = "Error");
+                RaiseError("Could not play agent voice: " + error.Message);
+            }
         }
 
-        void RaiseError(string message) => mainThread.Enqueue(() => onError?.Invoke(message));
+        void RaiseError(string message) => mainThread.Enqueue(() =>
+        {
+            LastError = message;
+            Debug.LogWarning("OpenCode Customs Avatar Bridge: " + message, this);
+            onError?.Invoke(message);
+        });
 
         System.Collections.IEnumerator PlayVisemes(VisemeCue[] cues)
         {
@@ -629,6 +975,19 @@ namespace OpenCode.Customs.AvatarBridge
                 onViseme?.Invoke(cue.shape, 1f);
                 previous = cue.timeMs;
             }
+        }
+
+        System.Collections.IEnumerator FinishAudioPlayback()
+        {
+            yield return null;
+            while (audioSource != null && audioSource.isPlaying) yield return null;
+            visemePlayback = null;
+            audioPlaybackCompletion = null;
+            AudioPlaybackState = "Idle";
+            onViseme?.Invoke(null, 0f);
+            if (!completeTurnAfterAudio) yield break;
+            completeTurnAfterAudio = false;
+            onAssistantState?.Invoke("idle");
         }
     }
 }

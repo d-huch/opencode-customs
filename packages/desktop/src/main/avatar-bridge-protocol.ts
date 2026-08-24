@@ -1,6 +1,6 @@
 export const AVATAR_BRIDGE_PROTOCOL = 2
-export const AVATAR_BRIDGE_PROTOCOL_MINOR = 3
-export const AVATAR_BRIDGE_VERSION = "2.3"
+export const AVATAR_BRIDGE_PROTOCOL_MINOR = 5
+export const AVATAR_BRIDGE_VERSION = "2.5"
 export const AVATAR_BRIDGE_PROTOCOLS = [1, 2] as const
 export const AVATAR_ACTIONS = [
   "animation.trigger",
@@ -20,6 +20,7 @@ export type AvatarPresentationState =
   | "listening"
   | "thinking"
   | "planning"
+  | "responding"
   | "speaking"
   | "acting"
   | "uncertain"
@@ -169,6 +170,7 @@ export type AvatarTranscript = {
   requestID: string
   text: string
   language?: string
+  responseMode?: "voice" | "text"
 }
 
 export type AvatarActionResult = {
@@ -388,11 +390,13 @@ function parseTranscript(value: Record<string, unknown>): AvatarTranscript | und
   if (!shortID(value.requestID) || !text(value.text, 20_000) || !value.text.trim()) return
   const language = optionalString(value.language, 32)
   if (language === invalid) return
+  if (value.responseMode !== undefined && value.responseMode !== "voice" && value.responseMode !== "text") return
   return {
     type: value.type === "speech.final" ? "speech.final" : "user.transcript",
     requestID: value.requestID,
     text: value.text.trim(),
     ...(typeof language === "string" ? { language } : {}),
+    ...(value.responseMode ? { responseMode: value.responseMode } : {}),
   }
 }
 

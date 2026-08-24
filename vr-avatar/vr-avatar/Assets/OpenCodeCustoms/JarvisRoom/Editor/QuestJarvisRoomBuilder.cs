@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.IO;
+using System.Reflection;
 using OpenCode.Customs.AvatarBridge;
 using Unity.AI.Navigation;
 using UnityEditor;
@@ -9,12 +11,21 @@ using UnityEditor.Build;
 using UnityEditor.Build.Reporting;
 using UnityEditor.Rendering;
 using UnityEditor.SceneManagement;
+using UnityEditor.XR.Management;
+using UnityEditor.XR.OpenXR.Features;
 using UnityEngine;
 using UnityEngine.AI;
 using UnityEngine.Animations.Rigging;
+using UnityEngine.EventSystems;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
 using UnityEngine.SceneManagement;
+using UnityEngine.XR.Management;
+using UnityEngine.XR.OpenXR;
+using UnityEngine.XR.Interaction.Toolkit.Inputs;
+using UnityEngine.XR.Interaction.Toolkit.UI;
+using Unity.XR.CoreUtils;
+using TMPro;
 
 namespace OpenCode.Customs.QuestAlpha.Editor
 {
@@ -24,18 +35,50 @@ namespace OpenCode.Customs.QuestAlpha.Editor
         const string ScenePath = SceneDirectory + "/JarvisRoom.unity";
         const string AvatarDirectory = "Assets/OpenCodeCustoms/Avatar";
         const string AnimationDirectory = AvatarDirectory + "/Animations/Mixamo";
+        const string GestureDirectory = AnimationDirectory + "/Gestures";
         const string AnimatorControllerPath = AvatarDirectory + "/GamerGirlAgent.controller";
         const string UpperBodyMaskPath = AvatarDirectory + "/GamerGirlUpperBody.mask";
         const string GamerGirlPrefabPath = "Assets/GamerGirl/Render pipeline/URP/Prefab/SK_GamerGirl_02 White Variant.prefab";
+        const string TmpFallbackPath = "Assets/TextMesh Pro/Resources/Fonts & Materials/LiberationSans SDF - Fallback.asset";
+        const string InteractionSimulatorPrefabPath = "Assets/Samples/XR Interaction Toolkit/3.5.0/XR Interaction Simulator/XR Interaction Simulator.prefab";
         static readonly string[] RequiredAnimations = { "Idle", "Walk", "Run", "Talking", "Thinking", "Wave", "Point", "Nod" };
         static readonly string[] RequiredBlendShapes = { "jawOpen", "eyeBlinkLeft", "eyeBlinkRight", "mouthFunnel", "mouthPucker", "mouthSmileLeft", "mouthSmileRight", "browInnerUp" };
+        static readonly GestureDefinition[] OptionalGestures =
+        {
+            new GestureDefinition("RelievedSigh", "RelievedSigh.fbx"),
+            new GestureDefinition("ThoughtfulHeadShake", "ThoughtfulHeadShake.fbx"),
+            new GestureDefinition("LengthyNod", "LengthyNod.fbx"),
+            new GestureDefinition("Acknowledge", "Acknowledge.fbx"),
+            new GestureDefinition("HappyGesture", "HappyGesture.fbx"),
+            new GestureDefinition("AngryGesture", "AngryGesture.fbx"),
+            new GestureDefinition("HardNod", "HardNod.fbx"),
+            new GestureDefinition("AnnoyedHeadShake", "AnnoyedHeadShake.fbx"),
+            new GestureDefinition("Cocky", "Cocky.fbx"),
+            new GestureDefinition("Yes", "Yes.fbx"),
+            new GestureDefinition("No", "No.fbx"),
+            new GestureDefinition("SarcasticNod", "SarcasticNod.fbx"),
+            new GestureDefinition("WeightShift", "WeightShift.fbx"),
+            new GestureDefinition("Dismiss", "Dismiss.fbx"),
+            new GestureDefinition("LookAway", "LookAway.fbx"),
+            new GestureDefinition("Hallin", "Hallin.fbx"),
+        };
 
-        [MenuItem("OpenCode Customs/Create Quest Jarvis Room")]
+        sealed class GestureDefinition
+        {
+            public readonly string trigger;
+            public readonly string file;
+            public GestureDefinition(string trigger, string file) { this.trigger = trigger; this.file = file; }
+        }
+
+        [MenuItem("OpenCode Customs/Rebuild Quest Jarvis Room")]
         public static void Create()
         {
+            RepairXrSettings();
+            EditorSettings.serializationMode = SerializationMode.ForceText;
             Directory.CreateDirectory(SceneDirectory);
             var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
             var environment = new GameObject("Jarvis Room Environment");
+            environment.AddComponent<JarvisRoomGeneration>().version = JarvisRoomGeneration.CurrentVersion;
             var surface = environment.AddComponent<NavMeshSurface>();
             Cube("Floor", new Vector3(0, -0.1f, 0), new Vector3(12, 0.2f, 12), environment.transform);
             Cube("North Wall", new Vector3(0, 1.5f, 6), new Vector3(12, 3, 0.2f), environment.transform);
@@ -46,9 +89,22 @@ namespace OpenCode.Customs.QuestAlpha.Editor
             Cube("Workbench", new Vector3(-1.8f, 0.5f, 1.5f), new Vector3(3, 1, 1.2f), environment.transform);
 
             var player = CreateXROrigin();
-            AttachInputVisuals(player);
+            RemoveMissingSceneScripts(player);
+            player.AddComponent<AvatarQuestXrLifecycle>();
+            var visuals = AttachInputVisuals(player);
             var camera = player.GetComponentInChildren<Camera>();
             if (camera == null) camera = CameraFallback(player);
+            var simulator = player.GetComponentsInChildren<Transform>(true).FirstOrDefault(value => value.name == "XR Interaction Simulator (Editor Only)");
+            var inputMode = player.AddComponent<AvatarEditorInputMode>();
+            inputMode.xrOrigin = player.transform;
+            inputMode.cameraFloorOffset = player.GetComponentInChildren<XROrigin>(true)?.CameraFloorOffsetObject?.transform;
+            inputMode.head = camera.transform;
+            inputMode.leftController = visuals.leftController.transform;
+            inputMode.rightController = visuals.rightController.transform;
+            inputMode.simulator = simulator != null ? simulator.gameObject : null;
+            inputMode.visuals = visuals;
+            inputMode.poseDrivers = player.GetComponentsInChildren<UnityEngine.InputSystem.XR.TrackedPoseDriver>(true);
+            inputMode.standingHeadHeight = 1.7f;
 
             var companion = new GameObject("Jarvis Agent");
             companion.transform.position = new Vector3(0, 0, -1);
@@ -61,15 +117,34 @@ namespace OpenCode.Customs.QuestAlpha.Editor
             var agent = companion.AddComponent<NavMeshAgent>();
             ConfigureNavMeshAgent(agent, body);
             var audio = companion.AddComponent<AudioSource>();
-            audio.spatialBlend = 1f; audio.maxDistance = 18f;
+            audio.playOnAwake = false;
+            audio.loop = false;
+            audio.volume = 1f;
+            audio.spatialBlend = 0.65f;
+            audio.minDistance = 1.5f;
+            audio.maxDistance = 18f;
             var sensor = companion.AddComponent<AvatarWorldSensor>();
             sensor.observer = companion.transform; sensor.viewCamera = camera; sensor.updatesPerSecond = 4;
             var registry = companion.AddComponent<AvatarCapabilityRegistry>();
             var bridge = companion.AddComponent<OpenCodeAvatarBridgeV2>();
             bridge.capabilityRegistry = registry; bridge.worldSensor = sensor; bridge.audioSource = audio;
+            bridge.connectionMode = AvatarConnectionMode.Auto;
+            bridge.clientID = "jarvis-lab-pcvr";
+            bridge.characterID = "jarvis";
+            bridge.gameID = "jarvis-lab";
+            bridge.saveSlotID = "slot-1";
+            bridge.receiveVoice = true;
             bridge.enableMicrophoneStreaming = true; bridge.handsFree = true;
+            companion.AddComponent<AvatarQuestPairingPanel>().bridge = bridge;
+            var keyboard = player.AddComponent<AvatarVRKeyboard>();
+            keyboard.bridge = bridge; keyboard.viewer = camera.transform;
+            var chatPanel = player.AddComponent<AvatarChatPanel>();
+            chatPanel.bridge = bridge; chatPanel.keyboard = keyboard; chatPanel.viewer = camera.transform;
+            keyboard.chatPanel = chatPanel;
             var overlay = companion.AddComponent<AvatarDeveloperOverlay>();
-            overlay.bridge = bridge;
+            overlay.bridge = bridge; overlay.keyboard = keyboard; overlay.chatPanel = chatPanel; overlay.viewer = camera.transform;
+            var speechBubble = companion.AddComponent<AvatarSpeechBubble>();
+            speechBubble.bridge = bridge; speechBubble.head = animator.GetBoneTransform(HumanBodyBones.Head); speechBubble.viewer = camera.transform;
             companion.AddComponent<AvatarScenarioRecorder>().sensor = sensor;
             var reactions = companion.AddComponent<AvatarMicroReactions>();
             reactions.animator = animator;
@@ -84,12 +159,12 @@ namespace OpenCode.Customs.QuestAlpha.Editor
             var rigTargets = ConfigureRig(companion, animator, camera.transform);
             var locomotion = companion.AddComponent<AvatarLocomotionController>();
             locomotion.agent = agent; locomotion.animator = animator;
-            overlay.locomotion = locomotion; overlay.reactions = reactions; overlay.rigTargets = rigTargets; overlay.presentation = presentation;
+            overlay.locomotion = locomotion; overlay.reactions = reactions; overlay.rigTargets = rigTargets; overlay.presentation = presentation; overlay.inputMode = inputMode;
             var world = companion.AddComponent<JarvisRoomWorld>();
             world.sensor = sensor;
 
             companion.AddComponent<MoveToCapability>().agent = agent;
-            var follow = companion.AddComponent<FollowCapability>(); follow.agent = agent; follow.player = player.transform;
+            var follow = companion.AddComponent<FollowCapability>(); follow.agent = agent; follow.player = camera.transform;
             companion.AddComponent<StayCapability>().agent = agent;
             var expression = companion.AddComponent<CharacterExpressionCapability>();
             expression.animator = animator; expression.reactions = reactions; expression.presentation = presentation;
@@ -110,15 +185,16 @@ namespace OpenCode.Customs.QuestAlpha.Editor
             surface.BuildNavMesh();
             registry.Refresh();
             EditorSceneManager.SaveScene(scene, ScenePath);
+            AssetDatabase.ForceReserializeAssets(new[] { ScenePath }, ForceReserializeAssetsOptions.ReserializeAssetsAndMetadata);
             EditorBuildSettings.scenes = new[] { new EditorBuildSettingsScene(ScenePath, true) };
             Selection.activeGameObject = companion;
-            Debug.Log("Quest Jarvis Room created with SK_GamerGirl_Agent. Paste pairing JSON into OpenCodeAvatarBridgeV2.");
+            Debug.Log("Quest Jarvis Room created with SK_GamerGirl_Agent. Unity will connect to OpenCode Customs automatically in Play Mode.");
         }
 
         [MenuItem("OpenCode Customs/Build Quest Development APK")]
         public static void BuildQuestDevelopment()
         {
-            EnsureAnimatorController(true);
+            RepairXrSettings();
             Create();
             PlayerSettings.SetApplicationIdentifier(NamedBuildTarget.Android, "ai.opencode.customs.jarvisroom");
             PlayerSettings.productName = "OpenCode Customs Jarvis Room";
@@ -139,23 +215,99 @@ namespace OpenCode.Customs.QuestAlpha.Editor
             Debug.Log("Quest development APK: " + report.summary.outputPath);
         }
 
+        [MenuItem("OpenCode Customs/Repair XR Settings")]
+        public static void RepairXrSettings()
+        {
+            RepairOpenXrPackageSettings();
+            ConfigureLoaders(BuildTargetGroup.Standalone, null);
+            ConfigureLoaders(BuildTargetGroup.Android, "Assets/XR/Loaders/OpenXRLoader.asset");
+            AssetDatabase.SaveAssets();
+            Debug.Log("XR settings repaired: Editor uses the XRI Interaction Simulator without an XR loader; Android uses OpenXR.");
+        }
+
+        static void RepairOpenXrPackageSettings()
+        {
+            const string legacyPath = "Assets/XR/Settings/OpenXRPackageSettings.asset";
+            const string path = "Assets/XR/Settings/OpenXR Package Settings.asset";
+            var assets = AssetDatabase.LoadAllAssetsAtPath(path);
+            var broken = assets.Any(value => value == null) || assets.Any(value => value != null && SerializationUtility.HasManagedReferencesWithMissingTypes(value));
+            if (broken)
+            {
+                var validation = typeof(OpenXRSettings).Assembly.GetType("UnityEditor.XR.OpenXR.OpenXRProjectValidation");
+                var regenerate = validation?.GetMethod("RegenerateXRPackageSettingsAsset", BindingFlags.Static | BindingFlags.NonPublic);
+                if (regenerate == null) throw new BuildFailedException("Installed OpenXR package does not expose its settings regeneration API.");
+                regenerate.Invoke(null, null);
+            }
+
+            FeatureHelpers.RefreshFeatures(BuildTargetGroup.Standalone);
+            FeatureHelpers.RefreshFeatures(BuildTargetGroup.Android);
+            var android = OpenXRSettings.GetSettingsForBuildTargetGroup(BuildTargetGroup.Android);
+            if (android == null) throw new BuildFailedException("Could not create Android OpenXR settings.");
+            var required = new[]
+            {
+                "MetaQuestFeature", "OculusTouchControllerProfile", "MetaQuestTouchPlusControllerProfile",
+                "HandTrackingDataSourceFeature", "HandInteractionProfile", "MetaHandTrackingAim", "MetaOpenXRHandMeshData",
+            };
+            foreach (var feature in android.GetFeatures())
+                if (feature != null && required.Contains(feature.GetType().Name)) feature.enabled = true;
+            EditorUtility.SetDirty(android);
+            if (AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(path) != null && AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(legacyPath) != null)
+                AssetDatabase.DeleteAsset(legacyPath);
+            AssetDatabase.SaveAssets();
+            if (AssetDatabase.LoadAllAssetsAtPath(path).Any(value => value == null))
+                throw new BuildFailedException("OpenXR package settings still contain unresolved serialized sub-assets after regeneration.");
+        }
+
         [MenuItem("OpenCode Customs/Validate Quest Jarvis Room")]
         public static void Validate()
         {
-            RepairUrpGlobalSettings();
-            EnsureAnimatorController(true);
             var scene = EditorSceneManager.OpenScene(ScenePath, OpenSceneMode.Single);
+            var generation = scene.GetRootGameObjects().SelectMany(value => value.GetComponentsInChildren<JarvisRoomGeneration>(true)).FirstOrDefault();
+            if (generation == null || generation.version != JarvisRoomGeneration.CurrentVersion)
+                throw new BuildFailedException("Jarvis Room is stale. Run OpenCode Customs > Rebuild Quest Jarvis Room.");
             var visuals = UnityEngine.Object.FindAnyObjectByType<AvatarXRInputVisuals>(FindObjectsInactive.Include);
             if (visuals == null || visuals.leftController == null || visuals.rightController == null ||
                 visuals.leftHand == null || visuals.rightHand == null)
                 throw new BuildFailedException("Jarvis Room must contain left/right Quest controller and hand visuals.");
-            var missing = 0;
-            foreach (var root in scene.GetRootGameObjects())
-                foreach (var value in root.GetComponentsInChildren<Transform>(true))
-                    missing += GameObjectUtility.GetMonoBehavioursWithMissingScriptCount(value.gameObject);
-            if (missing > 0) throw new BuildFailedException("Jarvis Room contains " + missing + " missing script references.");
+            var playerRig = scene.GetRootGameObjects().FirstOrDefault(value => value.name == "XriPlayerRig");
+            if (playerRig == null) throw new BuildFailedException("Jarvis Room must contain the XriPlayerRig imported from vr-constructor.");
+            var simulator = playerRig.GetComponentsInChildren<Transform>(true).FirstOrDefault(value => value.name == "XR Interaction Simulator (Editor Only)");
+            if (simulator == null || !simulator.CompareTag("EditorOnly"))
+                throw new BuildFailedException("XriPlayerRig must contain the Editor-only XR Interaction Simulator.");
+            if (playerRig.GetComponentInChildren<EventSystem>(true) == null || playerRig.GetComponentInChildren<XRUIInputModule>(true) == null)
+                throw new BuildFailedException("XriPlayerRig must contain EventSystem and XRUIInputModule components.");
+            var inputMode = playerRig.GetComponent<AvatarEditorInputMode>();
+            if (inputMode == null || inputMode.simulator == null || inputMode.visuals != visuals || inputMode.cameraFloorOffset == null)
+                throw new BuildFailedException("XriPlayerRig must contain the XRI/Desktop input mode controller.");
+            var keyboard = playerRig.GetComponent<AvatarVRKeyboard>();
+            if (keyboard == null || keyboard.viewer == null)
+                throw new BuildFailedException("XriPlayerRig must contain the interactive Ukrainian/English VR keyboard.");
+            var chatPanel = playerRig.GetComponent<AvatarChatPanel>();
+            if (chatPanel == null || chatPanel.viewer == null || chatPanel.keyboard != keyboard || keyboard.chatPanel != chatPanel)
+                throw new BuildFailedException("XriPlayerRig must contain the world-space Jarvis text chat wired to the VR keyboard.");
+            var bridges = scene.GetRootGameObjects().SelectMany(value => value.GetComponentsInChildren<OpenCodeAvatarBridgeV2>(true)).ToArray();
+            if (bridges.Length != 1 || !bridges[0].receiveVoice || bridges[0].audioSource == null)
+                throw new BuildFailedException("Jarvis Room must contain exactly one Avatar Bridge with Unity voice playback enabled.");
+            var speechBubble = scene.GetRootGameObjects().SelectMany(value => value.GetComponentsInChildren<AvatarSpeechBubble>(true)).FirstOrDefault();
+            var overlay = scene.GetRootGameObjects().SelectMany(value => value.GetComponentsInChildren<AvatarDeveloperOverlay>(true)).FirstOrDefault();
+            if (speechBubble == null || speechBubble.head == null || speechBubble.viewer == null)
+                throw new BuildFailedException("GamerGirl must contain a viewer-facing comic speech bubble attached above the head.");
+            if (overlay == null || overlay.keyboard != keyboard || overlay.chatPanel != chatPanel || overlay.viewer == null)
+                throw new BuildFailedException("Jarvis Room must contain the world-space developer panel wired to the VR keyboard and text chat.");
+            var origins = playerRig.GetComponentsInChildren<XROrigin>(true);
+            if (origins.Length == 0 || origins.Any(origin => Mathf.Abs(origin.CameraYOffset) > 0.001f ||
+                (origin.CameraFloorOffsetObject != null && origin.CameraFloorOffsetObject.transform.localPosition.sqrMagnitude > 0.000001f)))
+                throw new BuildFailedException("XriPlayerRig simulation requires zero Camera Y Offset and a zero Camera Floor Offset transform.");
+            var xrLifecycles = scene.GetRootGameObjects().SelectMany(value => value.GetComponentsInChildren<AvatarQuestXrLifecycle>(true)).ToArray();
+            if (xrLifecycles.Length != 1)
+                throw new BuildFailedException("Jarvis Room must contain exactly one Quest-only manual OpenXR lifecycle component.");
+            var missing = AuditMissingScripts(scene);
+            if (missing.Length > 0) throw new BuildFailedException("Missing script references:\n" + string.Join("\n", missing));
+            ValidateLoaders(BuildTargetGroup.Standalone, null);
+            ValidateLoaders(BuildTargetGroup.Android, "OpenXRLoader");
+            ValidateTmpFallback();
             ValidateGamerGirl(scene, true);
-            Debug.Log("Quest Jarvis Room validation passed: GamerGirl body, facial presentation, Mixamo animation, New Input System, controller visuals and hand visuals are configured.");
+            Debug.Log("Quest Jarvis Room validation passed: GamerGirl, comic speech bubble, text chat, VR keyboard, world-space diagnostics, New Input System, XR simulator, controllers and hands are configured.");
         }
 
         [MenuItem("OpenCode Customs/Validate GamerGirl Agent Body")]
@@ -164,6 +316,134 @@ namespace OpenCode.Customs.QuestAlpha.Editor
             var scene = EditorSceneManager.OpenScene(ScenePath, OpenSceneMode.Single);
             ValidateGamerGirl(scene, false);
             Debug.Log("SK_GamerGirl_Agent validation passed: Humanoid body, URP materials, face bindings, NavMesh locomotion, gaze and hand rigs are configured.");
+        }
+
+        static void ConfigureLoaders(BuildTargetGroup target, string loaderPath)
+        {
+            var settings = XRGeneralSettingsPerBuildTarget.XRGeneralSettingsForBuildTarget(target);
+            if (settings == null || settings.AssignedSettings == null)
+                throw new BuildFailedException("XR Plug-in Management settings are missing for " + target + ".");
+            var loader = string.IsNullOrEmpty(loaderPath) ? null : AssetDatabase.LoadAssetAtPath<XRLoader>(loaderPath);
+            if (!string.IsNullOrEmpty(loaderPath) && loader == null) throw new BuildFailedException("XR loader is missing: " + loaderPath);
+            var loaders = loader == null ? new List<XRLoader>() : new List<XRLoader> { loader };
+            if (!settings.AssignedSettings.TrySetLoaders(loaders))
+                throw new BuildFailedException("Could not configure XR loaders for " + target + ".");
+            settings.AssignedSettings.automaticLoading = false;
+            settings.AssignedSettings.automaticRunning = false;
+            settings.InitManagerOnStart = false;
+            EditorUtility.SetDirty(settings);
+            EditorUtility.SetDirty(settings.AssignedSettings);
+        }
+
+        static void ValidateLoaders(BuildTargetGroup target, string expected)
+        {
+            var settings = XRGeneralSettingsPerBuildTarget.XRGeneralSettingsForBuildTarget(target);
+            var loaders = settings?.AssignedSettings?.activeLoaders?.ToArray();
+            if (settings?.AssignedSettings == null || settings.InitManagerOnStart ||
+                settings.AssignedSettings.automaticLoading || settings.AssignedSettings.automaticRunning)
+                throw new BuildFailedException(target + " must use the controlled OpenCode Customs XR lifecycle instead of automatic XR startup.");
+            if (string.IsNullOrEmpty(expected))
+            {
+                if (loaders != null && loaders.Length > 0)
+                    throw new BuildFailedException(target + " must not start an XR loader; XRI Interaction Simulator owns Editor devices.");
+                return;
+            }
+            if (loaders == null || loaders.Length != 1 || loaders[0] == null || loaders[0].name != expected)
+                throw new BuildFailedException(target + " must use only " + expected + ".");
+        }
+
+        static void ValidateTmpFallback()
+        {
+            var font = AssetDatabase.LoadAssetAtPath<TMP_FontAsset>(TmpFallbackPath);
+            if (font == null)
+                throw new BuildFailedException("TextMesh Pro fallback font is missing: " + TmpFallbackPath);
+            if (SerializationUtility.HasManagedReferencesWithMissingTypes(font) ||
+                AssetDatabase.LoadAllAssetsAtPath(TmpFallbackPath).Any(value => value == null))
+                throw new BuildFailedException("TextMesh Pro fallback font contains unresolved serialized references: " + TmpFallbackPath);
+            if (font.sourceFontFile == null || font.material == null || font.atlasTextures == null ||
+                font.atlasTextures.Length == 0 || font.atlasTextures.Any(value => value == null))
+                throw new BuildFailedException("TextMesh Pro fallback font is incomplete. Restore its source font, material and atlas: " + TmpFallbackPath);
+        }
+
+        static string[] AuditMissingScripts(Scene scene)
+        {
+            var paths = new List<string>();
+            foreach (var root in scene.GetRootGameObjects()) CollectMissingScripts(root, "Scene", paths);
+            foreach (var dependency in AssetDatabase.GetDependencies(ScenePath, true))
+            {
+                if (dependency.EndsWith(".prefab", StringComparison.OrdinalIgnoreCase))
+                {
+                    var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(dependency);
+                    if (prefab != null) CollectMissingScripts(prefab, dependency, paths);
+                }
+                CollectMissingObjectReferences(dependency, paths);
+                CollectMissingAnimatorBehaviours(dependency, paths);
+            }
+            CollectMissingManagedReferences("Assets/XR/XRGeneralSettingsPerBuildTarget.asset", paths);
+            CollectMissingManagedReferences("Assets/XR/Settings/OpenXR Package Settings.asset", paths);
+            CollectMissingManagedReferences("Assets/Settings/Project Configuration/UniversalRenderPipelineGlobalSettings.asset", paths);
+            CollectMissingObjectReferences("Assets/XR/XRGeneralSettingsPerBuildTarget.asset", paths);
+            CollectMissingObjectReferences("Assets/XR/Settings/OpenXR Package Settings.asset", paths);
+            return paths.Distinct().OrderBy(value => value).ToArray();
+        }
+
+        static void CollectMissingObjectReferences(string assetPath, List<string> paths)
+        {
+            foreach (var value in AssetDatabase.LoadAllAssetsAtPath(assetPath))
+            {
+                if (value == null)
+                {
+                    paths.Add(assetPath + ": unresolved serialized sub-asset");
+                    continue;
+                }
+                var serialized = new SerializedObject(value);
+                var property = serialized.GetIterator();
+                if (!property.Next(true)) continue;
+                do
+                {
+                    if (property.propertyType != SerializedPropertyType.ObjectReference ||
+                        property.name != "m_Script" || property.objectReferenceValue != null) continue;
+                    paths.Add(assetPath + ": " + value.name + "." + property.propertyPath + " references a missing script");
+                }
+                while (property.Next(true));
+            }
+        }
+
+        static void CollectMissingAnimatorBehaviours(string assetPath, List<string> paths)
+        {
+            var controller = AssetDatabase.LoadAssetAtPath<AnimatorController>(assetPath);
+            if (controller == null) return;
+            foreach (var layer in controller.layers)
+                CollectMissingAnimatorBehaviours(assetPath, layer.stateMachine, paths);
+        }
+
+        static void CollectMissingAnimatorBehaviours(string assetPath, AnimatorStateMachine stateMachine, List<string> paths)
+        {
+            foreach (var state in stateMachine.states.Select(value => value.state))
+                if (state.behaviours.Any(value => value == null))
+                    paths.Add(assetPath + ": animator state " + state.name + " has a missing StateMachineBehaviour");
+            foreach (var child in stateMachine.stateMachines)
+                CollectMissingAnimatorBehaviours(assetPath, child.stateMachine, paths);
+        }
+
+        static void CollectMissingScripts(GameObject root, string source, List<string> paths)
+        {
+            foreach (var value in root.GetComponentsInChildren<Transform>(true))
+            {
+                var count = GameObjectUtility.GetMonoBehavioursWithMissingScriptCount(value.gameObject);
+                if (count == 0) continue;
+                paths.Add(source + ": " + AnimationUtility.CalculateTransformPath(value, root.transform) + " (" + count + ")");
+            }
+        }
+
+        static void CollectMissingManagedReferences(string assetPath, List<string> paths)
+        {
+            foreach (var value in AssetDatabase.LoadAllAssetsAtPath(assetPath))
+            {
+                if (value == null || !SerializationUtility.HasManagedReferencesWithMissingTypes(value)) continue;
+                foreach (var missing in SerializationUtility.GetManagedReferencesWithMissingTypes(value))
+                    paths.Add(assetPath + ": " + value.name + " -> " + missing.namespaceName + "." + missing.className);
+            }
         }
 
         [MenuItem("OpenCode Customs/Repair URP Global Settings")]
@@ -176,7 +456,6 @@ namespace OpenCode.Customs.QuestAlpha.Editor
 
             foreach (var missing in SerializationUtility.GetManagedReferencesWithMissingTypes(settings))
                 SerializationUtility.ClearManagedReferenceWithMissingType(settings, missing.referenceId);
-            EditorGraphicsSettings.PopulateRenderPipelineGraphicsSettings(settings);
             settings.Initialize();
             EditorUtility.SetDirty(settings);
             AssetDatabase.SaveAssetIfDirty(settings);
@@ -190,6 +469,18 @@ namespace OpenCode.Customs.QuestAlpha.Editor
                 SerializationUtility.GetManagedReferencesWithMissingTypes(settings),
                 value => value.namespaceName + "." + value.className);
             throw new BuildFailedException("URP Global Settings still contain missing managed-reference types: " + string.Join(", ", names));
+        }
+
+        [InitializeOnLoadMethod]
+        static void RepairUrpGlobalSettingsAfterReload()
+        {
+            EditorApplication.delayCall += () =>
+            {
+                if (EditorApplication.isPlayingOrWillChangePlaymode) return;
+                var settings = GraphicsSettings.GetSettingsForRenderPipeline<UniversalRenderPipeline>();
+                if (settings == null || !SerializationUtility.HasManagedReferencesWithMissingTypes(settings)) return;
+                RepairUrpGlobalSettings();
+            };
         }
 
         static GameObject CreateGamerGirlBody(Transform parent)
@@ -236,8 +527,39 @@ namespace OpenCode.Customs.QuestAlpha.Editor
             Directory.CreateDirectory(AvatarDirectory);
             AssetDatabase.Refresh();
             foreach (var value in paths) ConfigureAnimationImporter(value.Value, value.Key == "Idle" || value.Key == "Walk" || value.Key == "Run" || value.Key == "Talking" || value.Key == "Thinking");
+            var optionalPaths = OptionalGestures
+                .Select(value => new { definition = value, path = GestureDirectory + "/" + value.file })
+                .Where(value => File.Exists(value.path))
+                .ToArray();
+            foreach (var value in optionalPaths) ConfigureAnimationImporter(value.path, false);
+            var optionalClips = new Dictionary<string, AnimationClip>();
+            foreach (var value in optionalPaths)
+            {
+                var clip = LoadAnimationClip(value.path);
+                if (clip != null) optionalClips[value.definition.trigger] = clip;
+                else Debug.LogWarning("Optional gesture contains no usable AnimationClip: " + value.path);
+            }
             var existing = AssetDatabase.LoadAssetAtPath<AnimatorController>(AnimatorControllerPath);
-            if (existing != null) return existing;
+            if (existing != null)
+            {
+                foreach (var parameter in new[]
+                {
+                    new AnimatorControllerParameter { name = "Speed", type = AnimatorControllerParameterType.Float },
+                    new AnimatorControllerParameter { name = "AngularSpeed", type = AnimatorControllerParameterType.Float },
+                    new AnimatorControllerParameter { name = "AgentState", type = AnimatorControllerParameterType.Int },
+                    new AnimatorControllerParameter { name = "Emotion", type = AnimatorControllerParameterType.Int },
+                    new AnimatorControllerParameter { name = "EmotionIntensity", type = AnimatorControllerParameterType.Float },
+                })
+                    if (!existing.parameters.Any(value => value.name == parameter.name)) existing.AddParameter(parameter);
+                var layers = existing.layers;
+                if (layers.Length == 0) throw new BuildFailedException("Generated GamerGirl controller has no locomotion layer.");
+                layers[0].iKPass = true;
+                existing.layers = layers;
+                EnsureOptionalGestures(existing, optionalClips);
+                EditorUtility.SetDirty(existing);
+                AssetDatabase.SaveAssetIfDirty(existing);
+                return existing;
+            }
 
             var clips = paths.ToDictionary(value => value.Key, value => LoadAnimationClip(value.Value));
             var invalid = clips.Where(value => value.Value == null).Select(value => value.Key).ToArray();
@@ -249,10 +571,12 @@ namespace OpenCode.Customs.QuestAlpha.Editor
             controller.AddParameter("AgentState", AnimatorControllerParameterType.Int);
             controller.AddParameter("Emotion", AnimatorControllerParameterType.Int);
             controller.AddParameter("EmotionIntensity", AnimatorControllerParameterType.Float);
-            foreach (var trigger in new[] { "Wave", "Point", "Nod", "Thinking" }) controller.AddParameter(trigger, AnimatorControllerParameterType.Trigger);
+            foreach (var trigger in new[] { "Wave", "Point", "Nod", "Thinking" }.Concat(optionalClips.Keys))
+                controller.AddParameter(trigger, AnimatorControllerParameterType.Trigger);
 
             var baseLayer = controller.layers[0];
             baseLayer.name = "Locomotion";
+            baseLayer.iKPass = true;
             var locomotion = baseLayer.stateMachine.AddState("Locomotion");
             var blend = new BlendTree { name = "Idle Walk Run", blendParameter = "Speed", useAutomaticThresholds = false };
             AssetDatabase.AddObjectToAsset(blend, controller);
@@ -261,6 +585,9 @@ namespace OpenCode.Customs.QuestAlpha.Editor
             blend.AddChild(clips["Run"], 3.5f);
             locomotion.motion = blend;
             baseLayer.stateMachine.defaultState = locomotion;
+            var controllerLayers = controller.layers;
+            controllerLayers[0] = baseLayer;
+            controller.layers = controllerLayers;
 
             var upperStateMachine = new AnimatorStateMachine { name = "Upper Body" };
             AssetDatabase.AddObjectToAsset(upperStateMachine, controller);
@@ -276,6 +603,7 @@ namespace OpenCode.Customs.QuestAlpha.Editor
             AddGesture(upperStateMachine, empty, "Point", clips["Point"]);
             AddGesture(upperStateMachine, empty, "Nod", clips["Nod"]);
             AddGesture(upperStateMachine, empty, "Thinking", clips["Thinking"]);
+            foreach (var gesture in optionalClips) AddGesture(upperStateMachine, empty, gesture.Key, gesture.Value);
             controller.AddLayer(new AnimatorControllerLayer
             {
                 name = "Upper Body",
@@ -287,6 +615,28 @@ namespace OpenCode.Customs.QuestAlpha.Editor
             EditorUtility.SetDirty(controller);
             AssetDatabase.SaveAssets();
             return controller;
+        }
+
+        static void EnsureOptionalGestures(AnimatorController controller, Dictionary<string, AnimationClip> clips)
+        {
+            var upperLayer = controller.layers.FirstOrDefault(value => value.name == "Upper Body");
+            if (upperLayer == null || upperLayer.stateMachine == null) throw new BuildFailedException("Generated GamerGirl controller has no Upper Body layer.");
+            var empty = upperLayer.stateMachine.states.Select(value => value.state).FirstOrDefault(value => value.name == "Empty");
+            if (empty == null) throw new BuildFailedException("Generated GamerGirl controller has no Empty upper-body state.");
+            foreach (var gesture in clips)
+            {
+                if (!controller.parameters.Any(value => value.name == gesture.Key)) controller.AddParameter(gesture.Key, AnimatorControllerParameterType.Trigger);
+                var state = upperLayer.stateMachine.states.Select(value => value.state).FirstOrDefault(value => value.name == gesture.Key + " Gesture");
+                if (state != null)
+                {
+                    state.motion = gesture.Value;
+                    EditorUtility.SetDirty(state);
+                    continue;
+                }
+                AddGesture(upperLayer.stateMachine, empty, gesture.Key, gesture.Value);
+            }
+            EditorUtility.SetDirty(controller);
+            AssetDatabase.SaveAssets();
         }
 
         static string AnimationAssetPath(string name)
@@ -369,7 +719,7 @@ namespace OpenCode.Customs.QuestAlpha.Editor
 
         static AvatarRigTargets ConfigureRig(GameObject companion, Animator animator, Transform player)
         {
-            var head = RequireBone(animator, HumanBodyBones.Head);
+            RequireBone(animator, HumanBodyBones.Head);
             var leftUpperArm = RequireBone(animator, HumanBodyBones.LeftUpperArm);
             var leftLowerArm = RequireBone(animator, HumanBodyBones.LeftLowerArm);
             var leftHand = RequireBone(animator, HumanBodyBones.LeftHand);
@@ -379,48 +729,31 @@ namespace OpenCode.Customs.QuestAlpha.Editor
 
             var targets = new GameObject("Rig Targets");
             targets.transform.SetParent(companion.transform, false);
-            var headTarget = Target("Head Look Target", targets.transform, player.position);
             var leftTarget = Target("Left Hand Target", targets.transform, leftHand.position);
             var rightTarget = Target("Right Hand Target", targets.transform, rightHand.position);
             var leftHint = Target("Left Elbow Hint", targets.transform, leftLowerArm.position - companion.transform.right * 0.25f - companion.transform.forward * 0.15f);
             var rightHint = Target("Right Elbow Hint", targets.transform, rightLowerArm.position + companion.transform.right * 0.25f - companion.transform.forward * 0.15f);
 
             var builder = animator.gameObject.GetComponent<RigBuilder>() ?? animator.gameObject.AddComponent<RigBuilder>();
-            var headRig = CreateHeadRig(animator.transform, head, headTarget);
             var leftRig = CreateHandRig(animator.transform, "Left Hand Rig", leftUpperArm, leftLowerArm, leftHand, leftTarget, leftHint);
             var rightRig = CreateHandRig(animator.transform, "Right Hand Rig", rightUpperArm, rightLowerArm, rightHand, rightTarget, rightHint);
-            builder.layers.Add(new RigLayer(headRig));
+            builder.layers.Clear();
             builder.layers.Add(new RigLayer(leftRig));
             builder.layers.Add(new RigLayer(rightRig));
 
+            // OnAnimatorIK is dispatched to behaviours on the Animator GameObject.
+            var gaze = animator.gameObject.AddComponent<AvatarHumanoidGaze>();
+            gaze.animator = animator;
+            gaze.defaultTarget = player;
+
             var value = companion.AddComponent<AvatarRigTargets>();
             value.defaultLookTarget = player;
-            value.headLookTarget = headTarget;
+            value.gaze = gaze;
             value.leftHandTarget = leftTarget;
             value.rightHandTarget = rightTarget;
-            value.headRig = headRig;
             value.leftHandRig = leftRig;
             value.rightHandRig = rightRig;
             return value;
-        }
-
-        static Rig CreateHeadRig(Transform parent, Transform head, Transform target)
-        {
-            var root = new GameObject("Head Look Rig");
-            root.transform.SetParent(parent, false);
-            var rig = root.AddComponent<Rig>();
-            rig.weight = 1f;
-            var constraint = root.AddComponent<MultiAimConstraint>();
-            var data = constraint.data;
-            data.constrainedObject = head;
-            data.aimAxis = MultiAimConstraintData.Axis.Z;
-            data.upAxis = MultiAimConstraintData.Axis.Y;
-            data.maintainOffset = true;
-            var sources = new WeightedTransformArray();
-            sources.Add(new WeightedTransform(target, 1f));
-            data.sourceObjects = sources;
-            constraint.data = data;
-            return rig;
         }
 
         static Rig CreateHandRig(Transform parent, string name, Transform upperArm, Transform lowerArm, Transform hand, Transform target, Transform hint)
@@ -489,53 +822,106 @@ namespace OpenCode.Customs.QuestAlpha.Editor
             if (animator == null || animator.avatar == null || !animator.avatar.isHuman || !animator.avatar.isValid)
                 throw new BuildFailedException("SK_GamerGirl_Agent Humanoid Avatar is invalid.");
             if (requireAnimatorController && animator.runtimeAnimatorController == null) throw new BuildFailedException("SK_GamerGirl_Agent Animator Controller is missing.");
+            if (animator.runtimeAnimatorController is AnimatorController controller)
+            {
+                if (controller.layers.Length == 0 || !controller.layers[0].iKPass)
+                    throw new BuildFailedException("GamerGirl locomotion layer must enable humanoid IK for gaze.");
+                var configured = OptionalGestures.Where(value => File.Exists(GestureDirectory + "/" + value.file)).Select(value => value.trigger).ToArray();
+                var missingParameters = configured.Where(value => !controller.parameters.Any(parameter => parameter.name == value)).ToArray();
+                var upperLayer = controller.layers.FirstOrDefault(value => value.name == "Upper Body");
+                var stateNames = upperLayer?.stateMachine?.states.Select(value => value.state.name).ToArray() ?? Array.Empty<string>();
+                var missingStates = configured.Where(value => !stateNames.Contains(value + " Gesture")).ToArray();
+                if (missingParameters.Length > 0 || missingStates.Length > 0)
+                    throw new BuildFailedException("GamerGirl optional gestures are incomplete. Missing parameters: " + string.Join(", ", missingParameters) + "; missing states: " + string.Join(", ", missingStates));
+            }
             var presentation = scene.GetRootGameObjects().SelectMany(value => value.GetComponentsInChildren<AvatarVRMPresentation>(true)).FirstOrDefault();
             if (presentation == null || presentation.face == null) throw new BuildFailedException("GamerGirl facial presentation is not configured.");
             var missing = RequiredBlendShapes.Where(value => !HasBlendShape(presentation.face, value)).ToArray();
             if (missing.Length > 0) throw new BuildFailedException("GamerGirl face is missing required blend shapes: " + string.Join(", ", missing));
             if (body.GetComponentInParent<AvatarLocomotionController>() == null) throw new BuildFailedException("GamerGirl locomotion controller is missing.");
-            if (body.GetComponentInParent<AvatarRigTargets>() == null || body.GetComponentInChildren<RigBuilder>(true) == null)
+            var rigTargets = body.GetComponentInParent<AvatarRigTargets>();
+            if (rigTargets == null || rigTargets.gaze == null || body.GetComponentInChildren<AvatarHumanoidGaze>(true) == null || body.GetComponentInChildren<RigBuilder>(true) == null)
                 throw new BuildFailedException("GamerGirl gaze and hand rigs are missing.");
+            if (body.GetComponentInChildren<MultiAimConstraint>(true) != null)
+                throw new BuildFailedException("GamerGirl still contains the obsolete model-axis head MultiAim constraint.");
             var invalidMaterials = body.GetComponentsInChildren<Renderer>(true).SelectMany(value => value.sharedMaterials).Any(value => value == null || value.shader == null);
             if (invalidMaterials) throw new BuildFailedException("GamerGirl contains a missing material or shader.");
         }
 
         static GameObject CreateXROrigin()
         {
+            var player = new GameObject("XriPlayerRig");
             var preferred = new[]
             {
                 "Assets/Samples/XR Interaction Toolkit/3.5.1/Hands Interaction Demo/Prefabs/XR Origin Hands (XR Rig).prefab",
                 "Assets/Samples/XR Interaction Toolkit/3.5.1/Starter Assets/Prefabs/XR Origin (XR Rig).prefab",
             };
+            GameObject origin = null;
             foreach (var path in preferred)
             {
                 var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(path);
                 if (prefab == null) continue;
-                var value = PrefabUtility.InstantiatePrefab(prefab) as GameObject;
-                if (value == null) continue;
-                value.name = "XR Origin (Quest 3)";
-                return value;
+                origin = PrefabUtility.InstantiatePrefab(prefab, player.transform) as GameObject;
+                if (origin == null) continue;
+                origin.name = "XR Origin (Quest 3)";
+                PrefabUtility.UnpackPrefabInstance(origin, PrefabUnpackMode.Completely, InteractionMode.AutomatedAction);
+                break;
             }
-            return new GameObject("XR Origin (fallback)");
+            if (origin == null) new GameObject("XR Origin (fallback)").transform.SetParent(player.transform, false);
+
+            foreach (var xrOrigin in player.GetComponentsInChildren<XROrigin>(true))
+            {
+                xrOrigin.CameraYOffset = 0f;
+                if (xrOrigin.CameraFloorOffsetObject != null)
+                    xrOrigin.CameraFloorOffsetObject.transform.localPosition = Vector3.zero;
+            }
+
+            var simulator = InstantiatePrefab(InteractionSimulatorPrefabPath, player.transform, "XR Interaction Simulator (Editor Only)");
+            if (simulator == null)
+                throw new BuildFailedException("XR Interaction Simulator is missing. Copy it from vr-constructor to " + InteractionSimulatorPrefabPath + ".");
+            simulator.tag = "EditorOnly";
+
+            var eventSystem = new GameObject("XriEventSystem");
+            eventSystem.transform.SetParent(player.transform, false);
+            eventSystem.AddComponent<EventSystem>();
+            eventSystem.AddComponent<XRUIInputModule>();
+            return player;
         }
 
-        static void AttachInputVisuals(GameObject player)
+        static void RemoveMissingSceneScripts(GameObject root)
+        {
+            foreach (var value in root.GetComponentsInChildren<Transform>(true))
+            {
+                var count = GameObjectUtility.GetMonoBehavioursWithMissingScriptCount(value.gameObject);
+                if (count == 0) continue;
+                Debug.LogWarning("Removed " + count + " stale generated component reference(s) from " +
+                    AnimationUtility.CalculateTransformPath(value, root.transform) + ".");
+                GameObjectUtility.RemoveMonoBehavioursWithMissingScript(value.gameObject);
+            }
+        }
+
+        static AvatarXRInputVisuals AttachInputVisuals(GameObject player)
         {
             var transforms = player.GetComponentsInChildren<Transform>(true);
             var parent = System.Array.Find(transforms, value => value.name == "Camera Offset") ?? player.transform;
-            var leftController = InstantiatePrefab(
+            var leftController = System.Array.Find(transforms, value => value.name == "Left Controller")?.gameObject ?? InstantiatePrefab(
                 "Assets/Samples/XR Interaction Toolkit/3.5.1/Starter Assets/Prefabs/Controllers/XR Controller Left.prefab",
                 parent,
-                "Left Quest Controller Visual");
-            var rightController = InstantiatePrefab(
+                "Left Controller");
+            var rightController = System.Array.Find(transforms, value => value.name == "Right Controller")?.gameObject ?? InstantiatePrefab(
                 "Assets/Samples/XR Interaction Toolkit/3.5.1/Starter Assets/Prefabs/Controllers/XR Controller Right.prefab",
                 parent,
-                "Right Quest Controller Visual");
-            var visuals = player.AddComponent<AvatarXRInputVisuals>();
+                "Right Controller");
+            if (leftController == null || rightController == null)
+                throw new BuildFailedException("Tracked left/right XRI controller roots are missing.");
+            var visuals = player.GetComponent<AvatarXRInputVisuals>() ?? player.AddComponent<AvatarXRInputVisuals>();
             visuals.leftController = leftController;
             visuals.rightController = rightController;
             visuals.leftHand = System.Array.Find(transforms, value => value.name == "Left Hand")?.gameObject;
             visuals.rightHand = System.Array.Find(transforms, value => value.name == "Right Hand")?.gameObject;
+            visuals.modalityManager = player.GetComponentInChildren<XRInputModalityManager>(true);
+            if (visuals.modalityManager != null) visuals.modalityManager.enabled = false;
+            return visuals;
         }
 
         static GameObject InstantiatePrefab(string path, Transform parent, string name)
@@ -543,7 +929,11 @@ namespace OpenCode.Customs.QuestAlpha.Editor
             var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(path);
             if (prefab == null) return null;
             var value = PrefabUtility.InstantiatePrefab(prefab, parent) as GameObject;
-            if (value != null) value.name = name;
+            if (value != null)
+            {
+                value.name = name;
+                PrefabUtility.UnpackPrefabInstance(value, PrefabUnpackMode.Completely, InteractionMode.AutomatedAction);
+            }
             return value;
         }
 

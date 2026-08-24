@@ -131,6 +131,24 @@ const api: ElectronAPI = {
   exportVoiceDiagnostics: (sessionID) => ipcRenderer.invoke("export-voice-diagnostics", sessionID),
   storeVoiceTurnAudio: (input) => ipcRenderer.invoke("store-voice-turn-audio", input),
   getVoiceTurnAudio: (sessionID, turnID) => ipcRenderer.invoke("get-voice-turn-audio", sessionID, turnID),
+  getNemotronVoiceStatus: () => ipcRenderer.invoke("get-nemotron-voice-status"),
+  configureNemotronVoice: (input) => ipcRenderer.invoke("configure-nemotron-voice", input),
+  installNemotronVoice: () => ipcRenderer.invoke("install-nemotron-voice"),
+  startNemotronVoice: () => ipcRenderer.invoke("start-nemotron-voice"),
+  stopNemotronVoice: () => ipcRenderer.invoke("stop-nemotron-voice"),
+  beginNemotronVoice: (input) => ipcRenderer.invoke("begin-nemotron-voice", input),
+  appendNemotronVoice: (input) => ipcRenderer.send("append-nemotron-voice", input),
+  commitNemotronVoice: (requestID) => ipcRenderer.invoke("commit-nemotron-voice", requestID),
+  cancelNemotronVoice: (requestID) => ipcRenderer.invoke("cancel-nemotron-voice", requestID),
+  onNemotronVoiceEvent: (cb) => {
+    const handler = (_: unknown, event: Parameters<typeof cb>[0]) => cb(event)
+    ipcRenderer.on("nemotron-voice-event", handler)
+    void ipcRenderer.invoke("subscribe-nemotron-voice")
+    return () => {
+      ipcRenderer.removeListener("nemotron-voice-event", handler)
+      void ipcRenderer.invoke("unsubscribe-nemotron-voice")
+    }
+  },
   getResearchBrowserStatus: () => ipcRenderer.invoke("get-research-browser-status"),
   showResearchBrowser: () => ipcRenderer.invoke("show-research-browser"),
   clearResearchBrowserData: () => ipcRenderer.invoke("clear-research-browser-data"),

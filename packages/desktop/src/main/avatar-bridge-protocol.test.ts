@@ -48,6 +48,26 @@ describe("Unity Avatar Bridge protocol", () => {
     ).toBeUndefined()
   })
 
+  test("accepts text-only avatar transcripts and rejects unknown response modes", () => {
+    expect(parseAvatarClientMessage({
+      type: "speech.final",
+      requestID: "typed-1",
+      text: "  Привіт, Джарвісе!  ",
+      responseMode: "text",
+    })).toEqual({
+      type: "speech.final",
+      requestID: "typed-1",
+      text: "Привіт, Джарвісе!",
+      responseMode: "text",
+    })
+    expect(parseAvatarClientMessage({
+      type: "speech.final",
+      requestID: "typed-2",
+      text: "Привіт",
+      responseMode: "silent",
+    })).toBeUndefined()
+  })
+
   test("accepts a v2 capability manifest and bounded world snapshot", () => {
     expect(
       parseAvatarClientMessage({

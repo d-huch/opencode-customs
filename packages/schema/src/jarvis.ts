@@ -27,6 +27,59 @@ export const ModelRoles = Schema.Struct({
 }).annotate({ identifier: "Jarvis.ModelRoles" })
 export interface ModelRoles extends Schema.Schema.Type<typeof ModelRoles> {}
 
+export const ReactorProfile = Schema.Literals(["fast", "balanced", "quality"]).annotate({
+  identifier: "Jarvis.ReactorProfile",
+})
+export type ReactorProfile = typeof ReactorProfile.Type
+
+export const ReasoningMode = Schema.Literals(["off", "on"]).annotate({ identifier: "Jarvis.ReasoningMode" })
+export type ReasoningMode = typeof ReasoningMode.Type
+
+export const ReactorPolicy = Schema.Struct({
+  profile: ReactorProfile,
+  dialogueReasoning: ReasoningMode,
+  plannerReasoning: ReasoningMode,
+  allowFallback: Schema.Boolean,
+}).annotate({ identifier: "Jarvis.ReactorPolicy" })
+export interface ReactorPolicy extends Schema.Schema.Type<typeof ReactorPolicy> {}
+
+export const BenchmarkResult = Schema.Struct({
+  model: ModelRef,
+  endpoint: Schema.String,
+  instance: Schema.String,
+  testedAt: NonNegativeInt,
+  expiresAt: NonNegativeInt,
+  ttftMs: NonNegativeInt,
+  totalMs: NonNegativeInt,
+  tokensPerSecond: Schema.Number,
+  outputTokens: NonNegativeInt,
+  context: NonNegativeInt,
+  memoryBytes: optional(NonNegativeInt),
+  ukrainian: Schema.Boolean,
+  instructions: Schema.Boolean,
+  toolCalling: Schema.Boolean,
+  accepted: Schema.Boolean,
+  score: Schema.Number,
+  error: optional(Schema.String),
+}).annotate({ identifier: "Jarvis.BenchmarkResult" })
+export interface BenchmarkResult extends Schema.Schema.Type<typeof BenchmarkResult> {}
+
+export const BenchmarkState = Schema.Struct({
+  status: Schema.Literals(["idle", "running", "completed", "cancelled", "error"]),
+  profile: ReactorProfile,
+  startedAt: optional(NonNegativeInt),
+  completedAt: optional(NonNegativeInt),
+  activeModel: optional(ModelRef),
+  results: Schema.Array(BenchmarkResult),
+  selected: optional(ModelRef),
+  fallback: Schema.Array(ModelRef),
+  error: optional(Schema.String),
+}).annotate({ identifier: "Jarvis.BenchmarkState" })
+export interface BenchmarkState extends Schema.Schema.Type<typeof BenchmarkState> {}
+
+export const BenchmarkRun = Schema.Struct({ profile: ReactorProfile }).annotate({ identifier: "Jarvis.BenchmarkRun" })
+export interface BenchmarkRun extends Schema.Schema.Type<typeof BenchmarkRun> {}
+
 export const ProfileSnapshot = Schema.Struct({
   id: Schema.String,
   revision: NonNegativeInt,
@@ -63,6 +116,8 @@ export const Config = Schema.Struct({
   plannerTimeoutMs: NonNegativeInt,
   plannerIdleUnloadMs: NonNegativeInt,
   plannerEscalationMinWords: NonNegativeInt,
+  reactor: ReactorPolicy,
+  benchmark: BenchmarkState,
   initiative: InitiativePolicy,
   updatedAt: NonNegativeInt,
 }).annotate({ identifier: "Jarvis.Config" })

@@ -31,6 +31,7 @@ import { RepositoryMap } from "./repository-map"
 import { RepositoryRetrievalFeedback } from "./repository-retrieval-feedback"
 import * as SessionRunnerLLM from "./session/runner/llm"
 import { SessionRunnerModel } from "./session/runner/model"
+import { JarvisBenchmark } from "./jarvis-benchmark"
 import { SessionTodo } from "./session/todo"
 import { SkillV2 } from "./skill"
 import { SkillGuidance } from "./skill/guidance"
@@ -84,6 +85,7 @@ export const locationServices = LayerNode.group([
   ReadToolFileSystem.node,
   BuiltInTools.node,
   SessionRunnerModel.node,
+  JarvisBenchmark.node,
   Snapshot.node,
   SessionRunnerLLM.node,
 ])

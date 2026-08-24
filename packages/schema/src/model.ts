@@ -78,6 +78,10 @@ export const Info = Schema.Struct({
   cost: Schema.Array(Cost),
   status: Schema.Literals(["alpha", "beta", "deprecated", "active"]),
   enabled: Schema.Boolean,
+  runtime: Schema.Struct({
+    instanceID: Schema.String.pipe(optional),
+    sizeBytes: Schema.Number.pipe(optional),
+  }).pipe(optional),
   limit: Schema.Struct({
     context: Schema.Int,
     input: Schema.Int.pipe(optional),

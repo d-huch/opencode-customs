@@ -29,6 +29,7 @@ export interface SoundSettings {
 }
 
 export type VoicePersonalityMode = "normal" | "work" | "night" | "emergency"
+export type VoiceEngine = "cascade" | "nemotron"
 export type FishSpeechLanguage = "auto" | "uk" | "en" | "mixed"
 export type WebSearchEngine = "duckduckgo" | "google" | "bing"
 export type ResearchBrowserVisibility = "background" | "always" | "hidden"
@@ -43,6 +44,7 @@ export interface WebSearchSettings {
 }
 
 export interface VoiceSettings {
+  engine: VoiceEngine
   enabled: boolean
   autoSubmit: boolean
   speakResponses: boolean
@@ -326,6 +328,7 @@ const defaultSettings: Settings = {
     customInstructions: "",
   },
   voice: {
+    engine: "cascade",
     enabled: true,
     autoSubmit: true,
     speakResponses: true,
@@ -826,6 +829,10 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         },
       },
       voice: {
+        engine: withFallback(() => store.voice?.engine, defaultSettings.voice.engine),
+        setEngine(value: VoiceEngine) {
+          setStore("voice", "engine", value)
+        },
         enabled: withFallback(() => store.voice?.enabled, defaultSettings.voice.enabled),
         setEnabled(value: boolean) {
           setStore("voice", "enabled", value)

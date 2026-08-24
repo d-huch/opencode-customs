@@ -71,6 +71,11 @@ const layer = Layer.effect(
     const available = (provider: ProviderV2.Info, integration: Integration.Info | undefined) => {
       if (provider.disabled) return false
       if (typeof provider.request.body.apiKey === "string") return true
+      // Explicitly configured OpenAI-compatible endpoints (for example LM Studio
+      // and llama-server) do not require an Integration connection. Treating an
+      // empty same-name integration as authoritative made those models disappear
+      // from the V2 runtime catalog even though their local URL was configured.
+      if (provider.api.url) return true
       if (integration?.connections.length) return true
       return provider.integrationID === undefined && !integration
     }
