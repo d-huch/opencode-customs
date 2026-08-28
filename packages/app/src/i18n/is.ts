@@ -1,4 +1,4 @@
-import { DESKTOP_NATIVE_KEYS } from "./desktop-native"
+import { DESKTOP_NATIVE_ENGLISH, DESKTOP_NATIVE_KEYS } from "./desktop-native"
 
 const desktop = [
   "OpenCode",
@@ -70,6 +70,7 @@ const desktop = [
   "Vista skrá",
   "Skrár",
   "Staðbundinn þjónn",
+  "Research Browser",
   "WSL er aðeins í boði á Windows",
   "WSL er ekki í boði",
   "Ekki tókst að telja upp uppsettar WSL-dreifingar",
@@ -94,7 +95,7 @@ const desktop = [
 ]
 
 export const dict = {
-  ...Object.fromEntries(DESKTOP_NATIVE_KEYS.map((key, index) => [key, desktop[index]])),
+  ...Object.fromEntries(DESKTOP_NATIVE_KEYS.map((key, index) => [key, desktop[index] ?? DESKTOP_NATIVE_ENGLISH[key]])),
   "command.category.suggested": "Tillögur",
   "command.category.view": "Skoða",
   "command.category.project": "Verkefni",

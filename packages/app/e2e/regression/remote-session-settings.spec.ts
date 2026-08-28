@@ -185,7 +185,9 @@ for (const locale of [
 
     const wide = await body.evaluate((element) => {
       const style = getComputedStyle(element)
-      const children = [...element.querySelectorAll<HTMLElement>(":scope > .settings-v2-section")]
+      const children = [...element.querySelectorAll<HTMLElement>(":scope > .settings-v2-section")].filter(
+        (child) => child.offsetParent !== null,
+      )
       return {
         paddingLeft: style.paddingLeft,
         paddingRight: style.paddingRight,
@@ -201,6 +203,9 @@ for (const locale of [
     expect(wide.sectionGaps.every((gap) => gap >= 35)).toBe(true)
     expect(await header.evaluate((element) => getComputedStyle(element).position)).toBe("sticky")
 
+    await dialog.getByRole("tablist", { name: locale.id === "uk" ? "Центр керування Jarvis" : "Jarvis Control Center" })
+      .getByRole("tab", { name: locale.goals, exact: true })
+      .click()
     await dialog.getByRole("heading", { name: locale.inbox, exact: true }).scrollIntoViewIfNeeded()
     await expect(dialog.getByRole("heading", { name: locale.goals, exact: true })).toHaveCount(1)
     await expect(dialog.getByRole("heading", { name: locale.inbox, exact: true })).toBeVisible()
@@ -217,10 +222,19 @@ for (const locale of [
       .toEqual({ paddingLeft: "20px", paddingRight: "20px", overflow: 0 })
 
     if (locale.id === "en") {
+      await dialog.getByRole("tab", { name: "Companion", exact: true }).click()
+      await expect(dialog.getByRole("heading", { name: "Daily Companion", exact: true })).toBeVisible()
+      await expect(dialog.getByText("Google account", { exact: true })).toBeVisible()
+      await expect(dialog.getByRole("button", { name: "Create briefing", exact: true })).toBeDisabled()
+
+      await dialog.getByRole("tablist", { name: "Jarvis Control Center" }).getByRole("tab", { name: "Models", exact: true }).click()
       await dialog.locator('[data-action="settings-jarvis-model-dialogue"]').click()
       await expect(page.locator('[data-option-key="action:manage"]')).toBeVisible()
       await page.locator('[data-option-key="action:manage"]').click()
-      await expect(dialog.getByRole("tab", { name: "Models", exact: true })).toHaveAttribute("aria-selected", "true")
+      await expect(dialog.locator('[data-slot="tabs-v2-trigger"][data-value="models"]')).toHaveAttribute(
+        "aria-selected",
+        "true",
+      )
       await expect(page.getByText("Local context must be used within a context provider")).toHaveCount(0)
     }
   })
@@ -414,12 +428,31 @@ async function mockServers(page: Page, permissionRequests: string[], permissionR
     if (url.pathname === "/session/status") return json(route, {})
     if (url.pathname === "/session" && route.request().method() === "POST") return json(route, createdSessionA)
     if (url.pathname === "/session") return json(route, sessions)
-    if (url.pathname === "/api/provider" || url.pathname === "/api/model" || url.pathname === "/api/agent")
+    if (url.pathname === "/api/provider" || url.pathname === "/api/agent")
       return json(route, { data: [] })
+    if (url.pathname === "/api/model")
+      return json(route, {
+        data: [
+          {
+            id: "qwen-test",
+            providerID: "lmstudio",
+            name: "Qwen Test",
+            family: "qwen",
+            capabilities: { input: ["text"], output: ["text"], toolcall: true, temperature: true, attachment: false },
+            cost: [{ input: 0, output: 0 }],
+            limit: { context: 32_000, output: 4_096 },
+          },
+        ],
+      })
     if (url.pathname === "/api/model/default") return json(route, { data: null })
     if (url.pathname === "/api/jarvis/status") return json(route, jarvisStatus())
+    if (url.pathname === "/api/jarvis/control") return json(route, jarvisControlStatus())
     if (url.pathname === "/api/jarvis/goals" || url.pathname === "/api/jarvis/inbox") return json(route, [])
     if (url.pathname === "/api/jarvis/memory/search") return json(route, [])
+    if (url.pathname === "/api/jarvis/memory/uses" || url.pathname === "/api/jarvis/replays") return json(route, [])
+    if (url.pathname === "/api/jarvis/companion/status") return json(route, companionStatus())
+    if (url.pathname === "/api/jarvis/companion/briefings" || url.pathname === "/api/jarvis/companion/actions") return json(route, [])
+    if (url.pathname === "/api/jarvis/companion/actions/audit") return json(route, [])
     if (url.pathname === "/api/jarvis/profiles" && route.request().method() === "PUT") return json(route, [])
     if (["/api/command", "/api/reference", "/api/permission/request", "/api/question/request"].includes(url.pathname))
       return json(route, { location: { directory }, data: [] })
@@ -572,6 +605,41 @@ function jarvisStatus() {
     ],
     planner: { state: "offline", managed: false, activeRequests: 0 },
     embeddings: { state: "blocked", remaining: 0, processed: 0 },
+  }
+}
+
+function companionStatus() {
+  return {
+    config: {
+      enabled: false,
+      schedule: "08:30",
+      timezone: "Europe/Kyiv",
+      catchUpUntil: "18:00",
+      sources: { gmail: true, calendar: true, drive: true, goals: true, promises: true, inbox: true },
+      updatedAt: 1,
+    },
+    google: {
+      available: false,
+      phase: "unavailable",
+      scopes: [],
+      writeScopes: [],
+      checkedAt: 1,
+      error: "Google Companion is available only in the native Desktop app.",
+    },
+    catchUpAvailable: false,
+    bridgeAvailable: false,
+    error: "Google Companion is available only in the native Desktop app.",
+  }
+}
+
+function jarvisControlStatus() {
+  return {
+    runtime: jarvisStatus(),
+    presence: { surface: "desktop", state: "completed", updatedAt: 1 },
+    media: { state: "idle", queuedSentences: 0, activeJobs: 0, acknowledgedCancellation: true, updatedAt: 1 },
+    replayCount: 0,
+    recentMemoryUses: 0,
+    recommendations: [],
   }
 }
 

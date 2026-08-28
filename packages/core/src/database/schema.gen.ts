@@ -24,9 +24,80 @@ export default {
         );
       `)
       yield* tx.run(`
+        CREATE TABLE \`jarvis_companion_action_execution\` (
+          \`id\` text PRIMARY KEY,
+          \`proposal_id\` text NOT NULL,
+          \`status\` text NOT NULL,
+          \`result\` text,
+          \`error\` text,
+          \`time_created\` integer NOT NULL,
+          \`time_updated\` integer NOT NULL
+        );
+      `)
+      yield* tx.run(`
+        CREATE TABLE \`jarvis_companion_action\` (
+          \`id\` text PRIMARY KEY,
+          \`briefing_id\` text,
+          \`kind\` text NOT NULL,
+          \`title\` text NOT NULL,
+          \`preview\` text NOT NULL,
+          \`access\` text NOT NULL,
+          \`input\` text NOT NULL,
+          \`required_scopes\` text NOT NULL,
+          \`idempotency_key\` text NOT NULL,
+          \`external_revision\` text,
+          \`status\` text NOT NULL,
+          \`time_created\` integer NOT NULL,
+          \`time_updated\` integer NOT NULL
+        );
+      `)
+      yield* tx.run(`
+        CREATE TABLE \`jarvis_companion_config\` (
+          \`id\` integer PRIMARY KEY,
+          \`data\` text NOT NULL,
+          \`time_updated\` integer NOT NULL
+        );
+      `)
+      yield* tx.run(`
         CREATE TABLE \`jarvis_config\` (
           \`id\` integer PRIMARY KEY,
           \`data\` text NOT NULL,
+          \`time_updated\` integer NOT NULL
+        );
+      `)
+      yield* tx.run(`
+        CREATE TABLE \`jarvis_conversation\` (
+          \`id\` integer PRIMARY KEY,
+          \`session_id\` text NOT NULL,
+          \`profile_id\` text,
+          \`profile_revision\` integer,
+          \`recovered_at\` integer,
+          \`time_updated\` integer NOT NULL
+        );
+      `)
+      yield* tx.run(`
+        CREATE TABLE \`jarvis_daily_briefing_run\` (
+          \`id\` text PRIMARY KEY,
+          \`briefing_id\` text,
+          \`trigger\` text NOT NULL,
+          \`status\` text NOT NULL,
+          \`local_date\` text NOT NULL,
+          \`account_id\` text,
+          \`source_counts\` text NOT NULL,
+          \`error\` text,
+          \`started_at\` integer NOT NULL,
+          \`completed_at\` integer
+        );
+      `)
+      yield* tx.run(`
+        CREATE TABLE \`jarvis_daily_briefing\` (
+          \`id\` text PRIMARY KEY,
+          \`local_date\` text NOT NULL,
+          \`account_id\` text NOT NULL,
+          \`session_id\` text,
+          \`status\` text NOT NULL,
+          \`data\` text NOT NULL,
+          \`time_created\` integer NOT NULL,
           \`time_updated\` integer NOT NULL
         );
       `)
@@ -63,6 +134,18 @@ export default {
         );
       `)
       yield* tx.run(`
+        CREATE TABLE \`jarvis_media_state\` (
+          \`id\` text PRIMARY KEY,
+          \`turn_id\` text,
+          \`owner\` text,
+          \`state\` text NOT NULL,
+          \`queued_sentences\` integer NOT NULL,
+          \`active_jobs\` integer NOT NULL,
+          \`acknowledged_cancellation\` integer NOT NULL,
+          \`time_updated\` integer NOT NULL
+        );
+      `)
+      yield* tx.run(`
         CREATE TABLE \`jarvis_memory\` (
           \`id\` text PRIMARY KEY,
           \`profile_id\` text,
@@ -86,6 +169,25 @@ export default {
         );
       `)
       yield* tx.run(`
+        CREATE TABLE \`jarvis_memory_tombstone\` (
+          \`source_id\` text PRIMARY KEY,
+          \`time_created\` integer NOT NULL
+        );
+      `)
+      yield* tx.run(`
+        CREATE TABLE \`jarvis_memory_use\` (
+          \`id\` text PRIMARY KEY,
+          \`turn_id\` text NOT NULL,
+          \`memory_id\` text NOT NULL,
+          \`rank\` integer NOT NULL,
+          \`lexical_score\` real NOT NULL,
+          \`semantic_score\` real NOT NULL,
+          \`reason\` text NOT NULL,
+          \`time_created\` integer NOT NULL,
+          CONSTRAINT \`fk_jarvis_memory_use_turn_id_jarvis_turn_id_fk\` FOREIGN KEY (\`turn_id\`) REFERENCES \`jarvis_turn\`(\`id\`) ON DELETE CASCADE
+        );
+      `)
+      yield* tx.run(`
         CREATE TABLE \`jarvis_plan_step\` (
           \`id\` text PRIMARY KEY,
           \`goal_id\` text NOT NULL,
@@ -102,12 +204,64 @@ export default {
         );
       `)
       yield* tx.run(`
+        CREATE TABLE \`jarvis_presence\` (
+          \`id\` integer PRIMARY KEY,
+          \`data\` text NOT NULL,
+          \`time_updated\` integer NOT NULL
+        );
+      `)
+      yield* tx.run(`
         CREATE TABLE \`jarvis_profile\` (
           \`id\` text PRIMARY KEY,
           \`revision\` integer NOT NULL,
           \`name\` text NOT NULL,
           \`data\` text NOT NULL,
           \`primary\` integer DEFAULT false NOT NULL,
+          \`time_created\` integer NOT NULL,
+          \`time_updated\` integer NOT NULL
+        );
+      `)
+      yield* tx.run(`
+        CREATE TABLE \`jarvis_replay_execution\` (
+          \`id\` text PRIMARY KEY,
+          \`replay_id\` text NOT NULL,
+          \`status\` text NOT NULL,
+          \`fixture_only\` integer DEFAULT true NOT NULL,
+          \`assertions\` text NOT NULL,
+          \`metrics\` text NOT NULL,
+          \`error\` text,
+          \`time_created\` integer NOT NULL,
+          \`time_updated\` integer NOT NULL
+        );
+      `)
+      yield* tx.run(`
+        CREATE TABLE \`jarvis_replay\` (
+          \`id\` text PRIMARY KEY,
+          \`turn_id\` text,
+          \`session_id\` text,
+          \`surface\` text NOT NULL,
+          \`status\` text NOT NULL,
+          \`events\` text NOT NULL,
+          \`metrics\` text NOT NULL,
+          \`error\` text,
+          \`time_created\` integer NOT NULL,
+          \`time_updated\` integer NOT NULL
+        );
+      `)
+      yield* tx.run(`
+        CREATE TABLE \`jarvis_turn\` (
+          \`id\` text PRIMARY KEY,
+          \`request_id\` text NOT NULL,
+          \`session_id\` text NOT NULL,
+          \`profile_id\` text,
+          \`surface\` text NOT NULL,
+          \`response_mode\` text NOT NULL,
+          \`phase\` text NOT NULL,
+          \`sequence\` integer DEFAULT 0 NOT NULL,
+          \`presentation\` text,
+          \`metrics\` text NOT NULL,
+          \`error\` text,
+          \`cancel_reason\` text,
           \`time_created\` integer NOT NULL,
           \`time_updated\` integer NOT NULL
         );
@@ -381,6 +535,22 @@ export default {
           CONSTRAINT \`fk_session_share_session_id_session_id_fk\` FOREIGN KEY (\`session_id\`) REFERENCES \`session\`(\`id\`) ON DELETE CASCADE
         );
       `)
+      yield* tx.run(
+        `CREATE INDEX \`jarvis_companion_action_execution_proposal_idx\` ON \`jarvis_companion_action_execution\` (\`proposal_id\`,\`time_created\`);`,
+      )
+      yield* tx.run(
+        `CREATE UNIQUE INDEX \`jarvis_companion_action_idempotency_idx\` ON \`jarvis_companion_action\` (\`idempotency_key\`);`,
+      )
+      yield* tx.run(
+        `CREATE INDEX \`jarvis_companion_action_briefing_idx\` ON \`jarvis_companion_action\` (\`briefing_id\`);`,
+      )
+      yield* tx.run(
+        `CREATE INDEX \`jarvis_daily_briefing_run_time_idx\` ON \`jarvis_daily_briefing_run\` (\`started_at\`);`,
+      )
+      yield* tx.run(
+        `CREATE UNIQUE INDEX \`jarvis_daily_briefing_day_account_idx\` ON \`jarvis_daily_briefing\` (\`local_date\`,\`account_id\`);`,
+      )
+      yield* tx.run(`CREATE INDEX \`jarvis_daily_briefing_time_idx\` ON \`jarvis_daily_briefing\` (\`time_created\`);`)
       yield* tx.run(`CREATE INDEX \`jarvis_goal_outcome_goal_idx\` ON \`jarvis_goal_outcome\` (\`goal_id\`);`)
       yield* tx.run(`CREATE INDEX \`jarvis_goal_profile_status_idx\` ON \`jarvis_goal\` (\`profile_id\`,\`status\`);`)
       yield* tx.run(`CREATE INDEX \`jarvis_goal_session_idx\` ON \`jarvis_goal\` (\`session_id\`);`)
@@ -390,9 +560,25 @@ export default {
         `CREATE INDEX \`jarvis_memory_game_scope_idx\` ON \`jarvis_memory\` (\`game_id\`,\`save_slot_id\`,\`character_id\`);`,
       )
       yield* tx.run(
+        `CREATE UNIQUE INDEX \`jarvis_memory_use_turn_memory_idx\` ON \`jarvis_memory_use\` (\`turn_id\`,\`memory_id\`);`,
+      )
+      yield* tx.run(
+        `CREATE INDEX \`jarvis_memory_use_memory_idx\` ON \`jarvis_memory_use\` (\`memory_id\`,\`time_created\`);`,
+      )
+      yield* tx.run(
         `CREATE UNIQUE INDEX \`jarvis_plan_step_goal_position_idx\` ON \`jarvis_plan_step\` (\`goal_id\`,\`position\`);`,
       )
       yield* tx.run(`CREATE INDEX \`jarvis_profile_primary_idx\` ON \`jarvis_profile\` (\`primary\`);`)
+      yield* tx.run(
+        `CREATE INDEX \`jarvis_replay_execution_replay_idx\` ON \`jarvis_replay_execution\` (\`replay_id\`,\`time_created\`);`,
+      )
+      yield* tx.run(`CREATE UNIQUE INDEX \`jarvis_replay_turn_idx\` ON \`jarvis_replay\` (\`turn_id\`);`)
+      yield* tx.run(`CREATE INDEX \`jarvis_replay_time_idx\` ON \`jarvis_replay\` (\`time_created\`);`)
+      yield* tx.run(`CREATE UNIQUE INDEX \`jarvis_turn_request_idx\` ON \`jarvis_turn\` (\`request_id\`);`)
+      yield* tx.run(
+        `CREATE INDEX \`jarvis_turn_session_time_idx\` ON \`jarvis_turn\` (\`session_id\`,\`time_updated\`);`,
+      )
+      yield* tx.run(`CREATE INDEX \`jarvis_turn_phase_idx\` ON \`jarvis_turn\` (\`phase\`);`)
       yield* tx.run(`CREATE INDEX \`jarvis_wake_status_time_idx\` ON \`jarvis_wake\` (\`status\`,\`not_before\`);`)
       yield* tx.run(`CREATE UNIQUE INDEX \`event_aggregate_seq_idx\` ON \`event\` (\`aggregate_id\`,\`seq\`);`)
       yield* tx.run(`CREATE INDEX \`event_aggregate_type_seq_idx\` ON \`event\` (\`aggregate_id\`,\`type\`,\`seq\`);`)

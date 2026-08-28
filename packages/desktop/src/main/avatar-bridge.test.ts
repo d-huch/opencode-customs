@@ -13,6 +13,7 @@ describe("Avatar Bridge v2 integration", () => {
     const promptBodies: unknown[] = []
     let synthesisCalls = 0
     let catalogCalls = 0
+    let jarvisTurnSequence = 0
     const streams = new Set<ServerResponse>()
     const emit = (type: string, data: Record<string, unknown>) => {
       const frame = `data: ${JSON.stringify({ type, data })}\n\n`
@@ -33,6 +34,42 @@ describe("Avatar Bridge v2 integration", () => {
         response.setHeader("content-type", "application/json")
         if (request.method === "GET" && request.url === "/api/jarvis/status") {
           response.end(JSON.stringify({ config: { models: { dialogue: { providerID: "lmstudio", modelID: "qwen/test" } } } }))
+          return
+        }
+        if (request.method === "POST" && request.url === "/api/jarvis/conversation/adopt") {
+          response.end(JSON.stringify({ sessionID: "ses_unity", updatedAt: Date.now() }))
+          return
+        }
+        if (request.method === "POST" && request.url === "/api/jarvis/turns") {
+          const input = JSON.parse(Buffer.concat(body).toString()) as Record<string, unknown>
+          response.end(JSON.stringify({
+            id: `turn-${String(input.requestID)}`,
+            ...input,
+            phase: input.phase ?? "listening",
+            sequence: jarvisTurnSequence,
+            metrics: {},
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          }))
+          return
+        }
+        if (request.method === "PATCH" && request.url?.startsWith("/api/jarvis/turns/")) {
+          const input = JSON.parse(Buffer.concat(body).toString()) as Record<string, unknown>
+          jarvisTurnSequence = Number(input.sequence ?? jarvisTurnSequence + 1)
+          response.end(JSON.stringify({ id: request.url.split("/").at(-1), ...input }))
+          return
+        }
+        if (request.method === "POST" && request.url === "/api/jarvis/presence/handoff") {
+          response.end(Buffer.concat(body).toString())
+          return
+        }
+        if (request.method === "POST" && request.url === "/api/jarvis/media") {
+          response.end(Buffer.concat(body).toString())
+          return
+        }
+        if (request.method === "POST" && request.url === "/api/jarvis/replays") {
+          const input = JSON.parse(Buffer.concat(body).toString()) as Record<string, unknown>
+          response.end(JSON.stringify({ id: "replay-unity", ...input, createdAt: Date.now(), updatedAt: Date.now() }))
           return
         }
         if (request.method === "GET" && request.url === "/api/model") {
@@ -61,9 +98,25 @@ describe("Avatar Bridge v2 integration", () => {
           response.end(JSON.stringify({ message: "Session not found" }))
           return
         }
-        if (request.method === "POST" && request.url === "/api/session/ses_unity/prompt") {
-          promptBodies.push(JSON.parse(Buffer.concat(body).toString()))
-          response.end(JSON.stringify({ data: { id: "input_unity" } }))
+        if (request.method === "POST" && request.url === "/api/jarvis/turns/admit") {
+          const input = JSON.parse(Buffer.concat(body).toString()) as Record<string, unknown>
+          promptBodies.push(input)
+          response.end(JSON.stringify({
+            conversation: { sessionID: "ses_unity", updatedAt: Date.now() },
+            turn: {
+              id: `turn-${String(input.requestID)}`,
+              requestID: input.requestID,
+              sessionID: "ses_unity",
+              surface: input.surface,
+              phase: "responding",
+              sequence: ++jarvisTurnSequence,
+              metrics: { admittedAt: Date.now() },
+              createdAt: Date.now(),
+              updatedAt: Date.now(),
+            },
+            messageID: "msg_jarvis_test",
+            admitted: true,
+          }))
           const assistantMessageID = `assistant-${promptBodies.length}`
           setTimeout(() => {
             if (promptBodies.length >= 3) {
@@ -186,9 +239,9 @@ describe("Avatar Bridge v2 integration", () => {
     await next(messages, "assistant.done")
     expect(synthesisCalls).toBe(1)
     expect(promptBodies).toHaveLength(2)
-    expect(promptBodies[0]).toMatchObject({ prompt: { text: expect.stringContaining("Привіт") } })
-    expect(promptBodies[1]).toMatchObject({ prompt: { text: expect.stringContaining("Що ти бачиш?") } })
-    expect(promptBodies[0]).not.toHaveProperty("parts")
+    expect(promptBodies[0]).toMatchObject({ transcript: "Привіт" })
+    expect(promptBodies[1]).toMatchObject({ transcript: "Що ти бачиш?" })
+    expect(promptBodies[0]).not.toHaveProperty("prompt")
     expect(catalogCalls).toBeGreaterThanOrEqual(3)
 
     socket.send(JSON.stringify({
@@ -410,7 +463,7 @@ describe("Avatar Bridge v2 integration", () => {
       actions: [],
       resumeSequence: latestSequence,
     }))
-    expect(await next(resumedMessages, "welcome")).toMatchObject({ serverVersion: "2.5", protocolMinor: 5 })
+    expect(await next(resumedMessages, "welcome")).toMatchObject({ serverVersion: "2.7", protocolMinor: 7 })
 
     resumed.close()
     await bridge.stop()
@@ -441,14 +494,14 @@ describe("Avatar Bridge v2 integration", () => {
       gameID: "jarvis-lab",
       saveSlotID: "slot-1",
       protocol: 2,
-      protocolMinor: 5,
+      protocolMinor: 6,
     }
     const profile = await fetch(`${endpoint}/v1/avatar/bootstrap`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(identity),
     }).then((response) => response.json()) as Record<string, unknown>
-    expect(profile).toMatchObject({ ...identity, bootstrapVersion: 1, url: bridge.url })
+    expect(profile).toMatchObject({ ...identity, protocolMinor: 7, bootstrapVersion: 1, url: bridge.url })
     expect(typeof profile.token).toBe("string")
     expect(typeof profile.expiresAt).toBe("number")
 
@@ -526,7 +579,7 @@ describe("Avatar Bridge v2 integration", () => {
       service: "opencode-customs-avatar",
       version: 1,
       protocol: 2,
-      protocolMinor: 5,
+      protocolMinor: 7,
       certificateFingerprint: bridge.status().lan?.certificateFingerprint,
     })
     expect(value).not.toHaveProperty("token")

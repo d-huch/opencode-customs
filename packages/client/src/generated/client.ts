@@ -140,6 +140,29 @@ import type {
   RepositoryMapFeedbackRetrievalOutput,
   RepositoryMapClearKnowledgeInput,
   RepositoryMapClearKnowledgeOutput,
+  ServerJarvisConversationOutput,
+  ServerJarvisAdoptConversationInput,
+  ServerJarvisAdoptConversationOutput,
+  ServerJarvisPrewarmInput,
+  ServerJarvisPrewarmOutput,
+  ServerJarvisAdmitFinalInput,
+  ServerJarvisAdmitFinalOutput,
+  ServerJarvisControlStatusOutput,
+  ServerJarvisUpdateMediaStateInput,
+  ServerJarvisUpdateMediaStateOutput,
+  ServerJarvisRunDiagnosticsOutput,
+  ServerJarvisCreateTurnInput,
+  ServerJarvisCreateTurnOutput,
+  ServerJarvisCurrentTurnOutput,
+  ServerJarvisTurnInput,
+  ServerJarvisTurnOutput,
+  ServerJarvisUpdateTurnInput,
+  ServerJarvisUpdateTurnOutput,
+  ServerJarvisCancelTurnInput,
+  ServerJarvisCancelTurnOutput,
+  ServerJarvisPresenceOutput,
+  ServerJarvisHandoffPresenceInput,
+  ServerJarvisHandoffPresenceOutput,
   ServerJarvisStatusOutput,
   ServerJarvisConfigOutput,
   ServerJarvisUpdateConfigInput,
@@ -178,6 +201,24 @@ import type {
   ServerJarvisResolveMemoryConflictInput,
   ServerJarvisResolveMemoryConflictOutput,
   ServerJarvisReindexMemoryOutput,
+  ServerJarvisMemoryUsesInput,
+  ServerJarvisMemoryUsesOutput,
+  ServerJarvisRecordMemoryUseInput,
+  ServerJarvisRecordMemoryUseOutput,
+  ServerJarvisReplaysInput,
+  ServerJarvisReplaysOutput,
+  ServerJarvisRecordReplayInput,
+  ServerJarvisRecordReplayOutput,
+  ServerJarvisReplayInput,
+  ServerJarvisReplayOutput,
+  ServerJarvisRemoveReplayInput,
+  ServerJarvisRemoveReplayOutput,
+  ServerJarvisExecuteReplayInput,
+  ServerJarvisExecuteReplayOutput,
+  ServerJarvisReplayExecutionInput,
+  ServerJarvisReplayExecutionOutput,
+  ServerJarvisCompareReplaysInput,
+  ServerJarvisCompareReplaysOutput,
   ServerJarvisInboxOutput,
   ServerJarvisWakeInput,
   ServerJarvisWakeOutput,
@@ -185,6 +226,26 @@ import type {
   ServerJarvisDismissInboxOutput,
   ServerJarvisRetryInboxInput,
   ServerJarvisRetryInboxOutput,
+  ServerJarvisCompanionStatusOutput,
+  ServerJarvisCompanionConfigOutput,
+  ServerJarvisUpdateCompanionConfigInput,
+  ServerJarvisUpdateCompanionConfigOutput,
+  ServerJarvisRunDailyBriefingInput,
+  ServerJarvisRunDailyBriefingOutput,
+  ServerJarvisDailyBriefingsInput,
+  ServerJarvisDailyBriefingsOutput,
+  ServerJarvisDailyBriefingInput,
+  ServerJarvisDailyBriefingOutput,
+  ServerJarvisPrepareCompanionActionInput,
+  ServerJarvisPrepareCompanionActionOutput,
+  ServerJarvisCompanionActionsInput,
+  ServerJarvisCompanionActionsOutput,
+  ServerJarvisApproveCompanionActionInput,
+  ServerJarvisApproveCompanionActionOutput,
+  ServerJarvisCancelCompanionActionInput,
+  ServerJarvisCancelCompanionActionOutput,
+  ServerJarvisCompanionActionAuditInput,
+  ServerJarvisCompanionActionAuditOutput,
 } from "./types"
 import { ClientError } from "./client-error"
 
@@ -1255,6 +1316,219 @@ export function make(options: ClientOptions) {
         ),
     },
     "server.jarvis": {
+      conversation: (requestOptions?: RequestOptions) =>
+        request<ServerJarvisConversationOutput>(
+          {
+            method: "GET",
+            path: `/api/jarvis/conversation`,
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      adoptConversation: (input: ServerJarvisAdoptConversationInput, requestOptions?: RequestOptions) =>
+        request<ServerJarvisAdoptConversationOutput>(
+          {
+            method: "POST",
+            path: `/api/jarvis/conversation/adopt`,
+            body: {
+              sessionID: input["sessionID"],
+              profileID: input["profileID"],
+              profileRevision: input["profileRevision"],
+              surface: input["surface"],
+            },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      prewarm: (input: ServerJarvisPrewarmInput, requestOptions?: RequestOptions) =>
+        request<ServerJarvisPrewarmOutput>(
+          {
+            method: "POST",
+            path: `/api/jarvis/turns/prewarm`,
+            body: {
+              turnID: input["turnID"],
+              requestID: input["requestID"],
+              surface: input["surface"],
+              text: input["text"],
+              sequence: input["sequence"],
+              language: input["language"],
+              profileRevision: input["profileRevision"],
+              worldContext: input["worldContext"],
+              capturedAt: input["capturedAt"],
+            },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      admitFinal: (input: ServerJarvisAdmitFinalInput, requestOptions?: RequestOptions) =>
+        request<ServerJarvisAdmitFinalOutput>(
+          {
+            method: "POST",
+            path: `/api/jarvis/turns/admit`,
+            body: {
+              requestID: input["requestID"],
+              transcript: input["transcript"],
+              surface: input["surface"],
+              responseMode: input["responseMode"],
+              profileID: input["profileID"],
+              profileRevision: input["profileRevision"],
+              worldContext: input["worldContext"],
+            },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      controlStatus: (requestOptions?: RequestOptions) =>
+        request<ServerJarvisControlStatusOutput>(
+          {
+            method: "GET",
+            path: `/api/jarvis/control`,
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      updateMediaState: (input: ServerJarvisUpdateMediaStateInput, requestOptions?: RequestOptions) =>
+        request<ServerJarvisUpdateMediaStateOutput>(
+          {
+            method: "POST",
+            path: `/api/jarvis/media`,
+            body: {
+              turnID: input["turnID"],
+              owner: input["owner"],
+              state: input["state"],
+              queuedSentences: input["queuedSentences"],
+              activeJobs: input["activeJobs"],
+              acknowledgedCancellation: input["acknowledgedCancellation"],
+            },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      runDiagnostics: (requestOptions?: RequestOptions) =>
+        request<ServerJarvisRunDiagnosticsOutput>(
+          {
+            method: "POST",
+            path: `/api/jarvis/diagnostics`,
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      createTurn: (input: ServerJarvisCreateTurnInput, requestOptions?: RequestOptions) =>
+        request<ServerJarvisCreateTurnOutput>(
+          {
+            method: "POST",
+            path: `/api/jarvis/turns`,
+            body: {
+              requestID: input["requestID"],
+              sessionID: input["sessionID"],
+              profileID: input["profileID"],
+              surface: input["surface"],
+              responseMode: input["responseMode"],
+              phase: input["phase"],
+            },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      currentTurn: (requestOptions?: RequestOptions) =>
+        request<ServerJarvisCurrentTurnOutput>(
+          {
+            method: "GET",
+            path: `/api/jarvis/turns/current`,
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      turn: (input: ServerJarvisTurnInput, requestOptions?: RequestOptions) =>
+        request<ServerJarvisTurnOutput>(
+          {
+            method: "GET",
+            path: `/api/jarvis/turns/${encodeURIComponent(input.turnID)}`,
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      updateTurn: (input: ServerJarvisUpdateTurnInput, requestOptions?: RequestOptions) =>
+        request<ServerJarvisUpdateTurnOutput>(
+          {
+            method: "PATCH",
+            path: `/api/jarvis/turns/${encodeURIComponent(input.turnID)}`,
+            body: {
+              phase: input["phase"],
+              sequence: input["sequence"],
+              presentation: input["presentation"],
+              metrics: input["metrics"],
+              error: input["error"],
+              cancelReason: input["cancelReason"],
+            },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      cancelTurn: (input: ServerJarvisCancelTurnInput, requestOptions?: RequestOptions) =>
+        request<ServerJarvisCancelTurnOutput>(
+          {
+            method: "POST",
+            path: `/api/jarvis/turns/${encodeURIComponent(input.turnID)}/cancel`,
+            body: { reason: input["reason"] },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      presence: (requestOptions?: RequestOptions) =>
+        request<ServerJarvisPresenceOutput>(
+          {
+            method: "GET",
+            path: `/api/jarvis/presence`,
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      handoffPresence: (input: ServerJarvisHandoffPresenceInput, requestOptions?: RequestOptions) =>
+        request<ServerJarvisHandoffPresenceOutput>(
+          {
+            method: "POST",
+            path: `/api/jarvis/presence/handoff`,
+            body: {
+              from: input["from"],
+              to: input["to"],
+              sessionID: input["sessionID"],
+              turnID: input["turnID"],
+              microphone: input["microphone"],
+              playback: input["playback"],
+            },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
       status: (requestOptions?: RequestOptions) =>
         request<ServerJarvisStatusOutput>(
           { method: "GET", path: `/api/jarvis/status`, successStatus: 200, declaredStatuses: [401, 400], empty: false },
@@ -1561,6 +1835,129 @@ export function make(options: ClientOptions) {
           },
           requestOptions,
         ),
+      memoryUses: (input?: ServerJarvisMemoryUsesInput, requestOptions?: RequestOptions) =>
+        request<ServerJarvisMemoryUsesOutput>(
+          {
+            method: "GET",
+            path: `/api/jarvis/memory/uses`,
+            query: { memoryID: input?.["memoryID"], turnID: input?.["turnID"], limit: input?.["limit"] },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      recordMemoryUse: (input: ServerJarvisRecordMemoryUseInput, requestOptions?: RequestOptions) =>
+        request<ServerJarvisRecordMemoryUseOutput>(
+          {
+            method: "POST",
+            path: `/api/jarvis/memory/uses`,
+            body: {
+              turnID: input["turnID"],
+              memoryID: input["memoryID"],
+              rank: input["rank"],
+              lexicalScore: input["lexicalScore"],
+              semanticScore: input["semanticScore"],
+              reason: input["reason"],
+            },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      replays: (input?: ServerJarvisReplaysInput, requestOptions?: RequestOptions) =>
+        request<ServerJarvisReplaysOutput>(
+          {
+            method: "GET",
+            path: `/api/jarvis/replays`,
+            query: { limit: input?.["limit"] },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      recordReplay: (input: ServerJarvisRecordReplayInput, requestOptions?: RequestOptions) =>
+        request<ServerJarvisRecordReplayOutput>(
+          {
+            method: "POST",
+            path: `/api/jarvis/replays`,
+            body: {
+              turnID: input["turnID"],
+              sessionID: input["sessionID"],
+              surface: input["surface"],
+              status: input["status"],
+              events: input["events"],
+              metrics: input["metrics"],
+              error: input["error"],
+            },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      replay: (input: ServerJarvisReplayInput, requestOptions?: RequestOptions) =>
+        request<ServerJarvisReplayOutput>(
+          {
+            method: "GET",
+            path: `/api/jarvis/replays/${encodeURIComponent(input.replayID)}`,
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      removeReplay: (input: ServerJarvisRemoveReplayInput, requestOptions?: RequestOptions) =>
+        request<ServerJarvisRemoveReplayOutput>(
+          {
+            method: "DELETE",
+            path: `/api/jarvis/replays/${encodeURIComponent(input.replayID)}`,
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      executeReplay: (input: ServerJarvisExecuteReplayInput, requestOptions?: RequestOptions) =>
+        request<ServerJarvisExecuteReplayOutput>(
+          {
+            method: "POST",
+            path: `/api/jarvis/replays/${encodeURIComponent(input.replayID)}/execute`,
+            body: { fixtureOnly: input["fixtureOnly"] },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      replayExecution: (input: ServerJarvisReplayExecutionInput, requestOptions?: RequestOptions) =>
+        request<ServerJarvisReplayExecutionOutput>(
+          {
+            method: "GET",
+            path: `/api/jarvis/replay-executions/${encodeURIComponent(input.executionID)}`,
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      compareReplays: (input: ServerJarvisCompareReplaysInput, requestOptions?: RequestOptions) =>
+        request<ServerJarvisCompareReplaysOutput>(
+          {
+            method: "POST",
+            path: `/api/jarvis/replay-executions/compare`,
+            body: {
+              baselineExecutionID: input["baselineExecutionID"],
+              candidateExecutionID: input["candidateExecutionID"],
+            },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
       inbox: (requestOptions?: RequestOptions) =>
         request<ServerJarvisInboxOutput>(
           { method: "GET", path: `/api/jarvis/inbox`, successStatus: 200, declaredStatuses: [401, 400], empty: false },
@@ -1601,6 +1998,150 @@ export function make(options: ClientOptions) {
           {
             method: "POST",
             path: `/api/jarvis/inbox/${encodeURIComponent(input.wakeID)}/retry`,
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      companionStatus: (requestOptions?: RequestOptions) =>
+        request<ServerJarvisCompanionStatusOutput>(
+          {
+            method: "GET",
+            path: `/api/jarvis/companion/status`,
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      companionConfig: (requestOptions?: RequestOptions) =>
+        request<ServerJarvisCompanionConfigOutput>(
+          {
+            method: "GET",
+            path: `/api/jarvis/companion/config`,
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      updateCompanionConfig: (input: ServerJarvisUpdateCompanionConfigInput, requestOptions?: RequestOptions) =>
+        request<ServerJarvisUpdateCompanionConfigOutput>(
+          {
+            method: "PUT",
+            path: `/api/jarvis/companion/config`,
+            body: {
+              enabled: input["enabled"],
+              schedule: input["schedule"],
+              timezone: input["timezone"],
+              catchUpUntil: input["catchUpUntil"],
+              sources: input["sources"],
+              updatedAt: input["updatedAt"],
+            },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      runDailyBriefing: (input?: ServerJarvisRunDailyBriefingInput, requestOptions?: RequestOptions) =>
+        request<ServerJarvisRunDailyBriefingOutput>(
+          {
+            method: "POST",
+            path: `/api/jarvis/companion/briefings/run`,
+            body: { trigger: input?.["trigger"], force: input?.["force"] },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      dailyBriefings: (input?: ServerJarvisDailyBriefingsInput, requestOptions?: RequestOptions) =>
+        request<ServerJarvisDailyBriefingsOutput>(
+          {
+            method: "GET",
+            path: `/api/jarvis/companion/briefings`,
+            query: { limit: input?.["limit"] },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      dailyBriefing: (input: ServerJarvisDailyBriefingInput, requestOptions?: RequestOptions) =>
+        request<ServerJarvisDailyBriefingOutput>(
+          {
+            method: "GET",
+            path: `/api/jarvis/companion/briefings/${encodeURIComponent(input.briefingID)}`,
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      prepareCompanionAction: (input: ServerJarvisPrepareCompanionActionInput, requestOptions?: RequestOptions) =>
+        request<ServerJarvisPrepareCompanionActionOutput>(
+          {
+            method: "POST",
+            path: `/api/jarvis/companion/actions`,
+            body: {
+              briefingID: input["briefingID"],
+              kind: input["kind"],
+              title: input["title"],
+              preview: input["preview"],
+              input: input["input"],
+              requiredScopes: input["requiredScopes"],
+              idempotencyKey: input["idempotencyKey"],
+              externalRevision: input["externalRevision"],
+            },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      companionActions: (input?: ServerJarvisCompanionActionsInput, requestOptions?: RequestOptions) =>
+        request<ServerJarvisCompanionActionsOutput>(
+          {
+            method: "GET",
+            path: `/api/jarvis/companion/actions`,
+            query: { limit: input?.["limit"] },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      approveCompanionAction: (input: ServerJarvisApproveCompanionActionInput, requestOptions?: RequestOptions) =>
+        request<ServerJarvisApproveCompanionActionOutput>(
+          {
+            method: "POST",
+            path: `/api/jarvis/companion/actions/${encodeURIComponent(input.actionID)}/approve`,
+            body: { externalRevision: input["externalRevision"] },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      cancelCompanionAction: (input: ServerJarvisCancelCompanionActionInput, requestOptions?: RequestOptions) =>
+        request<ServerJarvisCancelCompanionActionOutput>(
+          {
+            method: "POST",
+            path: `/api/jarvis/companion/actions/${encodeURIComponent(input.actionID)}/cancel`,
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      companionActionAudit: (input?: ServerJarvisCompanionActionAuditInput, requestOptions?: RequestOptions) =>
+        request<ServerJarvisCompanionActionAuditOutput>(
+          {
+            method: "GET",
+            path: `/api/jarvis/companion/actions/audit`,
+            query: { limit: input?.["limit"] },
             successStatus: 200,
             declaredStatuses: [401, 400],
             empty: false,

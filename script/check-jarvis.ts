@@ -7,13 +7,25 @@ const skipBuild = process.argv.includes("--skip-build")
 const checkUnity = process.argv.includes("--unity")
 const buildQuest = process.argv.includes("--quest-build")
 const commands = [
+  { name: "Schema typecheck", cwd: "packages/schema", command: ["bun", "typecheck"] },
+  { name: "Core typecheck", cwd: "packages/core", command: ["bun", "typecheck"] },
+  { name: "Protocol typecheck", cwd: "packages/protocol", command: ["bun", "typecheck"] },
+  { name: "Server typecheck", cwd: "packages/server", command: ["bun", "typecheck"] },
+  { name: "Client typecheck", cwd: "packages/client", command: ["bun", "typecheck"] },
   { name: "App typecheck", cwd: "packages/app", command: ["bun", "typecheck"] },
   { name: "Desktop typecheck", cwd: "packages/desktop", command: ["bun", "typecheck"] },
   { name: "OpenCode typecheck", cwd: "packages/opencode", command: ["bun", "typecheck"] },
   {
     name: "Avatar protocol and state",
     cwd: "packages/desktop",
-    command: ["bun", "test", "src/main/avatar-bridge-protocol.test.ts", "src/main/avatar-bridge-state.test.ts", "src/main/avatar-bridge-lan.test.ts"],
+    command: [
+      "bun",
+      "test",
+      "src/main/avatar-bridge-protocol.test.ts",
+      "src/main/avatar-bridge-state.test.ts",
+      "src/main/avatar-bridge-lan.test.ts",
+      "src/main/jarvis-media-coordinator.test.ts",
+    ],
   },
   {
     name: "Avatar loopback smoke and 100-cycle reconnect",
@@ -25,6 +37,8 @@ const commands = [
     cwd: "packages/opencode",
     command: ["bun", "test", "test/session/chat-mode.test.ts"],
   },
+  { name: "Jarvis runtime and replay fixtures", cwd: "packages/core", command: ["bun", "test", "test/jarvis.test.ts"] },
+  { name: "Customs localization fallback", cwd: "packages/app", command: ["bun", "test", "src/i18n/parity.test.ts"] },
 ]
 
 for (const item of commands) {
@@ -46,8 +60,8 @@ if (missing.length > 0) {
   process.exit(1)
 }
 const manifest = await Bun.file(resolve(root, unityFiles[0])).json()
-if (manifest.version !== "2.3.1" || !manifest.samples?.some((sample: { path?: string }) => sample.path === "Samples~/JarvisLab")) {
-  console.error("[Jarvis] Unity package manifest does not expose Jarvis Lab v2.3.1")
+if (manifest.version !== "2.7.0" || !manifest.samples?.some((sample: { path?: string }) => sample.path === "Samples~/JarvisLab")) {
+  console.error("[Jarvis] Unity package manifest does not expose Jarvis Lab v2.7.0")
   process.exit(1)
 }
 console.log("\n[Jarvis] Unity UPM manifest and vertical-slice assets are present")

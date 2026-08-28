@@ -5,6 +5,7 @@ import { Database } from "@opencode-ai/core/database/database"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import { Global } from "@opencode-ai/core/global"
 import { JarvisRuntime } from "@opencode-ai/core/jarvis"
+import { JarvisCompanion } from "@opencode-ai/core/jarvis-companion"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { SessionV2 } from "@opencode-ai/core/session"
 import { Effect, Layer, Option, Schedule, Scope } from "effect"
@@ -18,6 +19,7 @@ export const layer = Layer.effectDiscard(
     const scope = yield* Scope.Scope
 
     yield* JarvisRuntime.suspendInterruptedGoals(db).pipe(Effect.orDie)
+    yield* JarvisRuntime.cancelInterruptedTurns(db).pipe(Effect.orDie)
 
     const ensureReflectionCandidates = Effect.fn("JarvisWakeScheduler.ensureReflections")(function* () {
       const config = yield* JarvisRuntime.getConfig(db)
@@ -39,6 +41,36 @@ export const layer = Layer.effectDiscard(
           }),
         { discard: true },
       )
+    })
+
+    const ensureDailyBriefing = Effect.fn("JarvisWakeScheduler.ensureDailyBriefing")(function* () {
+      const status = yield* JarvisCompanion.status(db)
+      const lastRun = status.lastRun
+      const completedDate =
+        lastRun && lastRun.accountID === status.google.accountID && ["completed", "partial", "skipped"].includes(lastRun.status)
+          ? lastRun.localDate
+          : undefined
+      const trigger = JarvisCompanion.scheduleDecision(Date.now(), status.config, completedDate)
+      if (!trigger) return
+      const run = yield* JarvisCompanion.run(db, { trigger })
+      if (!run.briefingID || !["completed", "partial"].includes(run.status)) return
+      const briefing = yield* JarvisCompanion.briefing(db, run.briefingID)
+      if (!briefing) return
+      yield* JarvisRuntime.enqueueWake(db, {
+        kind: "manual",
+        topic: `daily-briefing:${briefing.localDate}:${briefing.accountID}`,
+        text: [
+          `<daily_briefing id="${briefing.id}" date="${briefing.localDate}">`,
+          briefing.summary,
+          ...briefing.schedule,
+          ...briefing.importantMessages,
+          ...briefing.goalsAndPromises,
+          ...briefing.risks,
+          "Use only the supplied source IDs. Never infer missing facts or execute a proposed external action without separate approval.",
+          "</daily_briefing>",
+        ].join("\n"),
+        priority: 90,
+      })
     })
 
     const ensureInbox = Effect.fn("JarvisWakeScheduler.ensureInbox")(function* () {
@@ -68,6 +100,7 @@ export const layer = Layer.effectDiscard(
     })
 
     const tick = Effect.fn("JarvisWakeScheduler.tick")(function* () {
+      yield* ensureDailyBriefing()
       yield* ensureReflectionCandidates()
       const wake = yield* JarvisRuntime.claimWake(db)
       if (!wake) return

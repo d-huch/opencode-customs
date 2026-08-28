@@ -3443,6 +3443,1181 @@ export type RepositoryMapClearKnowledgeOutput = {
   readonly data: { readonly removed: number }
 }
 
+export type ServerJarvisConversationOutput = {
+  readonly sessionID: string
+  readonly profileID?: string
+  readonly profileRevision?: number
+  readonly recoveredAt?: number
+  readonly updatedAt: number
+}
+
+export type ServerJarvisAdoptConversationInput = {
+  readonly sessionID?: {
+    readonly sessionID?: string
+    readonly profileID?: string
+    readonly profileRevision?: number
+    readonly surface: "desktop" | "unity-editor" | "pcvr" | "quest"
+  }["sessionID"]
+  readonly profileID?: {
+    readonly sessionID?: string
+    readonly profileID?: string
+    readonly profileRevision?: number
+    readonly surface: "desktop" | "unity-editor" | "pcvr" | "quest"
+  }["profileID"]
+  readonly profileRevision?: {
+    readonly sessionID?: string
+    readonly profileID?: string
+    readonly profileRevision?: number
+    readonly surface: "desktop" | "unity-editor" | "pcvr" | "quest"
+  }["profileRevision"]
+  readonly surface: {
+    readonly sessionID?: string
+    readonly profileID?: string
+    readonly profileRevision?: number
+    readonly surface: "desktop" | "unity-editor" | "pcvr" | "quest"
+  }["surface"]
+}
+
+export type ServerJarvisAdoptConversationOutput = {
+  readonly sessionID: string
+  readonly profileID?: string
+  readonly profileRevision?: number
+  readonly recoveredAt?: number
+  readonly updatedAt: number
+}
+
+export type ServerJarvisPrewarmInput = {
+  readonly turnID?: {
+    readonly turnID?: string
+    readonly requestID: string
+    readonly surface: "desktop" | "unity-editor" | "pcvr" | "quest"
+    readonly text: string
+    readonly sequence: number
+    readonly language?: string
+    readonly profileRevision?: number
+    readonly worldContext?: string
+    readonly capturedAt: number
+  }["turnID"]
+  readonly requestID: {
+    readonly turnID?: string
+    readonly requestID: string
+    readonly surface: "desktop" | "unity-editor" | "pcvr" | "quest"
+    readonly text: string
+    readonly sequence: number
+    readonly language?: string
+    readonly profileRevision?: number
+    readonly worldContext?: string
+    readonly capturedAt: number
+  }["requestID"]
+  readonly surface: {
+    readonly turnID?: string
+    readonly requestID: string
+    readonly surface: "desktop" | "unity-editor" | "pcvr" | "quest"
+    readonly text: string
+    readonly sequence: number
+    readonly language?: string
+    readonly profileRevision?: number
+    readonly worldContext?: string
+    readonly capturedAt: number
+  }["surface"]
+  readonly text: {
+    readonly turnID?: string
+    readonly requestID: string
+    readonly surface: "desktop" | "unity-editor" | "pcvr" | "quest"
+    readonly text: string
+    readonly sequence: number
+    readonly language?: string
+    readonly profileRevision?: number
+    readonly worldContext?: string
+    readonly capturedAt: number
+  }["text"]
+  readonly sequence: {
+    readonly turnID?: string
+    readonly requestID: string
+    readonly surface: "desktop" | "unity-editor" | "pcvr" | "quest"
+    readonly text: string
+    readonly sequence: number
+    readonly language?: string
+    readonly profileRevision?: number
+    readonly worldContext?: string
+    readonly capturedAt: number
+  }["sequence"]
+  readonly language?: {
+    readonly turnID?: string
+    readonly requestID: string
+    readonly surface: "desktop" | "unity-editor" | "pcvr" | "quest"
+    readonly text: string
+    readonly sequence: number
+    readonly language?: string
+    readonly profileRevision?: number
+    readonly worldContext?: string
+    readonly capturedAt: number
+  }["language"]
+  readonly profileRevision?: {
+    readonly turnID?: string
+    readonly requestID: string
+    readonly surface: "desktop" | "unity-editor" | "pcvr" | "quest"
+    readonly text: string
+    readonly sequence: number
+    readonly language?: string
+    readonly profileRevision?: number
+    readonly worldContext?: string
+    readonly capturedAt: number
+  }["profileRevision"]
+  readonly worldContext?: {
+    readonly turnID?: string
+    readonly requestID: string
+    readonly surface: "desktop" | "unity-editor" | "pcvr" | "quest"
+    readonly text: string
+    readonly sequence: number
+    readonly language?: string
+    readonly profileRevision?: number
+    readonly worldContext?: string
+    readonly capturedAt: number
+  }["worldContext"]
+  readonly capturedAt: {
+    readonly turnID?: string
+    readonly requestID: string
+    readonly surface: "desktop" | "unity-editor" | "pcvr" | "quest"
+    readonly text: string
+    readonly sequence: number
+    readonly language?: string
+    readonly profileRevision?: number
+    readonly worldContext?: string
+    readonly capturedAt: number
+  }["capturedAt"]
+}
+
+export type ServerJarvisPrewarmOutput = {
+  readonly requestID: string
+  readonly surface: "desktop" | "unity-editor" | "pcvr" | "quest"
+  readonly sequence: number
+  readonly language?: string
+  readonly profileRevision?: number
+  readonly modelReady: boolean
+  readonly memoryReady: boolean
+  readonly worldReady: boolean
+  readonly expiresAt: number
+}
+
+export type ServerJarvisAdmitFinalInput = {
+  readonly requestID: {
+    readonly requestID: string
+    readonly transcript: string
+    readonly surface: "desktop" | "unity-editor" | "pcvr" | "quest"
+    readonly responseMode: "voice" | "text"
+    readonly profileID?: string
+    readonly profileRevision?: number
+    readonly worldContext?: string
+  }["requestID"]
+  readonly transcript: {
+    readonly requestID: string
+    readonly transcript: string
+    readonly surface: "desktop" | "unity-editor" | "pcvr" | "quest"
+    readonly responseMode: "voice" | "text"
+    readonly profileID?: string
+    readonly profileRevision?: number
+    readonly worldContext?: string
+  }["transcript"]
+  readonly surface: {
+    readonly requestID: string
+    readonly transcript: string
+    readonly surface: "desktop" | "unity-editor" | "pcvr" | "quest"
+    readonly responseMode: "voice" | "text"
+    readonly profileID?: string
+    readonly profileRevision?: number
+    readonly worldContext?: string
+  }["surface"]
+  readonly responseMode: {
+    readonly requestID: string
+    readonly transcript: string
+    readonly surface: "desktop" | "unity-editor" | "pcvr" | "quest"
+    readonly responseMode: "voice" | "text"
+    readonly profileID?: string
+    readonly profileRevision?: number
+    readonly worldContext?: string
+  }["responseMode"]
+  readonly profileID?: {
+    readonly requestID: string
+    readonly transcript: string
+    readonly surface: "desktop" | "unity-editor" | "pcvr" | "quest"
+    readonly responseMode: "voice" | "text"
+    readonly profileID?: string
+    readonly profileRevision?: number
+    readonly worldContext?: string
+  }["profileID"]
+  readonly profileRevision?: {
+    readonly requestID: string
+    readonly transcript: string
+    readonly surface: "desktop" | "unity-editor" | "pcvr" | "quest"
+    readonly responseMode: "voice" | "text"
+    readonly profileID?: string
+    readonly profileRevision?: number
+    readonly worldContext?: string
+  }["profileRevision"]
+  readonly worldContext?: {
+    readonly requestID: string
+    readonly transcript: string
+    readonly surface: "desktop" | "unity-editor" | "pcvr" | "quest"
+    readonly responseMode: "voice" | "text"
+    readonly profileID?: string
+    readonly profileRevision?: number
+    readonly worldContext?: string
+  }["worldContext"]
+}
+
+export type ServerJarvisAdmitFinalOutput = {
+  readonly conversation: {
+    readonly sessionID: string
+    readonly profileID?: string
+    readonly profileRevision?: number
+    readonly recoveredAt?: number
+    readonly updatedAt: number
+  }
+  readonly turn: {
+    readonly id: string
+    readonly requestID: string
+    readonly sessionID: string
+    readonly profileID?: string
+    readonly surface: "desktop" | "unity-editor" | "pcvr" | "quest"
+    readonly responseMode: "voice" | "text"
+    readonly phase:
+      | "listening"
+      | "transcribing"
+      | "understanding"
+      | "planning"
+      | "responding"
+      | "speaking"
+      | "acting"
+      | "completed"
+      | "cancelled"
+      | "error"
+    readonly sequence: number
+    readonly presentation?: {
+      readonly emotion: string
+      readonly intensity: number | "Infinity" | "-Infinity" | "NaN"
+      readonly gestureHint?: string
+      readonly gazeTarget?: string
+      readonly expectedDurationMs?: number
+    }
+    readonly metrics: {
+      readonly admittedAt?: number
+      readonly providerStartedAt?: number
+      readonly firstTextAt?: number
+      readonly firstAudioAt?: number
+      readonly completedAt?: number
+      readonly sttMs?: number
+      readonly ttftMs?: number
+      readonly ttsMs?: number
+      readonly cancelMs?: number
+    }
+    readonly error?: string
+    readonly cancelReason?: string
+    readonly createdAt: number
+    readonly updatedAt: number
+  }
+  readonly messageID: string
+  readonly admitted: boolean
+  readonly prewarm?: {
+    readonly requestID: string
+    readonly surface: "desktop" | "unity-editor" | "pcvr" | "quest"
+    readonly sequence: number
+    readonly language?: string
+    readonly profileRevision?: number
+    readonly modelReady: boolean
+    readonly memoryReady: boolean
+    readonly worldReady: boolean
+    readonly expiresAt: number
+  }
+}
+
+export type ServerJarvisControlStatusOutput = {
+  readonly runtime: {
+    readonly state: "ready" | "degraded" | "suspended"
+    readonly primaryProfile?: {
+      readonly id: string
+      readonly revision: number
+      readonly name: string
+      readonly userName?: string
+      readonly addressAs?: string
+      readonly language: string
+      readonly archetype: "natural" | "military" | "depressive" | "clown" | "jarvis" | "mentor" | "sarcastic"
+      readonly tone: string
+      readonly detail: string
+      readonly humor: string
+      readonly proactivity: string
+      readonly instructions: string
+      readonly catchphrases: ReadonlyArray<string>
+      readonly primary: boolean
+      readonly updatedAt: number
+    }
+    readonly config: {
+      readonly primaryProfileID?: string
+      readonly inboxSessionID?: string
+      readonly models: {
+        readonly dialogue?: { readonly providerID: string; readonly modelID: string }
+        readonly planner?: { readonly providerID: string; readonly modelID: string }
+        readonly embedding?: { readonly providerID: string; readonly modelID: string }
+      }
+      readonly plannerTimeoutMs: number
+      readonly plannerIdleUnloadMs: number
+      readonly plannerEscalationMinWords: number
+      readonly reactor: {
+        readonly profile: "fast" | "balanced" | "quality"
+        readonly dialogueReasoning: "off" | "on"
+        readonly plannerReasoning: "off" | "on"
+        readonly allowFallback: boolean
+      }
+      readonly benchmark: {
+        readonly status: "idle" | "running" | "completed" | "cancelled" | "error"
+        readonly profile: "fast" | "balanced" | "quality"
+        readonly startedAt?: number
+        readonly completedAt?: number
+        readonly activeModel?: { readonly providerID: string; readonly modelID: string }
+        readonly results: ReadonlyArray<{
+          readonly model: { readonly providerID: string; readonly modelID: string }
+          readonly endpoint: string
+          readonly instance: string
+          readonly testedAt: number
+          readonly expiresAt: number
+          readonly ttftMs: number
+          readonly totalMs: number
+          readonly tokensPerSecond: number | "Infinity" | "-Infinity" | "NaN"
+          readonly outputTokens: number
+          readonly context: number
+          readonly memoryBytes?: number
+          readonly ukrainian: boolean
+          readonly instructions: boolean
+          readonly toolCalling: boolean
+          readonly accepted: boolean
+          readonly score: number | "Infinity" | "-Infinity" | "NaN"
+          readonly error?: string
+        }>
+        readonly selected?: { readonly providerID: string; readonly modelID: string }
+        readonly fallback: ReadonlyArray<{ readonly providerID: string; readonly modelID: string }>
+        readonly error?: string
+      }
+      readonly initiative: {
+        readonly enabled: boolean
+        readonly quietStart: string
+        readonly quietEnd: string
+        readonly reflectionLimit: number
+        readonly eventLimit: number
+        readonly topicCooldownMinutes: number
+      }
+      readonly updatedAt: number
+    }
+    readonly activeGoals: number
+    readonly suspendedGoals: number
+    readonly pendingInbox: number
+    readonly memoryRecords: number
+    readonly degradedReasons: ReadonlyArray<string>
+    readonly modelRoles: ReadonlyArray<{
+      readonly role: "dialogue" | "planner" | "embedding"
+      readonly status: "unconfigured" | "ready" | "loading" | "offline" | "unauthorized" | "unsupported" | "degraded"
+      readonly model?: { readonly providerID: string; readonly modelID: string }
+      readonly verified: boolean
+      readonly detail?: string
+    }>
+    readonly planner: {
+      readonly state: "idle" | "loading" | "ready" | "busy" | "unloading" | "offline"
+      readonly managed: boolean
+      readonly activeRequests: number
+      readonly lastUsedAt?: number
+    }
+    readonly embeddings: {
+      readonly state: "idle" | "running" | "blocked" | "error"
+      readonly remaining: number
+      readonly processed: number
+      readonly error?: string
+    }
+  }
+  readonly conversation?: {
+    readonly sessionID: string
+    readonly profileID?: string
+    readonly profileRevision?: number
+    readonly recoveredAt?: number
+    readonly updatedAt: number
+  }
+  readonly currentTurn?: {
+    readonly id: string
+    readonly requestID: string
+    readonly sessionID: string
+    readonly profileID?: string
+    readonly surface: "desktop" | "unity-editor" | "pcvr" | "quest"
+    readonly responseMode: "voice" | "text"
+    readonly phase:
+      | "listening"
+      | "transcribing"
+      | "understanding"
+      | "planning"
+      | "responding"
+      | "speaking"
+      | "acting"
+      | "completed"
+      | "cancelled"
+      | "error"
+    readonly sequence: number
+    readonly presentation?: {
+      readonly emotion: string
+      readonly intensity: number | "Infinity" | "-Infinity" | "NaN"
+      readonly gestureHint?: string
+      readonly gazeTarget?: string
+      readonly expectedDurationMs?: number
+    }
+    readonly metrics: {
+      readonly admittedAt?: number
+      readonly providerStartedAt?: number
+      readonly firstTextAt?: number
+      readonly firstAudioAt?: number
+      readonly completedAt?: number
+      readonly sttMs?: number
+      readonly ttftMs?: number
+      readonly ttsMs?: number
+      readonly cancelMs?: number
+    }
+    readonly error?: string
+    readonly cancelReason?: string
+    readonly createdAt: number
+    readonly updatedAt: number
+  }
+  readonly presence: {
+    readonly surface: "desktop" | "unity-editor" | "pcvr" | "quest"
+    readonly microphoneOwner?: "desktop" | "unity-editor" | "pcvr" | "quest"
+    readonly playbackOwner?: "desktop" | "unity-editor" | "pcvr" | "quest"
+    readonly turnID?: string
+    readonly sessionID?: string
+    readonly state:
+      | "listening"
+      | "transcribing"
+      | "understanding"
+      | "planning"
+      | "responding"
+      | "speaking"
+      | "acting"
+      | "completed"
+      | "cancelled"
+      | "error"
+    readonly updatedAt: number
+  }
+  readonly media: {
+    readonly turnID?: string
+    readonly owner?: "desktop" | "unity-editor" | "pcvr" | "quest"
+    readonly state: "idle" | "buffering" | "synthesizing" | "playing" | "cancelling" | "error"
+    readonly queuedSentences: number
+    readonly activeJobs: number
+    readonly acknowledgedCancellation: boolean
+    readonly updatedAt: number
+  }
+  readonly replayCount: number
+  readonly recentMemoryUses: number
+  readonly recommendations: ReadonlyArray<string>
+}
+
+export type ServerJarvisUpdateMediaStateInput = {
+  readonly turnID?: {
+    readonly turnID?: string
+    readonly owner?: "desktop" | "unity-editor" | "pcvr" | "quest"
+    readonly state: "idle" | "buffering" | "synthesizing" | "playing" | "cancelling" | "error"
+    readonly queuedSentences: number
+    readonly activeJobs: number
+    readonly acknowledgedCancellation: boolean
+  }["turnID"]
+  readonly owner?: {
+    readonly turnID?: string
+    readonly owner?: "desktop" | "unity-editor" | "pcvr" | "quest"
+    readonly state: "idle" | "buffering" | "synthesizing" | "playing" | "cancelling" | "error"
+    readonly queuedSentences: number
+    readonly activeJobs: number
+    readonly acknowledgedCancellation: boolean
+  }["owner"]
+  readonly state: {
+    readonly turnID?: string
+    readonly owner?: "desktop" | "unity-editor" | "pcvr" | "quest"
+    readonly state: "idle" | "buffering" | "synthesizing" | "playing" | "cancelling" | "error"
+    readonly queuedSentences: number
+    readonly activeJobs: number
+    readonly acknowledgedCancellation: boolean
+  }["state"]
+  readonly queuedSentences: {
+    readonly turnID?: string
+    readonly owner?: "desktop" | "unity-editor" | "pcvr" | "quest"
+    readonly state: "idle" | "buffering" | "synthesizing" | "playing" | "cancelling" | "error"
+    readonly queuedSentences: number
+    readonly activeJobs: number
+    readonly acknowledgedCancellation: boolean
+  }["queuedSentences"]
+  readonly activeJobs: {
+    readonly turnID?: string
+    readonly owner?: "desktop" | "unity-editor" | "pcvr" | "quest"
+    readonly state: "idle" | "buffering" | "synthesizing" | "playing" | "cancelling" | "error"
+    readonly queuedSentences: number
+    readonly activeJobs: number
+    readonly acknowledgedCancellation: boolean
+  }["activeJobs"]
+  readonly acknowledgedCancellation: {
+    readonly turnID?: string
+    readonly owner?: "desktop" | "unity-editor" | "pcvr" | "quest"
+    readonly state: "idle" | "buffering" | "synthesizing" | "playing" | "cancelling" | "error"
+    readonly queuedSentences: number
+    readonly activeJobs: number
+    readonly acknowledgedCancellation: boolean
+  }["acknowledgedCancellation"]
+}
+
+export type ServerJarvisUpdateMediaStateOutput = {
+  readonly turnID?: string
+  readonly owner?: "desktop" | "unity-editor" | "pcvr" | "quest"
+  readonly state: "idle" | "buffering" | "synthesizing" | "playing" | "cancelling" | "error"
+  readonly queuedSentences: number
+  readonly activeJobs: number
+  readonly acknowledgedCancellation: boolean
+  readonly updatedAt: number
+}
+
+export type ServerJarvisRunDiagnosticsOutput = {
+  readonly checkedAt: number
+  readonly checks: ReadonlyArray<{
+    readonly id: string
+    readonly status: "ready" | "degraded" | "error"
+    readonly summary: string
+    readonly detail?: string
+  }>
+  readonly recommendations: ReadonlyArray<string>
+}
+
+export type ServerJarvisCreateTurnInput = {
+  readonly requestID: {
+    readonly requestID: string
+    readonly sessionID: string
+    readonly profileID?: string
+    readonly surface: "desktop" | "unity-editor" | "pcvr" | "quest"
+    readonly responseMode: "voice" | "text"
+    readonly phase?:
+      | "listening"
+      | "transcribing"
+      | "understanding"
+      | "planning"
+      | "responding"
+      | "speaking"
+      | "acting"
+      | "completed"
+      | "cancelled"
+      | "error"
+  }["requestID"]
+  readonly sessionID: {
+    readonly requestID: string
+    readonly sessionID: string
+    readonly profileID?: string
+    readonly surface: "desktop" | "unity-editor" | "pcvr" | "quest"
+    readonly responseMode: "voice" | "text"
+    readonly phase?:
+      | "listening"
+      | "transcribing"
+      | "understanding"
+      | "planning"
+      | "responding"
+      | "speaking"
+      | "acting"
+      | "completed"
+      | "cancelled"
+      | "error"
+  }["sessionID"]
+  readonly profileID?: {
+    readonly requestID: string
+    readonly sessionID: string
+    readonly profileID?: string
+    readonly surface: "desktop" | "unity-editor" | "pcvr" | "quest"
+    readonly responseMode: "voice" | "text"
+    readonly phase?:
+      | "listening"
+      | "transcribing"
+      | "understanding"
+      | "planning"
+      | "responding"
+      | "speaking"
+      | "acting"
+      | "completed"
+      | "cancelled"
+      | "error"
+  }["profileID"]
+  readonly surface: {
+    readonly requestID: string
+    readonly sessionID: string
+    readonly profileID?: string
+    readonly surface: "desktop" | "unity-editor" | "pcvr" | "quest"
+    readonly responseMode: "voice" | "text"
+    readonly phase?:
+      | "listening"
+      | "transcribing"
+      | "understanding"
+      | "planning"
+      | "responding"
+      | "speaking"
+      | "acting"
+      | "completed"
+      | "cancelled"
+      | "error"
+  }["surface"]
+  readonly responseMode: {
+    readonly requestID: string
+    readonly sessionID: string
+    readonly profileID?: string
+    readonly surface: "desktop" | "unity-editor" | "pcvr" | "quest"
+    readonly responseMode: "voice" | "text"
+    readonly phase?:
+      | "listening"
+      | "transcribing"
+      | "understanding"
+      | "planning"
+      | "responding"
+      | "speaking"
+      | "acting"
+      | "completed"
+      | "cancelled"
+      | "error"
+  }["responseMode"]
+  readonly phase?: {
+    readonly requestID: string
+    readonly sessionID: string
+    readonly profileID?: string
+    readonly surface: "desktop" | "unity-editor" | "pcvr" | "quest"
+    readonly responseMode: "voice" | "text"
+    readonly phase?:
+      | "listening"
+      | "transcribing"
+      | "understanding"
+      | "planning"
+      | "responding"
+      | "speaking"
+      | "acting"
+      | "completed"
+      | "cancelled"
+      | "error"
+  }["phase"]
+}
+
+export type ServerJarvisCreateTurnOutput = {
+  readonly id: string
+  readonly requestID: string
+  readonly sessionID: string
+  readonly profileID?: string
+  readonly surface: "desktop" | "unity-editor" | "pcvr" | "quest"
+  readonly responseMode: "voice" | "text"
+  readonly phase:
+    | "listening"
+    | "transcribing"
+    | "understanding"
+    | "planning"
+    | "responding"
+    | "speaking"
+    | "acting"
+    | "completed"
+    | "cancelled"
+    | "error"
+  readonly sequence: number
+  readonly presentation?: {
+    readonly emotion: string
+    readonly intensity: number | "Infinity" | "-Infinity" | "NaN"
+    readonly gestureHint?: string
+    readonly gazeTarget?: string
+    readonly expectedDurationMs?: number
+  }
+  readonly metrics: {
+    readonly admittedAt?: number
+    readonly providerStartedAt?: number
+    readonly firstTextAt?: number
+    readonly firstAudioAt?: number
+    readonly completedAt?: number
+    readonly sttMs?: number
+    readonly ttftMs?: number
+    readonly ttsMs?: number
+    readonly cancelMs?: number
+  }
+  readonly error?: string
+  readonly cancelReason?: string
+  readonly createdAt: number
+  readonly updatedAt: number
+}
+
+export type ServerJarvisCurrentTurnOutput = {
+  readonly id: string
+  readonly requestID: string
+  readonly sessionID: string
+  readonly profileID?: string
+  readonly surface: "desktop" | "unity-editor" | "pcvr" | "quest"
+  readonly responseMode: "voice" | "text"
+  readonly phase:
+    | "listening"
+    | "transcribing"
+    | "understanding"
+    | "planning"
+    | "responding"
+    | "speaking"
+    | "acting"
+    | "completed"
+    | "cancelled"
+    | "error"
+  readonly sequence: number
+  readonly presentation?: {
+    readonly emotion: string
+    readonly intensity: number | "Infinity" | "-Infinity" | "NaN"
+    readonly gestureHint?: string
+    readonly gazeTarget?: string
+    readonly expectedDurationMs?: number
+  }
+  readonly metrics: {
+    readonly admittedAt?: number
+    readonly providerStartedAt?: number
+    readonly firstTextAt?: number
+    readonly firstAudioAt?: number
+    readonly completedAt?: number
+    readonly sttMs?: number
+    readonly ttftMs?: number
+    readonly ttsMs?: number
+    readonly cancelMs?: number
+  }
+  readonly error?: string
+  readonly cancelReason?: string
+  readonly createdAt: number
+  readonly updatedAt: number
+} | null
+
+export type ServerJarvisTurnInput = { readonly turnID: { readonly turnID: string }["turnID"] }
+
+export type ServerJarvisTurnOutput = {
+  readonly id: string
+  readonly requestID: string
+  readonly sessionID: string
+  readonly profileID?: string
+  readonly surface: "desktop" | "unity-editor" | "pcvr" | "quest"
+  readonly responseMode: "voice" | "text"
+  readonly phase:
+    | "listening"
+    | "transcribing"
+    | "understanding"
+    | "planning"
+    | "responding"
+    | "speaking"
+    | "acting"
+    | "completed"
+    | "cancelled"
+    | "error"
+  readonly sequence: number
+  readonly presentation?: {
+    readonly emotion: string
+    readonly intensity: number | "Infinity" | "-Infinity" | "NaN"
+    readonly gestureHint?: string
+    readonly gazeTarget?: string
+    readonly expectedDurationMs?: number
+  }
+  readonly metrics: {
+    readonly admittedAt?: number
+    readonly providerStartedAt?: number
+    readonly firstTextAt?: number
+    readonly firstAudioAt?: number
+    readonly completedAt?: number
+    readonly sttMs?: number
+    readonly ttftMs?: number
+    readonly ttsMs?: number
+    readonly cancelMs?: number
+  }
+  readonly error?: string
+  readonly cancelReason?: string
+  readonly createdAt: number
+  readonly updatedAt: number
+} | null
+
+export type ServerJarvisUpdateTurnInput = {
+  readonly turnID: { readonly turnID: string }["turnID"]
+  readonly phase: {
+    readonly phase:
+      | "listening"
+      | "transcribing"
+      | "understanding"
+      | "planning"
+      | "responding"
+      | "speaking"
+      | "acting"
+      | "completed"
+      | "cancelled"
+      | "error"
+    readonly sequence: number
+    readonly presentation?: {
+      readonly emotion: string
+      readonly intensity: number | "Infinity" | "-Infinity" | "NaN"
+      readonly gestureHint?: string
+      readonly gazeTarget?: string
+      readonly expectedDurationMs?: number
+    }
+    readonly metrics?: {
+      readonly admittedAt?: number
+      readonly providerStartedAt?: number
+      readonly firstTextAt?: number
+      readonly firstAudioAt?: number
+      readonly completedAt?: number
+      readonly sttMs?: number
+      readonly ttftMs?: number
+      readonly ttsMs?: number
+      readonly cancelMs?: number
+    }
+    readonly error?: string
+    readonly cancelReason?: string
+  }["phase"]
+  readonly sequence: {
+    readonly phase:
+      | "listening"
+      | "transcribing"
+      | "understanding"
+      | "planning"
+      | "responding"
+      | "speaking"
+      | "acting"
+      | "completed"
+      | "cancelled"
+      | "error"
+    readonly sequence: number
+    readonly presentation?: {
+      readonly emotion: string
+      readonly intensity: number | "Infinity" | "-Infinity" | "NaN"
+      readonly gestureHint?: string
+      readonly gazeTarget?: string
+      readonly expectedDurationMs?: number
+    }
+    readonly metrics?: {
+      readonly admittedAt?: number
+      readonly providerStartedAt?: number
+      readonly firstTextAt?: number
+      readonly firstAudioAt?: number
+      readonly completedAt?: number
+      readonly sttMs?: number
+      readonly ttftMs?: number
+      readonly ttsMs?: number
+      readonly cancelMs?: number
+    }
+    readonly error?: string
+    readonly cancelReason?: string
+  }["sequence"]
+  readonly presentation?: {
+    readonly phase:
+      | "listening"
+      | "transcribing"
+      | "understanding"
+      | "planning"
+      | "responding"
+      | "speaking"
+      | "acting"
+      | "completed"
+      | "cancelled"
+      | "error"
+    readonly sequence: number
+    readonly presentation?: {
+      readonly emotion: string
+      readonly intensity: number | "Infinity" | "-Infinity" | "NaN"
+      readonly gestureHint?: string
+      readonly gazeTarget?: string
+      readonly expectedDurationMs?: number
+    }
+    readonly metrics?: {
+      readonly admittedAt?: number
+      readonly providerStartedAt?: number
+      readonly firstTextAt?: number
+      readonly firstAudioAt?: number
+      readonly completedAt?: number
+      readonly sttMs?: number
+      readonly ttftMs?: number
+      readonly ttsMs?: number
+      readonly cancelMs?: number
+    }
+    readonly error?: string
+    readonly cancelReason?: string
+  }["presentation"]
+  readonly metrics?: {
+    readonly phase:
+      | "listening"
+      | "transcribing"
+      | "understanding"
+      | "planning"
+      | "responding"
+      | "speaking"
+      | "acting"
+      | "completed"
+      | "cancelled"
+      | "error"
+    readonly sequence: number
+    readonly presentation?: {
+      readonly emotion: string
+      readonly intensity: number | "Infinity" | "-Infinity" | "NaN"
+      readonly gestureHint?: string
+      readonly gazeTarget?: string
+      readonly expectedDurationMs?: number
+    }
+    readonly metrics?: {
+      readonly admittedAt?: number
+      readonly providerStartedAt?: number
+      readonly firstTextAt?: number
+      readonly firstAudioAt?: number
+      readonly completedAt?: number
+      readonly sttMs?: number
+      readonly ttftMs?: number
+      readonly ttsMs?: number
+      readonly cancelMs?: number
+    }
+    readonly error?: string
+    readonly cancelReason?: string
+  }["metrics"]
+  readonly error?: {
+    readonly phase:
+      | "listening"
+      | "transcribing"
+      | "understanding"
+      | "planning"
+      | "responding"
+      | "speaking"
+      | "acting"
+      | "completed"
+      | "cancelled"
+      | "error"
+    readonly sequence: number
+    readonly presentation?: {
+      readonly emotion: string
+      readonly intensity: number | "Infinity" | "-Infinity" | "NaN"
+      readonly gestureHint?: string
+      readonly gazeTarget?: string
+      readonly expectedDurationMs?: number
+    }
+    readonly metrics?: {
+      readonly admittedAt?: number
+      readonly providerStartedAt?: number
+      readonly firstTextAt?: number
+      readonly firstAudioAt?: number
+      readonly completedAt?: number
+      readonly sttMs?: number
+      readonly ttftMs?: number
+      readonly ttsMs?: number
+      readonly cancelMs?: number
+    }
+    readonly error?: string
+    readonly cancelReason?: string
+  }["error"]
+  readonly cancelReason?: {
+    readonly phase:
+      | "listening"
+      | "transcribing"
+      | "understanding"
+      | "planning"
+      | "responding"
+      | "speaking"
+      | "acting"
+      | "completed"
+      | "cancelled"
+      | "error"
+    readonly sequence: number
+    readonly presentation?: {
+      readonly emotion: string
+      readonly intensity: number | "Infinity" | "-Infinity" | "NaN"
+      readonly gestureHint?: string
+      readonly gazeTarget?: string
+      readonly expectedDurationMs?: number
+    }
+    readonly metrics?: {
+      readonly admittedAt?: number
+      readonly providerStartedAt?: number
+      readonly firstTextAt?: number
+      readonly firstAudioAt?: number
+      readonly completedAt?: number
+      readonly sttMs?: number
+      readonly ttftMs?: number
+      readonly ttsMs?: number
+      readonly cancelMs?: number
+    }
+    readonly error?: string
+    readonly cancelReason?: string
+  }["cancelReason"]
+}
+
+export type ServerJarvisUpdateTurnOutput = {
+  readonly id: string
+  readonly requestID: string
+  readonly sessionID: string
+  readonly profileID?: string
+  readonly surface: "desktop" | "unity-editor" | "pcvr" | "quest"
+  readonly responseMode: "voice" | "text"
+  readonly phase:
+    | "listening"
+    | "transcribing"
+    | "understanding"
+    | "planning"
+    | "responding"
+    | "speaking"
+    | "acting"
+    | "completed"
+    | "cancelled"
+    | "error"
+  readonly sequence: number
+  readonly presentation?: {
+    readonly emotion: string
+    readonly intensity: number | "Infinity" | "-Infinity" | "NaN"
+    readonly gestureHint?: string
+    readonly gazeTarget?: string
+    readonly expectedDurationMs?: number
+  }
+  readonly metrics: {
+    readonly admittedAt?: number
+    readonly providerStartedAt?: number
+    readonly firstTextAt?: number
+    readonly firstAudioAt?: number
+    readonly completedAt?: number
+    readonly sttMs?: number
+    readonly ttftMs?: number
+    readonly ttsMs?: number
+    readonly cancelMs?: number
+  }
+  readonly error?: string
+  readonly cancelReason?: string
+  readonly createdAt: number
+  readonly updatedAt: number
+} | null
+
+export type ServerJarvisCancelTurnInput = {
+  readonly turnID: { readonly turnID: string }["turnID"]
+  readonly reason?: { readonly reason?: string }["reason"]
+}
+
+export type ServerJarvisCancelTurnOutput = {
+  readonly id: string
+  readonly requestID: string
+  readonly sessionID: string
+  readonly profileID?: string
+  readonly surface: "desktop" | "unity-editor" | "pcvr" | "quest"
+  readonly responseMode: "voice" | "text"
+  readonly phase:
+    | "listening"
+    | "transcribing"
+    | "understanding"
+    | "planning"
+    | "responding"
+    | "speaking"
+    | "acting"
+    | "completed"
+    | "cancelled"
+    | "error"
+  readonly sequence: number
+  readonly presentation?: {
+    readonly emotion: string
+    readonly intensity: number | "Infinity" | "-Infinity" | "NaN"
+    readonly gestureHint?: string
+    readonly gazeTarget?: string
+    readonly expectedDurationMs?: number
+  }
+  readonly metrics: {
+    readonly admittedAt?: number
+    readonly providerStartedAt?: number
+    readonly firstTextAt?: number
+    readonly firstAudioAt?: number
+    readonly completedAt?: number
+    readonly sttMs?: number
+    readonly ttftMs?: number
+    readonly ttsMs?: number
+    readonly cancelMs?: number
+  }
+  readonly error?: string
+  readonly cancelReason?: string
+  readonly createdAt: number
+  readonly updatedAt: number
+} | null
+
+export type ServerJarvisPresenceOutput = {
+  readonly surface: "desktop" | "unity-editor" | "pcvr" | "quest"
+  readonly microphoneOwner?: "desktop" | "unity-editor" | "pcvr" | "quest"
+  readonly playbackOwner?: "desktop" | "unity-editor" | "pcvr" | "quest"
+  readonly turnID?: string
+  readonly sessionID?: string
+  readonly state:
+    | "listening"
+    | "transcribing"
+    | "understanding"
+    | "planning"
+    | "responding"
+    | "speaking"
+    | "acting"
+    | "completed"
+    | "cancelled"
+    | "error"
+  readonly updatedAt: number
+}
+
+export type ServerJarvisHandoffPresenceInput = {
+  readonly from?: {
+    readonly from?: "desktop" | "unity-editor" | "pcvr" | "quest"
+    readonly to: "desktop" | "unity-editor" | "pcvr" | "quest"
+    readonly sessionID?: string
+    readonly turnID?: string
+    readonly microphone: boolean
+    readonly playback: boolean
+  }["from"]
+  readonly to: {
+    readonly from?: "desktop" | "unity-editor" | "pcvr" | "quest"
+    readonly to: "desktop" | "unity-editor" | "pcvr" | "quest"
+    readonly sessionID?: string
+    readonly turnID?: string
+    readonly microphone: boolean
+    readonly playback: boolean
+  }["to"]
+  readonly sessionID?: {
+    readonly from?: "desktop" | "unity-editor" | "pcvr" | "quest"
+    readonly to: "desktop" | "unity-editor" | "pcvr" | "quest"
+    readonly sessionID?: string
+    readonly turnID?: string
+    readonly microphone: boolean
+    readonly playback: boolean
+  }["sessionID"]
+  readonly turnID?: {
+    readonly from?: "desktop" | "unity-editor" | "pcvr" | "quest"
+    readonly to: "desktop" | "unity-editor" | "pcvr" | "quest"
+    readonly sessionID?: string
+    readonly turnID?: string
+    readonly microphone: boolean
+    readonly playback: boolean
+  }["turnID"]
+  readonly microphone: {
+    readonly from?: "desktop" | "unity-editor" | "pcvr" | "quest"
+    readonly to: "desktop" | "unity-editor" | "pcvr" | "quest"
+    readonly sessionID?: string
+    readonly turnID?: string
+    readonly microphone: boolean
+    readonly playback: boolean
+  }["microphone"]
+  readonly playback: {
+    readonly from?: "desktop" | "unity-editor" | "pcvr" | "quest"
+    readonly to: "desktop" | "unity-editor" | "pcvr" | "quest"
+    readonly sessionID?: string
+    readonly turnID?: string
+    readonly microphone: boolean
+    readonly playback: boolean
+  }["playback"]
+}
+
+export type ServerJarvisHandoffPresenceOutput = {
+  readonly surface: "desktop" | "unity-editor" | "pcvr" | "quest"
+  readonly microphoneOwner?: "desktop" | "unity-editor" | "pcvr" | "quest"
+  readonly playbackOwner?: "desktop" | "unity-editor" | "pcvr" | "quest"
+  readonly turnID?: string
+  readonly sessionID?: string
+  readonly state:
+    | "listening"
+    | "transcribing"
+    | "understanding"
+    | "planning"
+    | "responding"
+    | "speaking"
+    | "acting"
+    | "completed"
+    | "cancelled"
+    | "error"
+  readonly updatedAt: number
+}
+
 export type ServerJarvisStatusOutput = {
   readonly state: "ready" | "degraded" | "suspended"
   readonly primaryProfile?: {
@@ -5408,6 +6583,430 @@ export type ServerJarvisResolveMemoryConflictOutput = {
 
 export type ServerJarvisReindexMemoryOutput = { readonly queued: number; readonly remaining: number }
 
+export type ServerJarvisMemoryUsesInput = {
+  readonly memoryID?: {
+    readonly memoryID?: string | undefined
+    readonly turnID?: string | undefined
+    readonly limit?: number | undefined
+  }["memoryID"]
+  readonly turnID?: {
+    readonly memoryID?: string | undefined
+    readonly turnID?: string | undefined
+    readonly limit?: number | undefined
+  }["turnID"]
+  readonly limit?: {
+    readonly memoryID?: string | undefined
+    readonly turnID?: string | undefined
+    readonly limit?: number | undefined
+  }["limit"]
+}
+
+export type ServerJarvisMemoryUsesOutput = ReadonlyArray<{
+  readonly id: string
+  readonly turnID: string
+  readonly memoryID: string
+  readonly rank: number
+  readonly lexicalScore: number
+  readonly semanticScore: number
+  readonly reason: string
+  readonly createdAt: number
+}>
+
+export type ServerJarvisRecordMemoryUseInput = {
+  readonly turnID: {
+    readonly turnID: string
+    readonly memoryID: string
+    readonly rank: number
+    readonly lexicalScore?: number | "Infinity" | "-Infinity" | "NaN"
+    readonly semanticScore?: number | "Infinity" | "-Infinity" | "NaN"
+    readonly reason: string
+  }["turnID"]
+  readonly memoryID: {
+    readonly turnID: string
+    readonly memoryID: string
+    readonly rank: number
+    readonly lexicalScore?: number | "Infinity" | "-Infinity" | "NaN"
+    readonly semanticScore?: number | "Infinity" | "-Infinity" | "NaN"
+    readonly reason: string
+  }["memoryID"]
+  readonly rank: {
+    readonly turnID: string
+    readonly memoryID: string
+    readonly rank: number
+    readonly lexicalScore?: number | "Infinity" | "-Infinity" | "NaN"
+    readonly semanticScore?: number | "Infinity" | "-Infinity" | "NaN"
+    readonly reason: string
+  }["rank"]
+  readonly lexicalScore?: {
+    readonly turnID: string
+    readonly memoryID: string
+    readonly rank: number
+    readonly lexicalScore?: number | "Infinity" | "-Infinity" | "NaN"
+    readonly semanticScore?: number | "Infinity" | "-Infinity" | "NaN"
+    readonly reason: string
+  }["lexicalScore"]
+  readonly semanticScore?: {
+    readonly turnID: string
+    readonly memoryID: string
+    readonly rank: number
+    readonly lexicalScore?: number | "Infinity" | "-Infinity" | "NaN"
+    readonly semanticScore?: number | "Infinity" | "-Infinity" | "NaN"
+    readonly reason: string
+  }["semanticScore"]
+  readonly reason: {
+    readonly turnID: string
+    readonly memoryID: string
+    readonly rank: number
+    readonly lexicalScore?: number | "Infinity" | "-Infinity" | "NaN"
+    readonly semanticScore?: number | "Infinity" | "-Infinity" | "NaN"
+    readonly reason: string
+  }["reason"]
+}
+
+export type ServerJarvisRecordMemoryUseOutput = {
+  readonly id: string
+  readonly turnID: string
+  readonly memoryID: string
+  readonly rank: number
+  readonly lexicalScore: number
+  readonly semanticScore: number
+  readonly reason: string
+  readonly createdAt: number
+}
+
+export type ServerJarvisReplaysInput = { readonly limit?: { readonly limit?: number | undefined }["limit"] }
+
+export type ServerJarvisReplaysOutput = ReadonlyArray<{
+  readonly id: string
+  readonly turnID?: string
+  readonly sessionID?: string
+  readonly surface: "desktop" | "unity-editor" | "pcvr" | "quest"
+  readonly status: "recording" | "completed" | "cancelled" | "error"
+  readonly events: ReadonlyArray<{
+    readonly sequence: number
+    readonly type: string
+    readonly timestamp: number
+    readonly data: { readonly [x: string]: JsonValue }
+  }>
+  readonly metrics: {
+    readonly admittedAt?: number
+    readonly providerStartedAt?: number
+    readonly firstTextAt?: number
+    readonly firstAudioAt?: number
+    readonly completedAt?: number
+    readonly sttMs?: number
+    readonly ttftMs?: number
+    readonly ttsMs?: number
+    readonly cancelMs?: number
+  }
+  readonly error?: string
+  readonly createdAt: number
+  readonly updatedAt: number
+}>
+
+export type ServerJarvisRecordReplayInput = {
+  readonly turnID?: {
+    readonly turnID?: string
+    readonly sessionID?: string
+    readonly surface: "desktop" | "unity-editor" | "pcvr" | "quest"
+    readonly status?: "recording" | "completed" | "cancelled" | "error"
+    readonly events: ReadonlyArray<{
+      readonly sequence: number
+      readonly type: string
+      readonly timestamp: number
+      readonly data: { readonly [x: string]: JsonValue }
+    }>
+    readonly metrics?: {
+      readonly admittedAt?: number
+      readonly providerStartedAt?: number
+      readonly firstTextAt?: number
+      readonly firstAudioAt?: number
+      readonly completedAt?: number
+      readonly sttMs?: number
+      readonly ttftMs?: number
+      readonly ttsMs?: number
+      readonly cancelMs?: number
+    }
+    readonly error?: string
+  }["turnID"]
+  readonly sessionID?: {
+    readonly turnID?: string
+    readonly sessionID?: string
+    readonly surface: "desktop" | "unity-editor" | "pcvr" | "quest"
+    readonly status?: "recording" | "completed" | "cancelled" | "error"
+    readonly events: ReadonlyArray<{
+      readonly sequence: number
+      readonly type: string
+      readonly timestamp: number
+      readonly data: { readonly [x: string]: JsonValue }
+    }>
+    readonly metrics?: {
+      readonly admittedAt?: number
+      readonly providerStartedAt?: number
+      readonly firstTextAt?: number
+      readonly firstAudioAt?: number
+      readonly completedAt?: number
+      readonly sttMs?: number
+      readonly ttftMs?: number
+      readonly ttsMs?: number
+      readonly cancelMs?: number
+    }
+    readonly error?: string
+  }["sessionID"]
+  readonly surface: {
+    readonly turnID?: string
+    readonly sessionID?: string
+    readonly surface: "desktop" | "unity-editor" | "pcvr" | "quest"
+    readonly status?: "recording" | "completed" | "cancelled" | "error"
+    readonly events: ReadonlyArray<{
+      readonly sequence: number
+      readonly type: string
+      readonly timestamp: number
+      readonly data: { readonly [x: string]: JsonValue }
+    }>
+    readonly metrics?: {
+      readonly admittedAt?: number
+      readonly providerStartedAt?: number
+      readonly firstTextAt?: number
+      readonly firstAudioAt?: number
+      readonly completedAt?: number
+      readonly sttMs?: number
+      readonly ttftMs?: number
+      readonly ttsMs?: number
+      readonly cancelMs?: number
+    }
+    readonly error?: string
+  }["surface"]
+  readonly status?: {
+    readonly turnID?: string
+    readonly sessionID?: string
+    readonly surface: "desktop" | "unity-editor" | "pcvr" | "quest"
+    readonly status?: "recording" | "completed" | "cancelled" | "error"
+    readonly events: ReadonlyArray<{
+      readonly sequence: number
+      readonly type: string
+      readonly timestamp: number
+      readonly data: { readonly [x: string]: JsonValue }
+    }>
+    readonly metrics?: {
+      readonly admittedAt?: number
+      readonly providerStartedAt?: number
+      readonly firstTextAt?: number
+      readonly firstAudioAt?: number
+      readonly completedAt?: number
+      readonly sttMs?: number
+      readonly ttftMs?: number
+      readonly ttsMs?: number
+      readonly cancelMs?: number
+    }
+    readonly error?: string
+  }["status"]
+  readonly events: {
+    readonly turnID?: string
+    readonly sessionID?: string
+    readonly surface: "desktop" | "unity-editor" | "pcvr" | "quest"
+    readonly status?: "recording" | "completed" | "cancelled" | "error"
+    readonly events: ReadonlyArray<{
+      readonly sequence: number
+      readonly type: string
+      readonly timestamp: number
+      readonly data: { readonly [x: string]: JsonValue }
+    }>
+    readonly metrics?: {
+      readonly admittedAt?: number
+      readonly providerStartedAt?: number
+      readonly firstTextAt?: number
+      readonly firstAudioAt?: number
+      readonly completedAt?: number
+      readonly sttMs?: number
+      readonly ttftMs?: number
+      readonly ttsMs?: number
+      readonly cancelMs?: number
+    }
+    readonly error?: string
+  }["events"]
+  readonly metrics?: {
+    readonly turnID?: string
+    readonly sessionID?: string
+    readonly surface: "desktop" | "unity-editor" | "pcvr" | "quest"
+    readonly status?: "recording" | "completed" | "cancelled" | "error"
+    readonly events: ReadonlyArray<{
+      readonly sequence: number
+      readonly type: string
+      readonly timestamp: number
+      readonly data: { readonly [x: string]: JsonValue }
+    }>
+    readonly metrics?: {
+      readonly admittedAt?: number
+      readonly providerStartedAt?: number
+      readonly firstTextAt?: number
+      readonly firstAudioAt?: number
+      readonly completedAt?: number
+      readonly sttMs?: number
+      readonly ttftMs?: number
+      readonly ttsMs?: number
+      readonly cancelMs?: number
+    }
+    readonly error?: string
+  }["metrics"]
+  readonly error?: {
+    readonly turnID?: string
+    readonly sessionID?: string
+    readonly surface: "desktop" | "unity-editor" | "pcvr" | "quest"
+    readonly status?: "recording" | "completed" | "cancelled" | "error"
+    readonly events: ReadonlyArray<{
+      readonly sequence: number
+      readonly type: string
+      readonly timestamp: number
+      readonly data: { readonly [x: string]: JsonValue }
+    }>
+    readonly metrics?: {
+      readonly admittedAt?: number
+      readonly providerStartedAt?: number
+      readonly firstTextAt?: number
+      readonly firstAudioAt?: number
+      readonly completedAt?: number
+      readonly sttMs?: number
+      readonly ttftMs?: number
+      readonly ttsMs?: number
+      readonly cancelMs?: number
+    }
+    readonly error?: string
+  }["error"]
+}
+
+export type ServerJarvisRecordReplayOutput = {
+  readonly id: string
+  readonly turnID?: string
+  readonly sessionID?: string
+  readonly surface: "desktop" | "unity-editor" | "pcvr" | "quest"
+  readonly status: "recording" | "completed" | "cancelled" | "error"
+  readonly events: ReadonlyArray<{
+    readonly sequence: number
+    readonly type: string
+    readonly timestamp: number
+    readonly data: { readonly [x: string]: JsonValue }
+  }>
+  readonly metrics: {
+    readonly admittedAt?: number
+    readonly providerStartedAt?: number
+    readonly firstTextAt?: number
+    readonly firstAudioAt?: number
+    readonly completedAt?: number
+    readonly sttMs?: number
+    readonly ttftMs?: number
+    readonly ttsMs?: number
+    readonly cancelMs?: number
+  }
+  readonly error?: string
+  readonly createdAt: number
+  readonly updatedAt: number
+}
+
+export type ServerJarvisReplayInput = { readonly replayID: { readonly replayID: string }["replayID"] }
+
+export type ServerJarvisReplayOutput = {
+  readonly id: string
+  readonly turnID?: string
+  readonly sessionID?: string
+  readonly surface: "desktop" | "unity-editor" | "pcvr" | "quest"
+  readonly status: "recording" | "completed" | "cancelled" | "error"
+  readonly events: ReadonlyArray<{
+    readonly sequence: number
+    readonly type: string
+    readonly timestamp: number
+    readonly data: { readonly [x: string]: JsonValue }
+  }>
+  readonly metrics: {
+    readonly admittedAt?: number
+    readonly providerStartedAt?: number
+    readonly firstTextAt?: number
+    readonly firstAudioAt?: number
+    readonly completedAt?: number
+    readonly sttMs?: number
+    readonly ttftMs?: number
+    readonly ttsMs?: number
+    readonly cancelMs?: number
+  }
+  readonly error?: string
+  readonly createdAt: number
+  readonly updatedAt: number
+} | null
+
+export type ServerJarvisRemoveReplayInput = { readonly replayID: { readonly replayID: string }["replayID"] }
+
+export type ServerJarvisRemoveReplayOutput = { readonly changed: number }
+
+export type ServerJarvisExecuteReplayInput = {
+  readonly replayID: { readonly replayID: string }["replayID"]
+  readonly fixtureOnly?: { readonly fixtureOnly?: boolean }["fixtureOnly"]
+}
+
+export type ServerJarvisExecuteReplayOutput = {
+  readonly id: string
+  readonly replayID: string
+  readonly status: "queued" | "running" | "completed" | "error"
+  readonly fixtureOnly: boolean
+  readonly assertions: ReadonlyArray<{ readonly id: string; readonly passed: boolean; readonly detail?: string }>
+  readonly metrics: {
+    readonly admittedAt?: number
+    readonly providerStartedAt?: number
+    readonly firstTextAt?: number
+    readonly firstAudioAt?: number
+    readonly completedAt?: number
+    readonly sttMs?: number
+    readonly ttftMs?: number
+    readonly ttsMs?: number
+    readonly cancelMs?: number
+  }
+  readonly error?: string
+  readonly createdAt: number
+  readonly updatedAt: number
+} | null
+
+export type ServerJarvisReplayExecutionInput = { readonly executionID: { readonly executionID: string }["executionID"] }
+
+export type ServerJarvisReplayExecutionOutput = {
+  readonly id: string
+  readonly replayID: string
+  readonly status: "queued" | "running" | "completed" | "error"
+  readonly fixtureOnly: boolean
+  readonly assertions: ReadonlyArray<{ readonly id: string; readonly passed: boolean; readonly detail?: string }>
+  readonly metrics: {
+    readonly admittedAt?: number
+    readonly providerStartedAt?: number
+    readonly firstTextAt?: number
+    readonly firstAudioAt?: number
+    readonly completedAt?: number
+    readonly sttMs?: number
+    readonly ttftMs?: number
+    readonly ttsMs?: number
+    readonly cancelMs?: number
+  }
+  readonly error?: string
+  readonly createdAt: number
+  readonly updatedAt: number
+} | null
+
+export type ServerJarvisCompareReplaysInput = {
+  readonly baselineExecutionID: {
+    readonly baselineExecutionID: string
+    readonly candidateExecutionID: string
+  }["baselineExecutionID"]
+  readonly candidateExecutionID: {
+    readonly baselineExecutionID: string
+    readonly candidateExecutionID: string
+  }["candidateExecutionID"]
+}
+
+export type ServerJarvisCompareReplaysOutput = {
+  readonly baselineExecutionID: string
+  readonly candidateExecutionID: string
+  readonly regressions: ReadonlyArray<string>
+  readonly improvements: ReadonlyArray<string>
+  readonly passed: boolean
+} | null
+
 export type ServerJarvisInboxOutput = ReadonlyArray<{
   readonly id: string
   readonly profileID: string
@@ -5522,3 +7121,440 @@ export type ServerJarvisRetryInboxOutput = {
   readonly updatedAt: number
   readonly blockedReason?: string
 } | null
+
+export type ServerJarvisCompanionStatusOutput = {
+  readonly config: {
+    readonly enabled: boolean
+    readonly schedule: string
+    readonly timezone: string
+    readonly catchUpUntil: string
+    readonly sources: {
+      readonly gmail: boolean
+      readonly calendar: boolean
+      readonly drive: boolean
+      readonly goals: boolean
+      readonly promises: boolean
+      readonly inbox: boolean
+    }
+    readonly updatedAt: number
+  }
+  readonly google: {
+    readonly available: boolean
+    readonly phase: "unavailable" | "disconnected" | "connecting" | "connected" | "expired" | "error"
+    readonly accountID?: string
+    readonly email?: string
+    readonly scopes: ReadonlyArray<string>
+    readonly writeScopes: ReadonlyArray<string>
+    readonly checkedAt: number
+    readonly error?: string
+  }
+  readonly lastRun?: {
+    readonly id: string
+    readonly briefingID?: string
+    readonly trigger: "scheduled" | "catch_up" | "manual"
+    readonly status: "queued" | "collecting" | "completed" | "partial" | "error" | "skipped"
+    readonly localDate: string
+    readonly accountID?: string
+    readonly sourceCounts: { readonly [x: string]: number }
+    readonly error?: string
+    readonly startedAt: number
+    readonly completedAt?: number
+  }
+  readonly nextRunAt?: number
+  readonly catchUpAvailable: boolean
+  readonly bridgeAvailable: boolean
+  readonly error?: string
+}
+
+export type ServerJarvisCompanionConfigOutput = {
+  readonly enabled: boolean
+  readonly schedule: string
+  readonly timezone: string
+  readonly catchUpUntil: string
+  readonly sources: {
+    readonly gmail: boolean
+    readonly calendar: boolean
+    readonly drive: boolean
+    readonly goals: boolean
+    readonly promises: boolean
+    readonly inbox: boolean
+  }
+  readonly updatedAt: number
+}
+
+export type ServerJarvisUpdateCompanionConfigInput = {
+  readonly enabled: {
+    readonly enabled: boolean
+    readonly schedule: string
+    readonly timezone: string
+    readonly catchUpUntil: string
+    readonly sources: {
+      readonly gmail: boolean
+      readonly calendar: boolean
+      readonly drive: boolean
+      readonly goals: boolean
+      readonly promises: boolean
+      readonly inbox: boolean
+    }
+    readonly updatedAt: number
+  }["enabled"]
+  readonly schedule: {
+    readonly enabled: boolean
+    readonly schedule: string
+    readonly timezone: string
+    readonly catchUpUntil: string
+    readonly sources: {
+      readonly gmail: boolean
+      readonly calendar: boolean
+      readonly drive: boolean
+      readonly goals: boolean
+      readonly promises: boolean
+      readonly inbox: boolean
+    }
+    readonly updatedAt: number
+  }["schedule"]
+  readonly timezone: {
+    readonly enabled: boolean
+    readonly schedule: string
+    readonly timezone: string
+    readonly catchUpUntil: string
+    readonly sources: {
+      readonly gmail: boolean
+      readonly calendar: boolean
+      readonly drive: boolean
+      readonly goals: boolean
+      readonly promises: boolean
+      readonly inbox: boolean
+    }
+    readonly updatedAt: number
+  }["timezone"]
+  readonly catchUpUntil: {
+    readonly enabled: boolean
+    readonly schedule: string
+    readonly timezone: string
+    readonly catchUpUntil: string
+    readonly sources: {
+      readonly gmail: boolean
+      readonly calendar: boolean
+      readonly drive: boolean
+      readonly goals: boolean
+      readonly promises: boolean
+      readonly inbox: boolean
+    }
+    readonly updatedAt: number
+  }["catchUpUntil"]
+  readonly sources: {
+    readonly enabled: boolean
+    readonly schedule: string
+    readonly timezone: string
+    readonly catchUpUntil: string
+    readonly sources: {
+      readonly gmail: boolean
+      readonly calendar: boolean
+      readonly drive: boolean
+      readonly goals: boolean
+      readonly promises: boolean
+      readonly inbox: boolean
+    }
+    readonly updatedAt: number
+  }["sources"]
+  readonly updatedAt: {
+    readonly enabled: boolean
+    readonly schedule: string
+    readonly timezone: string
+    readonly catchUpUntil: string
+    readonly sources: {
+      readonly gmail: boolean
+      readonly calendar: boolean
+      readonly drive: boolean
+      readonly goals: boolean
+      readonly promises: boolean
+      readonly inbox: boolean
+    }
+    readonly updatedAt: number
+  }["updatedAt"]
+}
+
+export type ServerJarvisUpdateCompanionConfigOutput = {
+  readonly enabled: boolean
+  readonly schedule: string
+  readonly timezone: string
+  readonly catchUpUntil: string
+  readonly sources: {
+    readonly gmail: boolean
+    readonly calendar: boolean
+    readonly drive: boolean
+    readonly goals: boolean
+    readonly promises: boolean
+    readonly inbox: boolean
+  }
+  readonly updatedAt: number
+}
+
+export type ServerJarvisRunDailyBriefingInput = {
+  readonly trigger?: { readonly trigger?: "scheduled" | "catch_up" | "manual"; readonly force?: boolean }["trigger"]
+  readonly force?: { readonly trigger?: "scheduled" | "catch_up" | "manual"; readonly force?: boolean }["force"]
+}
+
+export type ServerJarvisRunDailyBriefingOutput = {
+  readonly id: string
+  readonly briefingID?: string
+  readonly trigger: "scheduled" | "catch_up" | "manual"
+  readonly status: "queued" | "collecting" | "completed" | "partial" | "error" | "skipped"
+  readonly localDate: string
+  readonly accountID?: string
+  readonly sourceCounts: { readonly [x: string]: number }
+  readonly error?: string
+  readonly startedAt: number
+  readonly completedAt?: number
+}
+
+export type ServerJarvisDailyBriefingsInput = { readonly limit?: { readonly limit?: number | undefined }["limit"] }
+
+export type ServerJarvisDailyBriefingsOutput = ReadonlyArray<{
+  readonly id: string
+  readonly localDate: string
+  readonly accountID: string
+  readonly sessionID?: string
+  readonly status: "collecting" | "ready" | "partial" | "error"
+  readonly summary: string
+  readonly schedule: ReadonlyArray<string>
+  readonly importantMessages: ReadonlyArray<string>
+  readonly goalsAndPromises: ReadonlyArray<string>
+  readonly conflicts: ReadonlyArray<string>
+  readonly risks: ReadonlyArray<string>
+  readonly sources: ReadonlyArray<{
+    readonly id: string
+    readonly kind: "gmail" | "calendar" | "drive" | "goal" | "promise" | "inbox"
+    readonly status: "ready" | "unavailable" | "error"
+    readonly title: string
+    readonly summary?: string
+    readonly timestamp?: number
+    readonly url?: string
+    readonly error?: string
+  }>
+  readonly proposedActions: ReadonlyArray<{
+    readonly id: string
+    readonly briefingID?: string
+    readonly kind: "gmail_draft" | "calendar_create" | "calendar_update" | "jarvis_reminder" | "jarvis_goal"
+    readonly title: string
+    readonly preview: string
+    readonly access: "read" | "local_write" | "external_write"
+    readonly input: { readonly [x: string]: JsonValue }
+    readonly requiredScopes: ReadonlyArray<string>
+    readonly idempotencyKey: string
+    readonly externalRevision?: string
+    readonly status: "prepared" | "approved" | "executing" | "completed" | "cancelled" | "conflict" | "error"
+    readonly createdAt: number
+    readonly updatedAt: number
+  }>
+  readonly createdAt: number
+  readonly updatedAt: number
+}>
+
+export type ServerJarvisDailyBriefingInput = { readonly briefingID: { readonly briefingID: string }["briefingID"] }
+
+export type ServerJarvisDailyBriefingOutput = {
+  readonly id: string
+  readonly localDate: string
+  readonly accountID: string
+  readonly sessionID?: string
+  readonly status: "collecting" | "ready" | "partial" | "error"
+  readonly summary: string
+  readonly schedule: ReadonlyArray<string>
+  readonly importantMessages: ReadonlyArray<string>
+  readonly goalsAndPromises: ReadonlyArray<string>
+  readonly conflicts: ReadonlyArray<string>
+  readonly risks: ReadonlyArray<string>
+  readonly sources: ReadonlyArray<{
+    readonly id: string
+    readonly kind: "gmail" | "calendar" | "drive" | "goal" | "promise" | "inbox"
+    readonly status: "ready" | "unavailable" | "error"
+    readonly title: string
+    readonly summary?: string
+    readonly timestamp?: number
+    readonly url?: string
+    readonly error?: string
+  }>
+  readonly proposedActions: ReadonlyArray<{
+    readonly id: string
+    readonly briefingID?: string
+    readonly kind: "gmail_draft" | "calendar_create" | "calendar_update" | "jarvis_reminder" | "jarvis_goal"
+    readonly title: string
+    readonly preview: string
+    readonly access: "read" | "local_write" | "external_write"
+    readonly input: { readonly [x: string]: JsonValue }
+    readonly requiredScopes: ReadonlyArray<string>
+    readonly idempotencyKey: string
+    readonly externalRevision?: string
+    readonly status: "prepared" | "approved" | "executing" | "completed" | "cancelled" | "conflict" | "error"
+    readonly createdAt: number
+    readonly updatedAt: number
+  }>
+  readonly createdAt: number
+  readonly updatedAt: number
+} | null
+
+export type ServerJarvisPrepareCompanionActionInput = {
+  readonly briefingID?: {
+    readonly briefingID?: string
+    readonly kind: "gmail_draft" | "calendar_create" | "calendar_update" | "jarvis_reminder" | "jarvis_goal"
+    readonly title: string
+    readonly preview: string
+    readonly input: { readonly [x: string]: JsonValue }
+    readonly requiredScopes?: ReadonlyArray<string>
+    readonly idempotencyKey: string
+    readonly externalRevision?: string
+  }["briefingID"]
+  readonly kind: {
+    readonly briefingID?: string
+    readonly kind: "gmail_draft" | "calendar_create" | "calendar_update" | "jarvis_reminder" | "jarvis_goal"
+    readonly title: string
+    readonly preview: string
+    readonly input: { readonly [x: string]: JsonValue }
+    readonly requiredScopes?: ReadonlyArray<string>
+    readonly idempotencyKey: string
+    readonly externalRevision?: string
+  }["kind"]
+  readonly title: {
+    readonly briefingID?: string
+    readonly kind: "gmail_draft" | "calendar_create" | "calendar_update" | "jarvis_reminder" | "jarvis_goal"
+    readonly title: string
+    readonly preview: string
+    readonly input: { readonly [x: string]: JsonValue }
+    readonly requiredScopes?: ReadonlyArray<string>
+    readonly idempotencyKey: string
+    readonly externalRevision?: string
+  }["title"]
+  readonly preview: {
+    readonly briefingID?: string
+    readonly kind: "gmail_draft" | "calendar_create" | "calendar_update" | "jarvis_reminder" | "jarvis_goal"
+    readonly title: string
+    readonly preview: string
+    readonly input: { readonly [x: string]: JsonValue }
+    readonly requiredScopes?: ReadonlyArray<string>
+    readonly idempotencyKey: string
+    readonly externalRevision?: string
+  }["preview"]
+  readonly input: {
+    readonly briefingID?: string
+    readonly kind: "gmail_draft" | "calendar_create" | "calendar_update" | "jarvis_reminder" | "jarvis_goal"
+    readonly title: string
+    readonly preview: string
+    readonly input: { readonly [x: string]: JsonValue }
+    readonly requiredScopes?: ReadonlyArray<string>
+    readonly idempotencyKey: string
+    readonly externalRevision?: string
+  }["input"]
+  readonly requiredScopes?: {
+    readonly briefingID?: string
+    readonly kind: "gmail_draft" | "calendar_create" | "calendar_update" | "jarvis_reminder" | "jarvis_goal"
+    readonly title: string
+    readonly preview: string
+    readonly input: { readonly [x: string]: JsonValue }
+    readonly requiredScopes?: ReadonlyArray<string>
+    readonly idempotencyKey: string
+    readonly externalRevision?: string
+  }["requiredScopes"]
+  readonly idempotencyKey: {
+    readonly briefingID?: string
+    readonly kind: "gmail_draft" | "calendar_create" | "calendar_update" | "jarvis_reminder" | "jarvis_goal"
+    readonly title: string
+    readonly preview: string
+    readonly input: { readonly [x: string]: JsonValue }
+    readonly requiredScopes?: ReadonlyArray<string>
+    readonly idempotencyKey: string
+    readonly externalRevision?: string
+  }["idempotencyKey"]
+  readonly externalRevision?: {
+    readonly briefingID?: string
+    readonly kind: "gmail_draft" | "calendar_create" | "calendar_update" | "jarvis_reminder" | "jarvis_goal"
+    readonly title: string
+    readonly preview: string
+    readonly input: { readonly [x: string]: JsonValue }
+    readonly requiredScopes?: ReadonlyArray<string>
+    readonly idempotencyKey: string
+    readonly externalRevision?: string
+  }["externalRevision"]
+}
+
+export type ServerJarvisPrepareCompanionActionOutput = {
+  readonly id: string
+  readonly briefingID?: string
+  readonly kind: "gmail_draft" | "calendar_create" | "calendar_update" | "jarvis_reminder" | "jarvis_goal"
+  readonly title: string
+  readonly preview: string
+  readonly access: "read" | "local_write" | "external_write"
+  readonly input: { readonly [x: string]: JsonValue }
+  readonly requiredScopes: ReadonlyArray<string>
+  readonly idempotencyKey: string
+  readonly externalRevision?: string
+  readonly status: "prepared" | "approved" | "executing" | "completed" | "cancelled" | "conflict" | "error"
+  readonly createdAt: number
+  readonly updatedAt: number
+}
+
+export type ServerJarvisCompanionActionsInput = { readonly limit?: { readonly limit?: number | undefined }["limit"] }
+
+export type ServerJarvisCompanionActionsOutput = ReadonlyArray<{
+  readonly id: string
+  readonly briefingID?: string
+  readonly kind: "gmail_draft" | "calendar_create" | "calendar_update" | "jarvis_reminder" | "jarvis_goal"
+  readonly title: string
+  readonly preview: string
+  readonly access: "read" | "local_write" | "external_write"
+  readonly input: { readonly [x: string]: JsonValue }
+  readonly requiredScopes: ReadonlyArray<string>
+  readonly idempotencyKey: string
+  readonly externalRevision?: string
+  readonly status: "prepared" | "approved" | "executing" | "completed" | "cancelled" | "conflict" | "error"
+  readonly createdAt: number
+  readonly updatedAt: number
+}>
+
+export type ServerJarvisApproveCompanionActionInput = {
+  readonly actionID: { readonly actionID: string }["actionID"]
+  readonly externalRevision?: { readonly externalRevision?: string }["externalRevision"]
+}
+
+export type ServerJarvisApproveCompanionActionOutput = {
+  readonly id: string
+  readonly proposalID: string
+  readonly status: "approved" | "executing" | "completed" | "cancelled" | "conflict" | "error"
+  readonly result?: { readonly [x: string]: JsonValue }
+  readonly error?: string
+  readonly createdAt: number
+  readonly updatedAt: number
+} | null
+
+export type ServerJarvisCancelCompanionActionInput = { readonly actionID: { readonly actionID: string }["actionID"] }
+
+export type ServerJarvisCancelCompanionActionOutput = {
+  readonly id: string
+  readonly briefingID?: string
+  readonly kind: "gmail_draft" | "calendar_create" | "calendar_update" | "jarvis_reminder" | "jarvis_goal"
+  readonly title: string
+  readonly preview: string
+  readonly access: "read" | "local_write" | "external_write"
+  readonly input: { readonly [x: string]: JsonValue }
+  readonly requiredScopes: ReadonlyArray<string>
+  readonly idempotencyKey: string
+  readonly externalRevision?: string
+  readonly status: "prepared" | "approved" | "executing" | "completed" | "cancelled" | "conflict" | "error"
+  readonly createdAt: number
+  readonly updatedAt: number
+} | null
+
+export type ServerJarvisCompanionActionAuditInput = {
+  readonly limit?: { readonly limit?: number | undefined }["limit"]
+}
+
+export type ServerJarvisCompanionActionAuditOutput = ReadonlyArray<{
+  readonly id: string
+  readonly proposalID: string
+  readonly status: "approved" | "executing" | "completed" | "cancelled" | "conflict" | "error"
+  readonly result?: { readonly [x: string]: JsonValue }
+  readonly error?: string
+  readonly createdAt: number
+  readonly updatedAt: number
+}>

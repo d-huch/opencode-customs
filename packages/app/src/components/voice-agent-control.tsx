@@ -1,7 +1,10 @@
 import { Button } from "@opencode-ai/ui/button"
+import { DropdownMenu } from "@opencode-ai/ui/dropdown-menu"
+import { Icon } from "@opencode-ai/ui/icon"
+import { IconButton } from "@opencode-ai/ui/icon-button"
 import { IconButtonV2 } from "@opencode-ai/ui/v2/icon-button-v2"
 import type { Message, Part } from "@opencode-ai/sdk/v2/client"
-import { createEffect, createMemo, createSignal, onCleanup, Show, type Accessor } from "solid-js"
+import { createEffect, createMemo, createSignal, For, onCleanup, Show, type Accessor } from "solid-js"
 import { useLanguage } from "@/context/language"
 import { usePlatform, type MicrophoneAccess } from "@/context/platform"
 import { useSettings } from "@/context/settings"
@@ -40,6 +43,9 @@ import {
   type VoiceUnderstandingReason,
 } from "@/utils/voice-understanding"
 import { upsertVoiceDictionaryEntry } from "@/utils/voice-dictionary"
+import type { VoiceMode } from "@/utils/voice-mode"
+
+const VOICE_MODES = ["full", "listen", "speak", "off"] as const
 
 type VoiceAgentControlProps = {
   sessionID: Accessor<string | undefined>
@@ -138,6 +144,19 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
   const microphonePercent = createMemo(() => Math.round(microphoneLevel() * 10) * 10)
   const personalityVoice = createMemo(() => local.personality.current()?.voice)
   const canSpeak = createMemo(() => settings.voice.enabled() && settings.voice.speakResponses() && !!personalityVoice())
+  let lastDesktopHandoff: string | undefined
+  const handoffDesktop = (microphone: boolean, playback: boolean) => {
+    const sessionID = props.sessionID()
+    if (!sessionID) return
+    const key = `${sessionID}:${microphone}:${playback}`
+    if (lastDesktopHandoff === key) return
+    lastDesktopHandoff = key
+    void sdk().client.v2.jarvis.handoffPresence({
+      jarvisPresenceHandoff: { to: "desktop", sessionID, microphone, playback },
+    }).catch(() => {
+      if (lastDesktopHandoff === key) lastDesktopHandoff = undefined
+    })
+  }
   let handsFree = false
   let responseParentID: string | undefined
   let submittedAt: number | undefined
@@ -417,6 +436,7 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
     }
     const text = speechText(value).slice(0, 6_000)
     if (speechMessageID !== messageID || !text.startsWith(speechObserved)) {
+      handoffDesktop(false, true)
       speechGeneration += 1
       stopSpeech()
       resetSpeechStream()
@@ -1138,9 +1158,31 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
     resetSpeechStream()
     setLiveTranscript("")
     orchestrator.cancel("voice_disabled")
+    handoffDesktop(false, false)
+  })
+
+  createEffect(() => {
+    if (!settings.voice.enabled() || settings.voice.listeningEnabled()) return
+    handsFree = false
+    clearWakePhrase()
+    stopDuplex()
+    setLiveTranscript("")
+    if (state() === "listening" || state() === "transcribing" || state() === "interrupted")
+      orchestrator.cancel("listening_disabled")
+    handoffDesktop(false, settings.voice.speakResponses())
+  })
+
+  createEffect(() => {
+    if (!settings.voice.enabled() || settings.voice.speakResponses()) return
+    speechGeneration += 1
+    stopSpeech()
+    resetSpeechStream()
+    if (state() === "speaking" || state() === "synthesizing") orchestrator.cancel("speech_disabled")
+    handoffDesktop(settings.voice.listeningEnabled(), false)
   })
 
   async function start(preserveWake = false) {
+    if (!settings.voice.enabled() || !settings.voice.listeningEnabled()) return
     if (preserveWake && state() !== "idle") return
     if (settings.voice.engine() === "nemotron" && nemotronDuplex && (state() === "listening" || state() === "transcribing")) {
       handsFree = false
@@ -1164,6 +1206,7 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
       return
     }
     const turn = orchestrator.begin(preserveWake ? "hands_free_restart" : "microphone_start")
+    handoffDesktop(true, settings.voice.speakResponses())
     microphoneAccess = (await platform.requestMicrophoneAccess?.().catch(() => "unknown")) ?? "unknown"
     if (!orchestrator.isCurrent(turn)) return
     recordVoice("ui", "microphone_access", { state: microphoneAccess })
@@ -1264,6 +1307,7 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
   createEffect(() => {
     const enabled =
       settings.voice.enabled() &&
+      settings.voice.listeningEnabled() &&
       settings.voice.autoSubmit() &&
       settings.voice.handsFree() &&
       settings.voice.wakePhraseEnabled() &&
@@ -1294,6 +1338,122 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
   })
 
   const label = () => language.t(`voice.action.${state()}`)
+  const modeLabel = (mode = settings.voice.mode()) => language.t(`voice.mode.${mode}`)
+  const modeTitle = () => language.t("voice.mode.menu", { mode: modeLabel() })
+  const listeningAvailable = () => settings.voice.enabled() && settings.voice.listeningEnabled()
+
+  const setVoiceMode = async (mode: VoiceMode) => {
+    const current = state()
+    settings.voice.setMode(mode)
+    if (mode === "off") {
+      handsFree = false
+      clearWakePhrase()
+      stopDuplex()
+      speechGeneration += 1
+      stopSpeech()
+      resetSpeechStream()
+      setLiveTranscript("")
+      orchestrator.cancel("voice_mode_off")
+      handoffDesktop(false, false)
+      return
+    }
+    if (mode === "speak") {
+      handsFree = false
+      clearWakePhrase()
+      stopDuplex()
+      setLiveTranscript("")
+      if (current === "listening" || current === "transcribing" || current === "interrupted")
+        orchestrator.cancel("voice_mode_speak")
+      handoffDesktop(false, true)
+      return
+    }
+    if (mode === "listen") {
+      speechGeneration += 1
+      stopSpeech()
+      resetSpeechStream()
+    }
+    if (current === "listening" || current === "transcribing") {
+      handoffDesktop(true, mode === "full")
+      return
+    }
+    if (current !== "idle" || props.working()) interrupt("voice_mode_barge_in")
+    handoffDesktop(true, mode === "full")
+    queueMicrotask(() => void start())
+  }
+
+  const modeIcon = () => (
+    <Show
+      when={settings.voice.mode() === "listen"}
+      fallback={
+        <span class="relative flex size-4 items-center justify-center">
+          <Icon name="speaker" size="small" />
+          <Show when={settings.voice.mode() === "off"}>
+            <span class="absolute h-px w-4 -rotate-45 bg-current" />
+          </Show>
+        </span>
+      }
+    >
+      <Microphone active={false} level={0} />
+    </Show>
+  )
+
+  const ModeMenu = () => (
+    <DropdownMenu gutter={4} placement="top-end">
+      <Show
+        when={props.appearance === "v2"}
+        fallback={
+          <DropdownMenu.Trigger
+            as={IconButton}
+            data-action="voice-mode"
+            icon="speaker"
+            type="button"
+            variant="ghost"
+            class="size-8 p-0"
+            classList={{ "opacity-50": settings.voice.mode() === "off" }}
+            title={modeTitle()}
+            aria-label={modeTitle()}
+          />
+        }
+      >
+        <DropdownMenu.Trigger
+          as={IconButtonV2}
+          data-action="voice-mode"
+          type="button"
+          size="normal"
+          variant={settings.voice.mode() === "off" ? "ghost-muted" : "ghost"}
+          icon={modeIcon()}
+          title={modeTitle()}
+          aria-label={modeTitle()}
+        />
+      </Show>
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content class="w-[260px]">
+          <DropdownMenu.RadioGroup
+            value={settings.voice.mode()}
+            onChange={(value) => {
+              if (!VOICE_MODES.includes(value as VoiceMode)) return
+              void setVoiceMode(value as VoiceMode)
+            }}
+          >
+            <For each={VOICE_MODES}>
+              {(mode) => (
+                <DropdownMenu.RadioItem value={mode} data-action={`voice-mode-${mode}`}>
+                  <div class="flex min-w-0 flex-1 flex-col">
+                    <DropdownMenu.ItemLabel>{modeLabel(mode)}</DropdownMenu.ItemLabel>
+                    <DropdownMenu.ItemDescription>{language.t(`voice.mode.${mode}.description`)}</DropdownMenu.ItemDescription>
+                  </div>
+                  <DropdownMenu.ItemIndicator>
+                    <Icon name="check-small" size="small" class="text-icon-weak" />
+                  </DropdownMenu.ItemIndicator>
+                </DropdownMenu.RadioItem>
+              )}
+            </For>
+          </DropdownMenu.RadioGroup>
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu>
+  )
+
   const status = () => {
     const value = language.t(
       `voice.status.${state() as "listening" | "transcribing" | "thinking" | "synthesizing" | "speaking" | "interrupted"}`,
@@ -1319,7 +1479,8 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
   })
 
   return (
-    <Show when={settings.voice.enabled()}>
+    <div class="flex items-center gap-1">
+      <ModeMenu />
       <Show
         when={props.appearance === "v2"}
         fallback={
@@ -1328,9 +1489,10 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
             type="button"
             variant="ghost"
             class="size-8 p-0"
+            disabled={!listeningAvailable()}
             onClick={() => void start()}
-            title={label()}
-            aria-label={label()}
+            title={listeningAvailable() ? label() : language.t("voice.mode.listeningDisabled")}
+            aria-label={listeningAvailable() ? label() : language.t("voice.mode.listeningDisabled")}
           >
             <Microphone active={state() !== "idle"} level={microphoneLevel()} />
           </Button>
@@ -1342,12 +1504,13 @@ export function VoiceAgentControl(props: VoiceAgentControlProps) {
           size="normal"
           variant={state() === "idle" ? "ghost" : "contrast"}
           icon={<Microphone active={state() !== "idle"} level={microphoneLevel()} />}
+          disabled={!listeningAvailable()}
           onClick={() => void start()}
-          title={label()}
-          aria-label={label()}
+          title={listeningAvailable() ? label() : language.t("voice.mode.listeningDisabled")}
+          aria-label={listeningAvailable() ? label() : language.t("voice.mode.listeningDisabled")}
         />
       </Show>
-    </Show>
+    </div>
   )
 }
 

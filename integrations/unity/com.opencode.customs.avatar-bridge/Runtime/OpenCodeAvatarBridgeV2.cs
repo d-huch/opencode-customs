@@ -24,6 +24,8 @@ namespace OpenCode.Customs.AvatarBridge
         public string characterID = "jarvis";
         public string gameID = "jarvis-lab";
         public string saveSlotID = "slot-1";
+        [Tooltip("Leave empty to select unity-editor, pcvr, or quest from the build target.")]
+        public string surfaceIdentity;
         public string bootstrapUrl = AvatarBootstrap.DefaultUrl;
         public bool connectOnStart = true;
 
@@ -64,11 +66,17 @@ namespace OpenCode.Customs.AvatarBridge
         public AvatarStringEvent onAssistantState = new AvatarStringEvent();
         public AvatarStringEvent onTranscriptPartial = new AvatarStringEvent();
         public AvatarStringEvent onUserText = new AvatarStringEvent();
+        public AvatarStringEvent onTurnPhase = new AvatarStringEvent();
+        public AvatarStringEvent onGestureHint = new AvatarStringEvent();
+        public AvatarStringEvent onGazeTarget = new AvatarStringEvent();
+        [Tooltip("Sanitized fixture frames only. Live actions are never executed by Replay Lab.")]
+        public AvatarReplayEvent onReplayFixtureFrame = new AvatarReplayEvent();
 
         readonly ConcurrentQueue<Action> mainThread = new ConcurrentQueue<Action>();
         readonly Dictionary<string, CancellationTokenSource> activeActions = new Dictionary<string, CancellationTokenSource>();
         readonly Dictionary<string, AvatarActionResult> completedActions = new Dictionary<string, AvatarActionResult>();
         readonly MemoryStream audioBuffer = new MemoryStream();
+        readonly Queue<PendingPlayback> playbackQueue = new Queue<PendingPlayback>();
         CancellationTokenSource lifetime;
         CancellationTokenSource transportLifetime;
         IAvatarTransport transport;
@@ -92,7 +100,15 @@ namespace OpenCode.Customs.AvatarBridge
         Coroutine visemePlayback;
         Coroutine audioPlaybackCompletion;
         bool completeTurnAfterAudio;
+        bool audioDecodeActive;
         bool welcomeReceived;
+
+        sealed class PendingPlayback
+        {
+            public byte[] bytes;
+            public string contentType;
+            public VisemeCue[] visemes;
+        }
 
         public bool IsConnected => transport != null && transport.State == WebSocketState.Open;
         public string CurrentGoal { get; private set; }
@@ -110,6 +126,11 @@ namespace OpenCode.Customs.AvatarBridge
         public string ResponseFallback { get; private set; }
         public string VoiceEngine { get; private set; } = "cascade";
         public string RealtimeStage { get; private set; } = "idle";
+        public string CurrentTurnID { get; private set; }
+        public string CurrentTurnPhase { get; private set; } = "completed";
+        public int MediaQueuedSentences { get; private set; }
+        public int MediaActiveJobs { get; private set; }
+        public long CancellationLatencyMs { get; private set; }
         public ApprovalRequest CurrentApproval => currentApproval;
 
         async void Start()
@@ -416,10 +437,23 @@ namespace OpenCode.Customs.AvatarBridge
                 clientID = profile.clientID, characterID = profile.characterID,
                 gameID = profile.gameID, saveSlotID = profile.saveSlotID, sessionID = profile.sessionID,
                 profileID = profile.profileID, profileRevision = profile.profileRevision,
+                surface = ResolveSurfaceIdentity(),
                 resumeSequence = lastServerSequence,
                 actions = new[] { "animation.trigger", "emotion.set", "gesture.play", "look_at", "move_to", "speech.stop" },
                 voice,
             });
+        }
+
+        string ResolveSurfaceIdentity()
+        {
+            if (!string.IsNullOrWhiteSpace(surfaceIdentity)) return surfaceIdentity.Trim();
+#if UNITY_ANDROID && !UNITY_EDITOR
+            return "quest";
+#elif UNITY_EDITOR
+            return "unity-editor";
+#else
+            return "pcvr";
+#endif
         }
 
         async Task ReceiveLoop(IAvatarTransport currentTransport, CancellationToken cancellation)
@@ -525,7 +559,7 @@ namespace OpenCode.Customs.AvatarBridge
                     mainThread.Enqueue(() => onSpeechEmotion?.Invoke(emotion, intensity));
                     mainThread.Enqueue(() => onAssistantState?.Invoke("speaking"));
                     return;
-                case "assistant.audio.end": _ = DecodeAndPlay(audioBuffer.ToArray(), audioContentType); return;
+                case "assistant.audio.end": QueueAudioPlayback(audioBuffer.ToArray(), audioContentType, pendingVisemes); return;
                 case "assistant.done":
                     mainThread.Enqueue(() =>
                     {
@@ -551,6 +585,67 @@ namespace OpenCode.Customs.AvatarBridge
                         onSpeechEmotion?.Invoke(presentation.emotion ?? "neutral", presentation.intensity);
                         if (!string.IsNullOrWhiteSpace(presentation.goal)) onGoalChanged?.Invoke(presentation.goal);
                     });
+                    return;
+                case "jarvis.turn":
+                    var turn = message.ToObject<JarvisTurnFrame>();
+                    if (turn == null) return;
+                    mainThread.Enqueue(() =>
+                    {
+                        CurrentTurnID = turn.turnID;
+                        CurrentTurnPhase = string.IsNullOrWhiteSpace(turn.phase) ? CurrentTurnPhase : turn.phase;
+                        RealtimeStage = CurrentTurnPhase;
+                        onTurnPhase?.Invoke(CurrentTurnPhase);
+                        if (CurrentTurnPhase == "cancelled" || CurrentTurnPhase == "error") ResetSpeechPresentation();
+                    });
+                    return;
+                case "jarvis.presentation.cue":
+                    var cue = message["cue"]?.ToObject<JarvisPresentationCue>();
+                    if (cue == null) return;
+                    mainThread.Enqueue(() =>
+                    {
+                        onSpeechEmotion?.Invoke(cue.emotion ?? "neutral", Mathf.Clamp01(cue.intensity));
+                        if (!string.IsNullOrWhiteSpace(cue.gestureHint)) onGestureHint?.Invoke(cue.gestureHint);
+                        if (!string.IsNullOrWhiteSpace(cue.gazeTarget)) onGazeTarget?.Invoke(cue.gazeTarget);
+                    });
+                    return;
+                case "jarvis.media.queue":
+                    var media = message.ToObject<JarvisMediaFrame>();
+                    if (media == null) return;
+                    mainThread.Enqueue(() =>
+                    {
+                        MediaQueuedSentences = Mathf.Max(0, media.queued);
+                        MediaActiveJobs = Mathf.Max(0, media.active);
+                        RealtimeStage = media.state ?? RealtimeStage;
+                    });
+                    return;
+                case "jarvis.cancellation.ack":
+                    mainThread.Enqueue(() =>
+                    {
+                        CancellationLatencyMs = message.Value<long?>("latencyMs") ?? 0;
+                        MediaQueuedSentences = 0;
+                        MediaActiveJobs = 0;
+                        RealtimeStage = "listening";
+                        ResetSpeechPresentation();
+                    });
+                    return;
+                case "jarvis.snapshot":
+                    profile.sessionID = message.Value<string>("sessionID") ?? profile.sessionID;
+                    var snapshotMedia = message["media"]?.ToObject<JarvisMediaFrame>();
+                    if (snapshotMedia == null) return;
+                    mainThread.Enqueue(() =>
+                    {
+                        MediaQueuedSentences = Mathf.Max(0, snapshotMedia.queued);
+                        MediaActiveJobs = Mathf.Max(0, snapshotMedia.active);
+                        RealtimeStage = snapshotMedia.state ?? RealtimeStage;
+                    });
+                    return;
+                case "jarvis.replay.fixture":
+                    var fixtureEvent = message["event"] as JObject;
+                    if (fixtureEvent == null) return;
+                    mainThread.Enqueue(() => onReplayFixtureFrame?.Invoke(fixtureEvent.ToString(Newtonsoft.Json.Formatting.None)));
+                    return;
+                case "jarvis.replay.fixture.done":
+                    mainThread.Enqueue(() => onAssistantState?.Invoke("idle"));
                     return;
                 case "user.transcript.partial":
                     mainThread.Enqueue(() =>
@@ -825,6 +920,8 @@ namespace OpenCode.Customs.AvatarBridge
             visemePlayback = null;
             audioPlaybackCompletion = null;
             completeTurnAfterAudio = false;
+            audioDecodeActive = false;
+            playbackQueue.Clear();
             audioSource?.Stop();
             AudioPlaybackState = "Idle";
             onViseme?.Invoke(null, 0f);
@@ -911,22 +1008,44 @@ namespace OpenCode.Customs.AvatarBridge
             audioBuffer.Write(payload, 12, payload.Length - 12);
         }
 
-        async Task DecodeAndPlay(byte[] bytes, string contentType)
+        void QueueAudioPlayback(byte[] bytes, string contentType, VisemeCue[] visemes)
         {
+            mainThread.Enqueue(() =>
+            {
+                playbackQueue.Enqueue(new PendingPlayback
+                {
+                    bytes = bytes,
+                    contentType = contentType,
+                    visemes = visemes ?? Array.Empty<VisemeCue>(),
+                });
+                if (!audioDecodeActive && (audioSource == null || !audioSource.isPlaying)) _ = PlayNextAudio();
+            });
+        }
+
+        async Task PlayNextAudio()
+        {
+            if (audioDecodeActive || playbackQueue.Count == 0) return;
+            audioDecodeActive = true;
+            var pending = playbackQueue.Dequeue();
+            var bytes = pending.bytes;
+            var contentType = pending.contentType;
             if (audioSource == null)
             {
+                audioDecodeActive = false;
                 mainThread.Enqueue(() => AudioPlaybackState = "Error");
                 RaiseError("Agent voice cannot play because the character AudioSource is missing.");
                 return;
             }
             if (bytes.Length == 0)
             {
+                audioDecodeActive = false;
                 mainThread.Enqueue(() => AudioPlaybackState = "Error");
                 RaiseError("Agent voice response contained no audio data.");
                 return;
             }
             if (contentType != null && contentType.IndexOf("wav", StringComparison.OrdinalIgnoreCase) < 0)
             {
+                audioDecodeActive = false;
                 mainThread.Enqueue(() => AudioPlaybackState = "Error");
                 RaiseError("Agent voice returned unsupported audio type: " + contentType + ".");
                 return;
@@ -945,6 +1064,7 @@ namespace OpenCode.Customs.AvatarBridge
                     audioSource.clip = clip;
                     audioSource.Play();
                     AudioPlaybackState = "Playing";
+                    pendingVisemes = pending.visemes;
                     if (visemePlayback != null) StopCoroutine(visemePlayback);
                     if (audioPlaybackCompletion != null) StopCoroutine(audioPlaybackCompletion);
                     visemePlayback = StartCoroutine(PlayVisemes(pendingVisemes));
@@ -953,6 +1073,7 @@ namespace OpenCode.Customs.AvatarBridge
             }
             catch (Exception error)
             {
+                audioDecodeActive = false;
                 mainThread.Enqueue(() => AudioPlaybackState = "Error");
                 RaiseError("Could not play agent voice: " + error.Message);
             }
@@ -983,8 +1104,14 @@ namespace OpenCode.Customs.AvatarBridge
             while (audioSource != null && audioSource.isPlaying) yield return null;
             visemePlayback = null;
             audioPlaybackCompletion = null;
+            audioDecodeActive = false;
             AudioPlaybackState = "Idle";
             onViseme?.Invoke(null, 0f);
+            if (playbackQueue.Count > 0)
+            {
+                _ = PlayNextAudio();
+                yield break;
+            }
             if (!completeTurnAfterAudio) yield break;
             completeTurnAfterAudio = false;
             onAssistantState?.Invoke("idle");

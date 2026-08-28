@@ -7,11 +7,19 @@ import { Database } from "./database/database"
 import { RepositoryEmbeddings } from "./repository-embeddings"
 import {
   JarvisConfigTable,
+  JarvisConversationTable,
   JarvisGoalOutcomeTable,
   JarvisGoalTable,
   JarvisMemoryTable,
+  JarvisMemoryTombstoneTable,
+  JarvisMemoryUseTable,
+  JarvisMediaStateTable,
   JarvisPlanStepTable,
+  JarvisPresenceTable,
   JarvisProfileTable,
+  JarvisReplayTable,
+  JarvisReplayExecutionTable,
+  JarvisTurnTable,
   JarvisWakeTable,
 } from "./jarvis.sql"
 
@@ -21,6 +29,19 @@ const MAX_ACTIONS = 8
 const MAX_CYCLE_MS = 60_000
 const plannerRuntime = { activeRequests: 0, lastUsedAt: undefined as number | undefined }
 const dialogueRuntime = { activeRequests: 0 }
+const PRESENCE_ID = 1
+const CONVERSATION_ID = 1
+const MEDIA_ID = "primary"
+const TERMINAL_TURN_PHASES: readonly Jarvis.TurnPhase[] = ["completed", "cancelled", "error"]
+const ACTIVE_TURN_PHASES: readonly Jarvis.TurnPhase[] = [
+  "listening",
+  "transcribing",
+  "understanding",
+  "planning",
+  "responding",
+  "speaking",
+  "acting",
+]
 
 export const defaultConfig = (): Jarvis.Config => ({
   models: {},
@@ -158,6 +179,249 @@ export const profile = Effect.fn("JarvisRuntime.profile")(function* (
   const id = profileID ?? config.primaryProfileID
   if (!id) return undefined
   return (yield* db.select().from(JarvisProfileTable).where(eq(JarvisProfileTable.id, id)).get())?.data
+})
+
+export const createTurn = Effect.fn("JarvisRuntime.createTurn")(function* (
+  db: Database.Interface["db"],
+  input: Jarvis.TurnCreate,
+) {
+  const existing = yield* db.select().from(JarvisTurnTable).where(eq(JarvisTurnTable.request_id, input.requestID)).get()
+  if (existing) return turnFromRow(existing)
+  const now = Date.now()
+  const turn: Jarvis.Turn = {
+    id: crypto.randomUUID(),
+    requestID: input.requestID,
+    sessionID: input.sessionID,
+    profileID: input.profileID,
+    surface: input.surface,
+    responseMode: input.responseMode,
+    phase: input.phase ?? "listening",
+    sequence: 0,
+    metrics: {},
+    createdAt: now,
+    updatedAt: now,
+  }
+  yield* db.insert(JarvisTurnTable).values(turnRow(turn)).onConflictDoNothing({ target: JarvisTurnTable.request_id })
+  const stored = yield* db.select().from(JarvisTurnTable).where(eq(JarvisTurnTable.request_id, input.requestID)).get()
+  const created = stored ? turnFromRow(stored) : turn
+  yield* syncPresenceFromTurn(db, created)
+  return created
+})
+
+export const turn = Effect.fn("JarvisRuntime.turn")(function* (db: Database.Interface["db"], id: string) {
+  const row = yield* db.select().from(JarvisTurnTable).where(eq(JarvisTurnTable.id, id)).get()
+  return row ? turnFromRow(row) : undefined
+})
+
+export const turnByRequest = Effect.fn("JarvisRuntime.turnByRequest")(function* (
+  db: Database.Interface["db"],
+  requestID: string,
+) {
+  const row = yield* db.select().from(JarvisTurnTable).where(eq(JarvisTurnTable.request_id, requestID)).get()
+  return row ? turnFromRow(row) : undefined
+})
+
+export const currentTurn = Effect.fn("JarvisRuntime.currentTurn")(function* (db: Database.Interface["db"]) {
+  const row = yield* db.select().from(JarvisTurnTable).orderBy(desc(JarvisTurnTable.time_updated)).limit(1).get()
+  return row ? turnFromRow(row) : undefined
+})
+
+export const activeTurn = Effect.fn("JarvisRuntime.activeTurn")(function* (
+  db: Database.Interface["db"],
+  sessionID: string,
+) {
+  const row = yield* db
+    .select()
+    .from(JarvisTurnTable)
+    .where(and(eq(JarvisTurnTable.session_id, sessionID), inArray(JarvisTurnTable.phase, ACTIVE_TURN_PHASES)))
+    .orderBy(desc(JarvisTurnTable.time_updated))
+    .limit(1)
+    .get()
+  return row ? turnFromRow(row) : undefined
+})
+
+export const updateTurn = Effect.fn("JarvisRuntime.updateTurn")(function* (
+  db: Database.Interface["db"],
+  id: string,
+  input: Jarvis.TurnUpdate,
+) {
+  const row = yield* db.select().from(JarvisTurnTable).where(eq(JarvisTurnTable.id, id)).get()
+  if (!row) return undefined
+  if (input.sequence <= row.sequence) return turnFromRow(row)
+  if (TERMINAL_TURN_PHASES.includes(row.phase)) return turnFromRow(row)
+  if (!validTurnTransition(row.phase, input.phase)) return turnFromRow(row)
+  const now = Date.now()
+  yield* db
+    .update(JarvisTurnTable)
+    .set({
+      phase: input.phase,
+      sequence: input.sequence,
+      presentation: input.presentation ?? row.presentation,
+      metrics: { ...row.metrics, ...input.metrics },
+      error: input.error?.slice(0, 2_000) ?? row.error,
+      cancel_reason: input.cancelReason?.slice(0, 1_000) ?? row.cancel_reason,
+      time_updated: now,
+    })
+    .where(and(eq(JarvisTurnTable.id, id), eq(JarvisTurnTable.sequence, row.sequence)))
+  const updated = yield* turn(db, id)
+  if (updated) yield* syncPresenceFromTurn(db, updated)
+  return updated
+})
+
+export const cancelTurn = Effect.fn("JarvisRuntime.cancelTurn")(function* (
+  db: Database.Interface["db"],
+  id: string,
+  input: Jarvis.TurnCancel,
+) {
+  const row = yield* db.select().from(JarvisTurnTable).where(eq(JarvisTurnTable.id, id)).get()
+  if (!row) return undefined
+  if (TERMINAL_TURN_PHASES.includes(row.phase)) return turnFromRow(row)
+  const now = Date.now()
+  yield* db
+    .update(JarvisTurnTable)
+    .set({
+      phase: "cancelled",
+      sequence: row.sequence + 1,
+      cancel_reason: input.reason?.slice(0, 1_000) ?? "user_interrupted",
+      metrics: { ...row.metrics, completedAt: now },
+      time_updated: now,
+    })
+    .where(eq(JarvisTurnTable.id, id))
+  const cancelled = yield* turn(db, id)
+  if (cancelled) yield* syncPresenceFromTurn(db, cancelled)
+  return cancelled
+})
+
+export const cancelInterruptedTurns = Effect.fn("JarvisRuntime.cancelInterruptedTurns")(function* (
+  db: Database.Interface["db"],
+) {
+  const now = Date.now()
+  const rows = yield* db
+    .select()
+    .from(JarvisTurnTable)
+    .where(inArray(JarvisTurnTable.phase, ACTIVE_TURN_PHASES))
+  yield* Effect.forEach(
+    rows,
+    (row) =>
+      db
+        .update(JarvisTurnTable)
+        .set({
+          phase: "cancelled",
+          sequence: row.sequence + 1,
+          cancel_reason: "process_restart",
+          metrics: { ...row.metrics, completedAt: now },
+          time_updated: now,
+        })
+        .where(eq(JarvisTurnTable.id, row.id)),
+    { concurrency: 1 },
+  )
+  return rows.length
+})
+
+export const presence = Effect.fn("JarvisRuntime.presence")(function* (db: Database.Interface["db"]) {
+  const stored = (yield* db.select().from(JarvisPresenceTable).where(eq(JarvisPresenceTable.id, PRESENCE_ID)).get())?.data
+  return stored ?? ({ surface: "desktop", state: "completed", updatedAt: Date.now() } satisfies Jarvis.Presence)
+})
+
+export const handoffPresence = Effect.fn("JarvisRuntime.handoffPresence")(function* (
+  db: Database.Interface["db"],
+  input: Jarvis.PresenceHandoff,
+) {
+  const current = yield* presence(db)
+  if (input.from && current.surface !== input.from && current.microphoneOwner !== input.from) return current
+  const data: Jarvis.Presence = {
+    surface: input.to,
+    microphoneOwner: input.microphone ? input.to : current.microphoneOwner,
+    playbackOwner: input.playback ? input.to : current.playbackOwner,
+    turnID: input.turnID ?? current.turnID,
+    sessionID: input.sessionID ?? current.sessionID,
+    state: current.state,
+    updatedAt: Date.now(),
+  }
+  yield* db
+    .insert(JarvisPresenceTable)
+    .values({ id: PRESENCE_ID, data, time_updated: data.updatedAt })
+    .onConflictDoUpdate({ target: JarvisPresenceTable.id, set: { data, time_updated: data.updatedAt } })
+  return data
+})
+
+export const conversation = Effect.fn("JarvisRuntime.conversation")(function* (db: Database.Interface["db"]) {
+  const row = yield* db
+    .select()
+    .from(JarvisConversationTable)
+    .where(eq(JarvisConversationTable.id, CONVERSATION_ID))
+    .get()
+  return row ? conversationFromRow(row) : undefined
+})
+
+export const adoptConversation = Effect.fn("JarvisRuntime.adoptConversation")(function* (
+  db: Database.Interface["db"],
+  input: Omit<Jarvis.ConversationState, "updatedAt"> & { updatedAt?: number },
+) {
+  const data: Jarvis.ConversationState = { ...input, updatedAt: input.updatedAt ?? Date.now() }
+  yield* db
+    .insert(JarvisConversationTable)
+    .values({
+      id: CONVERSATION_ID,
+      session_id: data.sessionID,
+      profile_id: data.profileID,
+      profile_revision: data.profileRevision,
+      recovered_at: data.recoveredAt,
+      time_updated: data.updatedAt,
+    })
+    .onConflictDoUpdate({
+      target: JarvisConversationTable.id,
+      set: {
+        session_id: data.sessionID,
+        profile_id: data.profileID,
+        profile_revision: data.profileRevision,
+        recovered_at: data.recoveredAt,
+        time_updated: data.updatedAt,
+      },
+    })
+  return data
+})
+
+export const mediaState = Effect.fn("JarvisRuntime.mediaState")(function* (db: Database.Interface["db"]) {
+  const row = yield* db.select().from(JarvisMediaStateTable).where(eq(JarvisMediaStateTable.id, MEDIA_ID)).get()
+  if (!row)
+    return {
+      state: "idle",
+      queuedSentences: 0,
+      activeJobs: 0,
+      acknowledgedCancellation: true,
+      updatedAt: Date.now(),
+    } satisfies Jarvis.MediaState
+  return {
+    turnID: row.turn_id ?? undefined,
+    owner: (row.owner as Jarvis.Surface | null) ?? undefined,
+    state: row.state as Jarvis.MediaState["state"],
+    queuedSentences: row.queued_sentences,
+    activeJobs: row.active_jobs,
+    acknowledgedCancellation: row.acknowledged_cancellation,
+    updatedAt: row.time_updated,
+  } satisfies Jarvis.MediaState
+})
+
+export const updateMediaState = Effect.fn("JarvisRuntime.updateMediaState")(function* (
+  db: Database.Interface["db"],
+  input: Jarvis.MediaStateUpdate,
+) {
+  const data: Jarvis.MediaState = { ...input, updatedAt: Date.now() }
+  const values = {
+    turn_id: data.turnID,
+    owner: data.owner,
+    state: data.state,
+    queued_sentences: data.queuedSentences,
+    active_jobs: data.activeJobs,
+    acknowledged_cancellation: data.acknowledgedCancellation,
+    time_updated: data.updatedAt,
+  }
+  yield* db
+    .insert(JarvisMediaStateTable)
+    .values({ id: MEDIA_ID, ...values })
+    .onConflictDoUpdate({ target: JarvisMediaStateTable.id, set: values })
+  return data
 })
 
 export const createGoal = Effect.fn("JarvisRuntime.createGoal")(function* (
@@ -370,6 +634,12 @@ export const remember = Effect.fn("JarvisRuntime.remember")(function* (
   db: Database.Interface["db"],
   input: Jarvis.MemoryRecord,
 ) {
+  const forgotten = yield* db
+    .select({ sourceID: JarvisMemoryTombstoneTable.source_id })
+    .from(JarvisMemoryTombstoneTable)
+    .where(eq(JarvisMemoryTombstoneTable.source_id, input.sourceID))
+    .get()
+  if (forgotten) return input
   const now = Date.now()
   const config = yield* getConfig(db)
   const embedded = input.embedding
@@ -459,7 +729,58 @@ export const removeMemory = Effect.fn("JarvisRuntime.removeMemory")(function* (
   db: Database.Interface["db"],
   id: string,
 ) {
+  const current = yield* db.select().from(JarvisMemoryTable).where(eq(JarvisMemoryTable.id, id)).get()
+  if (!current) return 0
+  yield* db
+    .insert(JarvisMemoryTombstoneTable)
+    .values({ source_id: current.source_id, time_created: Date.now() })
+    .onConflictDoNothing({ target: JarvisMemoryTombstoneTable.source_id })
   return (yield* db.delete(JarvisMemoryTable).where(eq(JarvisMemoryTable.id, id)).returning({ id: JarvisMemoryTable.id })).length
+})
+
+export const recordMemoryUse = Effect.fn("JarvisRuntime.recordMemoryUse")(function* (
+  db: Database.Interface["db"],
+  input: Jarvis.MemoryUseCreate,
+) {
+  const record: Jarvis.MemoryUse = {
+    id: crypto.randomUUID(),
+    turnID: input.turnID,
+    memoryID: input.memoryID,
+    rank: input.rank,
+    lexicalScore: input.lexicalScore ?? 0,
+    semanticScore: input.semanticScore ?? 0,
+    reason: input.reason.slice(0, 1_000),
+    createdAt: Date.now(),
+  }
+  yield* db
+    .insert(JarvisMemoryUseTable)
+    .values(memoryUseRow(record))
+    .onConflictDoUpdate({
+      target: [JarvisMemoryUseTable.turn_id, JarvisMemoryUseTable.memory_id],
+      set: {
+        rank: record.rank,
+        lexical_score: record.lexicalScore,
+        semantic_score: record.semanticScore,
+        reason: record.reason,
+        time_created: record.createdAt,
+      },
+    })
+  return record
+})
+
+export const memoryUses = Effect.fn("JarvisRuntime.memoryUses")(function* (
+  db: Database.Interface["db"],
+  input: { memoryID?: string; turnID?: string; limit?: number },
+) {
+  const where = input.memoryID
+    ? eq(JarvisMemoryUseTable.memory_id, input.memoryID)
+    : input.turnID
+      ? eq(JarvisMemoryUseTable.turn_id, input.turnID)
+      : undefined
+  const rows = where
+    ? yield* db.select().from(JarvisMemoryUseTable).where(where).orderBy(desc(JarvisMemoryUseTable.time_created)).limit(Math.min(input.limit ?? 50, 100))
+    : yield* db.select().from(JarvisMemoryUseTable).orderBy(desc(JarvisMemoryUseTable.time_created)).limit(Math.min(input.limit ?? 50, 100))
+  return rows.map(memoryUseFromRow)
 })
 
 export const patchMemory = Effect.fn("JarvisRuntime.patchMemory")(function* (
@@ -543,6 +864,18 @@ export const enqueueWake = Effect.fn("JarvisRuntime.enqueueWake")(function* (
   const now = Date.now()
   const day = new Date(now)
   day.setHours(0, 0, 0, 0)
+  const suppressed = yield* db
+    .select({ id: JarvisWakeTable.id })
+    .from(JarvisWakeTable)
+    .where(
+      and(
+        eq(JarvisWakeTable.profile_id, config.primaryProfileID),
+        eq(JarvisWakeTable.topic, input.topic),
+        eq(JarvisWakeTable.status, "dismissed"),
+      ),
+    )
+    .get()
+  if (suppressed) return undefined
   const cooldown = input.kind === "reflection" ? day.getTime() : now - config.initiative.topicCooldownMinutes * 60_000
   const duplicate = yield* db
     .select({ id: JarvisWakeTable.id })
@@ -657,6 +990,245 @@ export const cancelGoal = Effect.fn("JarvisRuntime.cancelGoal")(function* (
     summary: input.summary?.trim() || "Cancelled by the user.",
     changedEntityIDs: input.changedEntityIDs ?? [],
   })
+})
+
+export const recordReplay = Effect.fn("JarvisRuntime.recordReplay")(function* (
+  db: Database.Interface["db"],
+  input: Jarvis.ReplayCreate,
+) {
+  const now = Date.now()
+  const existing = input.turnID
+    ? yield* db.select().from(JarvisReplayTable).where(eq(JarvisReplayTable.turn_id, input.turnID)).get()
+    : undefined
+  const replay: Jarvis.ReplayRun = {
+    id: existing?.id ?? crypto.randomUUID(),
+    turnID: input.turnID,
+    sessionID: input.sessionID,
+    surface: input.surface,
+    status: input.status ?? "completed",
+    events: sanitizeReplayEvents(input.events).slice(-500),
+    metrics: input.metrics ?? {},
+    error: input.error?.slice(0, 2_000),
+    createdAt: existing?.time_created ?? now,
+    updatedAt: now,
+  }
+  const update = {
+    session_id: replay.sessionID,
+    surface: replay.surface,
+    status: replay.status,
+    events: replay.events,
+    metrics: replay.metrics,
+    error: replay.error,
+    time_updated: replay.updatedAt,
+  }
+  if (replay.turnID) {
+    yield* db
+      .insert(JarvisReplayTable)
+      .values(replayRow(replay))
+      .onConflictDoUpdate({ target: JarvisReplayTable.turn_id, set: update })
+  } else {
+    yield* db.insert(JarvisReplayTable).values(replayRow(replay))
+  }
+  const overflow = yield* db
+    .select({ id: JarvisReplayTable.id })
+    .from(JarvisReplayTable)
+    .orderBy(desc(JarvisReplayTable.time_created))
+    .limit(1_000)
+    .offset(30)
+  if (overflow.length > 0)
+    yield* db.delete(JarvisReplayTable).where(inArray(JarvisReplayTable.id, overflow.map((row) => row.id)))
+  return replay
+})
+
+export const replays = Effect.fn("JarvisRuntime.replays")(function* (db: Database.Interface["db"], limit = 30) {
+  return (yield* db
+    .select()
+    .from(JarvisReplayTable)
+    .orderBy(desc(JarvisReplayTable.time_created))
+    .limit(Math.min(Math.max(limit, 1), 30))).map(replayFromRow)
+})
+
+export const replay = Effect.fn("JarvisRuntime.replay")(function* (db: Database.Interface["db"], id: string) {
+  const row = yield* db.select().from(JarvisReplayTable).where(eq(JarvisReplayTable.id, id)).get()
+  return row ? replayFromRow(row) : undefined
+})
+
+export const removeReplay = Effect.fn("JarvisRuntime.removeReplay")(function* (
+  db: Database.Interface["db"],
+  id: string,
+) {
+  return (yield* db.delete(JarvisReplayTable).where(eq(JarvisReplayTable.id, id)).returning({ id: JarvisReplayTable.id })).length
+})
+
+export const executeReplay = Effect.fn("JarvisRuntime.executeReplay")(function* (
+  db: Database.Interface["db"],
+  replayID: string,
+  _input: Jarvis.ReplayExecute,
+) {
+  const source = yield* replay(db, replayID)
+  if (!source) return undefined
+  const now = Date.now()
+  const terminal = source.events.findLast((event) => /(?:^|\.)(?:completed|cancelled|error)$/u.test(event.type))
+  const actionEvents = source.events.filter((event) => /(?:action|tool)/iu.test(event.type))
+  const unsafe = actionEvents.filter((event) => {
+    const risk = typeof event.data.risk === "string" ? event.data.risk : undefined
+    return risk === "interaction" || risk === "critical" || event.data.external === true
+  })
+  const textEvents = source.events.filter((event) => /text(?:\.delta|\.done)?$/u.test(event.type))
+  const playbackStarts = source.events.filter((event) => /audio\.start|playback\.start/u.test(event.type))
+  const playbackEnds = source.events.filter((event) => /audio\.end|playback\.end/u.test(event.type))
+  const assertions: Jarvis.ReplayAssertion[] = [
+    { id: "terminal", passed: !!terminal, detail: terminal ? undefined : "No terminal turn event was recorded." },
+    {
+      id: "no-duplicate-text",
+      passed: new Set(textEvents.map((event) => JSON.stringify(event.data))).size === textEvents.length,
+      detail: "Assistant text events must be unique.",
+    },
+    {
+      id: "playback-order",
+      passed: playbackStarts.length <= playbackEnds.length + 1,
+      detail: "Playback starts must have matching terminal events.",
+    },
+    {
+      id: "side-effects-blocked",
+      passed: true,
+      detail:
+        unsafe.length > 0
+          ? `${unsafe.length} unsafe action(s) replaced with recorded fixture results.`
+          : "Replay used the fixture adapter; no external side effects were executed.",
+    },
+    {
+      id: "neutral-after-cancel",
+      passed:
+        source.status !== "cancelled" ||
+        source.events.some((event) => /(?:^|\.)presentation$/u.test(event.type) && event.data.emotion === "neutral"),
+      detail: "Cancelled turns must finish with a neutral presentation cue.",
+    },
+  ]
+  const execution: Jarvis.ReplayExecution = {
+    id: crypto.randomUUID(),
+    replayID,
+    status: "completed",
+    fixtureOnly: true,
+    assertions,
+    metrics: source.metrics,
+    createdAt: now,
+    updatedAt: now,
+  }
+  yield* db.insert(JarvisReplayExecutionTable).values(replayExecutionRow(execution))
+  return execution
+})
+
+export const replayExecution = Effect.fn("JarvisRuntime.replayExecution")(function* (
+  db: Database.Interface["db"],
+  id: string,
+) {
+  const row = yield* db.select().from(JarvisReplayExecutionTable).where(eq(JarvisReplayExecutionTable.id, id)).get()
+  return row ? replayExecutionFromRow(row) : undefined
+})
+
+export const compareReplayExecutions = Effect.fn("JarvisRuntime.compareReplayExecutions")(function* (
+  db: Database.Interface["db"],
+  input: Jarvis.ReplayCompare,
+) {
+  const baseline = yield* replayExecution(db, input.baselineExecutionID)
+  const candidate = yield* replayExecution(db, input.candidateExecutionID)
+  if (!baseline || !candidate) return undefined
+  const failures = (execution: Jarvis.ReplayExecution) =>
+    new Set(execution.assertions.filter((assertion) => !assertion.passed).map((assertion) => assertion.id))
+  const previous = failures(baseline)
+  const current = failures(candidate)
+  const regressions = [...current].filter((id) => !previous.has(id))
+  const improvements = [...previous].filter((id) => !current.has(id))
+  return {
+    baselineExecutionID: baseline.id,
+    candidateExecutionID: candidate.id,
+    regressions,
+    improvements,
+    passed: regressions.length === 0 && current.size === 0,
+  } satisfies Jarvis.ReplayComparison
+})
+
+export const diagnostics = Effect.fn("JarvisRuntime.diagnostics")(function* (db: Database.Interface["db"]) {
+  const runtime = yield* status(db)
+  const active = yield* currentTurn(db)
+  const currentPresence = yield* presence(db)
+  const currentConversation = yield* conversation(db)
+  const [memoryRecords, replayRuns] = yield* Effect.all(
+    [count(db, JarvisMemoryTable), count(db, JarvisReplayTable)],
+    { concurrency: "unbounded" },
+  )
+  const checks: Jarvis.DiagnosticCheck[] = [
+    {
+      id: "sqlite",
+      status: "ready",
+      summary: "Jarvis SQLite storage is available.",
+      detail: `${memoryRecords} memory record(s) and ${replayRuns} replay trace(s) are readable.`,
+    },
+    {
+      id: "profile",
+      status: runtime.primaryProfile ? "ready" : "degraded",
+      summary: runtime.primaryProfile ? "Primary Jarvis profile is synchronized." : "Primary Jarvis profile is missing.",
+    },
+    ...runtime.modelRoles.map((role) => ({
+      id: `model-${role.role}`,
+      status: role.status === "ready" ? ("ready" as const) : role.status === "unconfigured" ? ("degraded" as const) : ("error" as const),
+      summary: `${role.role}: ${role.status}`,
+      detail: role.detail,
+    })),
+    {
+      id: "presence",
+      status: currentPresence.microphoneOwner || currentPresence.playbackOwner ? "ready" : "degraded",
+      summary: currentPresence.microphoneOwner || currentPresence.playbackOwner ? "A live media surface is available." : "No live media surface owns microphone or playback.",
+    },
+    {
+      id: "turn",
+      status: active?.phase === "error" ? "error" : "ready",
+      summary: active ? `Latest turn: ${active.phase}.` : "No Jarvis turn has been recorded yet.",
+      detail: active?.error,
+    },
+    {
+      id: "conversation",
+      status: currentConversation ? "ready" : "degraded",
+      summary: currentConversation ? "Canonical Jarvis session is adopted." : "Canonical Jarvis session will be created on first use.",
+      detail: currentConversation?.sessionID,
+    },
+    {
+      id: "replay",
+      status: replayRuns > 0 ? "ready" : "degraded",
+      summary: replayRuns > 0 ? "Replay Lab has sanitized traces." : "Replay Lab has no turn traces yet.",
+    },
+  ]
+  return {
+    checkedAt: Date.now(),
+    checks,
+    recommendations: recommendations(runtime, currentPresence, active),
+  } satisfies Jarvis.Diagnostics
+})
+
+export const controlStatus = Effect.fn("JarvisRuntime.controlStatus")(function* (db: Database.Interface["db"]) {
+  const [runtime, active, currentPresence, currentConversation, currentMedia, replayCount, recentMemoryUses] = yield* Effect.all(
+    [
+      status(db),
+      currentTurn(db),
+      presence(db),
+      conversation(db),
+      mediaState(db),
+      count(db, JarvisReplayTable),
+      count(db, JarvisMemoryUseTable),
+    ],
+    { concurrency: "unbounded" },
+  )
+  return {
+    runtime,
+    conversation: currentConversation,
+    currentTurn: active,
+    presence: currentPresence,
+    media: currentMedia,
+    replayCount,
+    recentMemoryUses,
+    recommendations: recommendations(runtime, currentPresence, active),
+  } satisfies Jarvis.ControlStatus
 })
 
 export const status = Effect.fn("JarvisRuntime.status")(function* (db: Database.Interface["db"]) {
@@ -898,6 +1470,214 @@ function memoryFromRow(row: typeof JarvisMemoryTable.$inferSelect): Jarvis.Memor
   }
 }
 
+function turnRow(turn: Jarvis.Turn): typeof JarvisTurnTable.$inferInsert {
+  return {
+    id: turn.id,
+    request_id: turn.requestID,
+    session_id: turn.sessionID,
+    profile_id: turn.profileID,
+    surface: turn.surface,
+    response_mode: turn.responseMode,
+    phase: turn.phase,
+    sequence: turn.sequence,
+    presentation: turn.presentation,
+    metrics: turn.metrics,
+    error: turn.error,
+    cancel_reason: turn.cancelReason,
+    time_created: turn.createdAt,
+    time_updated: turn.updatedAt,
+  }
+}
+
+function turnFromRow(row: typeof JarvisTurnTable.$inferSelect): Jarvis.Turn {
+  return {
+    id: row.id,
+    requestID: row.request_id,
+    sessionID: row.session_id,
+    profileID: row.profile_id ?? undefined,
+    surface: row.surface,
+    responseMode: row.response_mode,
+    phase: row.phase,
+    sequence: row.sequence,
+    presentation: row.presentation ?? undefined,
+    metrics: row.metrics,
+    error: row.error ?? undefined,
+    cancelReason: row.cancel_reason ?? undefined,
+    createdAt: row.time_created,
+    updatedAt: row.time_updated,
+  }
+}
+
+function validTurnTransition(current: Jarvis.TurnPhase, next: Jarvis.TurnPhase) {
+  if (next === "cancelled" || next === "error") return true
+  const order: readonly Jarvis.TurnPhase[] = [
+    "listening",
+    "transcribing",
+    "understanding",
+    "planning",
+    "responding",
+    "speaking",
+    "acting",
+    "completed",
+  ]
+  const currentIndex = order.indexOf(current)
+  const nextIndex = order.indexOf(next)
+  return currentIndex >= 0 && nextIndex >= currentIndex
+}
+
+const syncPresenceFromTurn = Effect.fn("JarvisRuntime.syncPresenceFromTurn")(function* (
+  db: Database.Interface["db"],
+  turn: Jarvis.Turn,
+) {
+  const current = (yield* db.select().from(JarvisPresenceTable).where(eq(JarvisPresenceTable.id, PRESENCE_ID)).get())?.data
+  const data: Jarvis.Presence = {
+    surface: turn.surface,
+    microphoneOwner: current?.microphoneOwner,
+    playbackOwner: current?.playbackOwner,
+    turnID: turn.id,
+    sessionID: turn.sessionID,
+    state: turn.phase,
+    updatedAt: turn.updatedAt,
+  }
+  yield* db
+    .insert(JarvisPresenceTable)
+    .values({ id: PRESENCE_ID, data, time_updated: data.updatedAt })
+    .onConflictDoUpdate({ target: JarvisPresenceTable.id, set: { data, time_updated: data.updatedAt } })
+})
+
+function memoryUseRow(record: Jarvis.MemoryUse): typeof JarvisMemoryUseTable.$inferInsert {
+  return {
+    id: record.id,
+    turn_id: record.turnID,
+    memory_id: record.memoryID,
+    rank: record.rank,
+    lexical_score: record.lexicalScore,
+    semantic_score: record.semanticScore,
+    reason: record.reason,
+    time_created: record.createdAt,
+  }
+}
+
+function memoryUseFromRow(row: typeof JarvisMemoryUseTable.$inferSelect): Jarvis.MemoryUse {
+  return {
+    id: row.id,
+    turnID: row.turn_id,
+    memoryID: row.memory_id,
+    rank: row.rank,
+    lexicalScore: row.lexical_score,
+    semanticScore: row.semantic_score,
+    reason: row.reason,
+    createdAt: row.time_created,
+  }
+}
+
+function replayRow(replay: Jarvis.ReplayRun): typeof JarvisReplayTable.$inferInsert {
+  return {
+    id: replay.id,
+    turn_id: replay.turnID,
+    session_id: replay.sessionID,
+    surface: replay.surface,
+    status: replay.status,
+    events: replay.events,
+    metrics: replay.metrics,
+    error: replay.error,
+    time_created: replay.createdAt,
+    time_updated: replay.updatedAt,
+  }
+}
+
+function replayFromRow(row: typeof JarvisReplayTable.$inferSelect): Jarvis.ReplayRun {
+  return {
+    id: row.id,
+    turnID: row.turn_id ?? undefined,
+    sessionID: row.session_id ?? undefined,
+    surface: row.surface,
+    status: row.status,
+    events: row.events,
+    metrics: row.metrics,
+    error: row.error ?? undefined,
+    createdAt: row.time_created,
+    updatedAt: row.time_updated,
+  }
+}
+
+function conversationFromRow(row: typeof JarvisConversationTable.$inferSelect): Jarvis.ConversationState {
+  return {
+    sessionID: row.session_id,
+    profileID: row.profile_id ?? undefined,
+    profileRevision: row.profile_revision ?? undefined,
+    recoveredAt: row.recovered_at ?? undefined,
+    updatedAt: row.time_updated,
+  }
+}
+
+function replayExecutionRow(execution: Jarvis.ReplayExecution): typeof JarvisReplayExecutionTable.$inferInsert {
+  return {
+    id: execution.id,
+    replay_id: execution.replayID,
+    status: execution.status,
+    fixture_only: execution.fixtureOnly,
+    assertions: execution.assertions,
+    metrics: execution.metrics,
+    error: execution.error,
+    time_created: execution.createdAt,
+    time_updated: execution.updatedAt,
+  }
+}
+
+function replayExecutionFromRow(row: typeof JarvisReplayExecutionTable.$inferSelect): Jarvis.ReplayExecution {
+  return {
+    id: row.id,
+    replayID: row.replay_id,
+    status: row.status,
+    fixtureOnly: row.fixture_only,
+    assertions: row.assertions,
+    metrics: row.metrics,
+    error: row.error ?? undefined,
+    createdAt: row.time_created,
+    updatedAt: row.time_updated,
+  }
+}
+
+function sanitizeReplayEvents(events: readonly Jarvis.ReplayEvent[]) {
+  return events.map((event) => ({
+    ...event,
+    type: event.type.slice(0, 120),
+    data: Object.fromEntries(
+      Object.entries(event.data)
+        .filter(([key]) => !/(?:audio|token|secret|password|authorization|api.?key)/iu.test(key))
+        .map(([key, value]) => [key.slice(0, 120), sanitizeReplayValue(value)]),
+    ),
+  }))
+}
+
+type ReplayValue = Jarvis.ReplayEvent["data"][string]
+
+function sanitizeReplayValue(value: ReplayValue): ReplayValue {
+  if (typeof value === "string") return value.slice(0, 4_000)
+  if (Array.isArray(value)) return value.slice(0, 64).map(sanitizeReplayValue)
+  if (!value || typeof value !== "object") return value
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => !/(?:audio|token|secret|password|authorization|api.?key)/iu.test(key))
+      .slice(0, 64)
+      .map(([key, nested]) => [key.slice(0, 120), sanitizeReplayValue(nested)]),
+  )
+}
+
+function recommendations(runtime: Jarvis.RuntimeStatus, value: Jarvis.Presence, active?: Jarvis.Turn) {
+  return [
+    ...(runtime.primaryProfile ? [] : ["Choose and synchronize a Primary Jarvis profile."]),
+    ...(runtime.modelRoles.find((role) => role.role === "dialogue")?.status === "ready"
+      ? []
+      : ["Verify a fast dialogue model before starting hands-free voice."]),
+    ...(value.microphoneOwner ? [] : ["Activate Desktop or VR voice to assign a microphone owner."]),
+    ...(value.playbackOwner ? [] : ["Choose a voice-enabled personality to assign a playback owner."]),
+    ...(active?.phase === "error" ? [active.error ?? "Inspect the latest failed Jarvis turn."] : []),
+    ...(runtime.embeddings.state === "blocked" ? ["Memory remains lexical until the embedding role is ready."] : []),
+  ]
+}
+
 function memoryVisible(row: typeof JarvisMemoryTable.$inferSelect, input: Jarvis.MemorySearch) {
   if (row.lifecycle === "archived") return false
   if (row.scope === "user") return true
@@ -979,7 +1759,12 @@ function validTime(value: string) {
 
 const count = Effect.fn("JarvisRuntime.count")(function* (
   db: Database.Interface["db"],
-  table: typeof JarvisGoalTable | typeof JarvisWakeTable | typeof JarvisMemoryTable,
+  table:
+    | typeof JarvisGoalTable
+    | typeof JarvisWakeTable
+    | typeof JarvisMemoryTable
+    | typeof JarvisMemoryUseTable
+    | typeof JarvisReplayTable,
   where?: ReturnType<typeof eq> | ReturnType<typeof inArray>,
 ) {
   const query = db.select({ count: sql<number>`count(*)` }).from(table)

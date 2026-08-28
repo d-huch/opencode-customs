@@ -67,6 +67,10 @@ export type Event =
   | EventQuestionV2Asked
   | EventQuestionV2Replied
   | EventQuestionV2Rejected
+  | EventJarvisTurnUpdated
+  | EventJarvisPresenceUpdated
+  | EventJarvisReplayUpdated
+  | EventJarvisCompanionBriefingUpdated
   | EventTodoUpdated
   | EventLspUpdated
   | EventPermissionAsked
@@ -1377,6 +1381,34 @@ export type GlobalEvent = {
         properties: {
           sessionID: string
           requestID: string
+        }
+      }
+    | {
+        id: string
+        type: "jarvis.turn.updated"
+        properties: {
+          turn: JarvisTurn
+        }
+      }
+    | {
+        id: string
+        type: "jarvis.presence.updated"
+        properties: {
+          presence: JarvisPresence
+        }
+      }
+    | {
+        id: string
+        type: "jarvis.replay.updated"
+        properties: {
+          replay: JarvisReplayRun
+        }
+      }
+    | {
+        id: string
+        type: "jarvis.companion.briefing.updated"
+        properties: {
+          briefing: JarvisDailyBriefing
         }
       }
     | {
@@ -3175,6 +3207,10 @@ export type V2Event =
   | QuestionV2Asked
   | QuestionV2Replied
   | QuestionV2Rejected
+  | JarvisTurnUpdated
+  | JarvisPresenceUpdated
+  | JarvisReplayUpdated
+  | JarvisCompanionBriefingUpdated
   | TodoUpdated
   | LspUpdated
   | PermissionAsked
@@ -3422,6 +3458,145 @@ export type QuestionV2Tool = {
 }
 
 export type QuestionV2Answer = Array<string>
+
+export type JarvisSurface = "desktop" | "unity-editor" | "pcvr" | "quest"
+
+export type JarvisTurnPhase =
+  | "listening"
+  | "transcribing"
+  | "understanding"
+  | "planning"
+  | "responding"
+  | "speaking"
+  | "acting"
+  | "completed"
+  | "cancelled"
+  | "error"
+
+export type JarvisPresentationCue = {
+  emotion: string
+  intensity: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  gestureHint?: string
+  gazeTarget?: string
+  expectedDurationMs?: number
+}
+
+export type JarvisTurnMetrics = {
+  admittedAt?: number
+  providerStartedAt?: number
+  firstTextAt?: number
+  firstAudioAt?: number
+  completedAt?: number
+  sttMs?: number
+  ttftMs?: number
+  ttsMs?: number
+  cancelMs?: number
+}
+
+export type JarvisTurn = {
+  id: string
+  requestID: string
+  sessionID: string
+  profileID?: string
+  surface: JarvisSurface
+  responseMode: "voice" | "text"
+  phase: JarvisTurnPhase
+  sequence: number
+  presentation?: JarvisPresentationCue
+  metrics: JarvisTurnMetrics
+  error?: string
+  cancelReason?: string
+  createdAt: number
+  updatedAt: number
+}
+
+export type JarvisPresence = {
+  surface: JarvisSurface
+  microphoneOwner?: JarvisSurface
+  playbackOwner?: JarvisSurface
+  turnID?: string
+  sessionID?: string
+  state: JarvisTurnPhase
+  updatedAt: number
+}
+
+export type JarvisReplayEvent = {
+  sequence: number
+  type: string
+  timestamp: number
+  data: {
+    [key: string]: unknown
+  }
+}
+
+export type JarvisReplayRun = {
+  id: string
+  turnID?: string
+  sessionID?: string
+  surface: JarvisSurface
+  status: "recording" | "completed" | "cancelled" | "error"
+  events: Array<JarvisReplayEvent>
+  metrics: JarvisTurnMetrics
+  error?: string
+  createdAt: number
+  updatedAt: number
+}
+
+export type JarvisDailyCompanionSourceKind = "gmail" | "calendar" | "drive" | "goal" | "promise" | "inbox"
+
+export type JarvisDailyBriefingSource = {
+  id: string
+  kind: JarvisDailyCompanionSourceKind
+  status: "ready" | "unavailable" | "error"
+  title: string
+  summary?: string
+  timestamp?: number
+  url?: string
+  error?: string
+}
+
+export type JarvisCompanionActionKind =
+  | "gmail_draft"
+  | "calendar_create"
+  | "calendar_update"
+  | "jarvis_reminder"
+  | "jarvis_goal"
+
+export type JarvisCompanionActionProposal = {
+  id: string
+  briefingID?: string
+  kind: JarvisCompanionActionKind
+  title: string
+  preview: string
+  access: "read" | "local_write" | "external_write"
+  input: {
+    [key: string]: unknown
+  }
+  requiredScopes: Array<string>
+  idempotencyKey: string
+  externalRevision?: string
+  status: "prepared" | "approved" | "executing" | "completed" | "cancelled" | "conflict" | "error"
+  createdAt: number
+  updatedAt: number
+}
+
+export type JarvisDailyBriefing = {
+  id: string
+  localDate: string
+  accountID: string
+  sessionID?: string
+  status: "collecting" | "ready" | "partial" | "error"
+  summary: string
+  schedule: Array<string>
+  importantMessages: Array<string>
+  goalsAndPromises: Array<string>
+  conflicts: Array<string>
+  risks: Array<string>
+  sources: Array<JarvisDailyBriefingSource>
+  proposedActions: Array<JarvisCompanionActionProposal>
+  createdAt: number
+  updatedAt: number
+}
 
 export type ProjectVcs = "git"
 
@@ -5967,6 +6142,82 @@ export type QuestionV2Rejected = {
   }
 }
 
+export type JarvisPresentationCue1 = {
+  emotion: string
+  intensity: number | "NaN" | "Infinity" | "-Infinity"
+  gestureHint?: string
+  gazeTarget?: string
+  expectedDurationMs?: number
+}
+
+export type JarvisTurnUpdated = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "jarvis.turn.updated"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    turn: JarvisTurn
+  }
+}
+
+export type JarvisPresenceUpdated = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "jarvis.presence.updated"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    presence: JarvisPresence
+  }
+}
+
+export type JarvisReplayUpdated = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "jarvis.replay.updated"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    replay: JarvisReplayRun
+  }
+}
+
+export type JarvisCompanionBriefingUpdated = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "jarvis.companion.briefing.updated"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    briefing: JarvisDailyBriefing
+  }
+}
+
 export type TodoUpdated = {
   id: string
   metadata?: {
@@ -6721,6 +6972,63 @@ export type RepositoryMapRetrievalFeedback = {
   relevance: "used" | "rejected" | "clear"
 }
 
+export type JarvisConversationState = {
+  sessionID: string
+  profileID?: string
+  profileRevision?: number
+  recoveredAt?: number
+  updatedAt: number
+}
+
+export type JarvisConversationAdopt = {
+  sessionID?: string
+  profileID?: string
+  profileRevision?: number
+  surface: JarvisSurface
+}
+
+export type JarvisPartialTranscript = {
+  turnID?: string
+  requestID: string
+  surface: JarvisSurface
+  text: string
+  sequence: number
+  language?: string
+  profileRevision?: number
+  worldContext?: string
+  capturedAt: number
+}
+
+export type JarvisPrewarmState = {
+  requestID: string
+  surface: JarvisSurface
+  sequence: number
+  language?: string
+  profileRevision?: number
+  modelReady: boolean
+  memoryReady: boolean
+  worldReady: boolean
+  expiresAt: number
+}
+
+export type JarvisFinalAdmission = {
+  requestID: string
+  transcript: string
+  surface: JarvisSurface
+  responseMode: "voice" | "text"
+  profileID?: string
+  profileRevision?: number
+  worldContext?: string
+}
+
+export type JarvisFinalAdmissionResult = {
+  conversation: JarvisConversationState
+  turn: JarvisTurn
+  messageID: string
+  admitted: boolean
+  prewarm?: JarvisPrewarmState
+}
+
 export type JarvisProfileSnapshot = {
   id: string
   revision: number
@@ -6849,6 +7157,80 @@ export type JarvisRuntimeStatus = {
   modelRoles: Array<JarvisModelRoleStatus>
   planner: JarvisPlannerLifecycle
   embeddings: JarvisEmbeddingBackfill
+}
+
+export type JarvisMediaState = {
+  turnID?: string
+  owner?: JarvisSurface
+  state: "idle" | "buffering" | "synthesizing" | "playing" | "cancelling" | "error"
+  queuedSentences: number
+  activeJobs: number
+  acknowledgedCancellation: boolean
+  updatedAt: number
+}
+
+export type JarvisControlStatus = {
+  runtime: JarvisRuntimeStatus
+  conversation?: JarvisConversationState
+  currentTurn?: JarvisTurn
+  presence: JarvisPresence
+  media: JarvisMediaState
+  replayCount: number
+  recentMemoryUses: number
+  recommendations: Array<string>
+}
+
+export type JarvisMediaStateUpdate = {
+  turnID?: string
+  owner?: JarvisSurface
+  state: "idle" | "buffering" | "synthesizing" | "playing" | "cancelling" | "error"
+  queuedSentences: number
+  activeJobs: number
+  acknowledgedCancellation: boolean
+}
+
+export type JarvisDiagnosticCheck = {
+  id: string
+  status: "ready" | "degraded" | "error"
+  summary: string
+  detail?: string
+}
+
+export type JarvisDiagnostics = {
+  checkedAt: number
+  checks: Array<JarvisDiagnosticCheck>
+  recommendations: Array<string>
+}
+
+export type JarvisTurnCreate = {
+  requestID: string
+  sessionID: string
+  profileID?: string
+  surface: JarvisSurface
+  responseMode: "voice" | "text"
+  phase?: JarvisTurnPhase
+}
+
+export type JarvisTurnUpdate = {
+  phase: JarvisTurnPhase
+  sequence: number
+  presentation?: JarvisPresentationCue
+  metrics?: JarvisTurnMetrics
+  error?: string
+  cancelReason?: string
+}
+
+export type JarvisTurnCancel = {
+  reason?: string
+}
+
+export type JarvisPresenceHandoff = {
+  from?: JarvisSurface
+  to: JarvisSurface
+  sessionID?: string
+  turnID?: string
+  microphone: boolean
+  playback: boolean
 }
 
 export type JarvisBenchmarkRun = {
@@ -7007,6 +7389,75 @@ export type JarvisMemoryBackfillResult = {
   remaining: number
 }
 
+export type JarvisMemoryUse = {
+  id: string
+  turnID: string
+  memoryID: string
+  rank: number
+  lexicalScore: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  semanticScore: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  reason: string
+  createdAt: number
+}
+
+export type JarvisMemoryUseCreate = {
+  turnID: string
+  memoryID: string
+  rank: number
+  lexicalScore?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  semanticScore?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  reason: string
+}
+
+export type JarvisReplayCreate = {
+  turnID?: string
+  sessionID?: string
+  surface: JarvisSurface
+  status?: "recording" | "completed" | "cancelled" | "error"
+  events: Array<JarvisReplayEvent>
+  metrics?: JarvisTurnMetrics
+  error?: string
+}
+
+export type JarvisReplayMutation = {
+  changed: number
+}
+
+export type JarvisReplayExecute = {
+  fixtureOnly?: boolean
+}
+
+export type JarvisReplayAssertion = {
+  id: string
+  passed: boolean
+  detail?: string
+}
+
+export type JarvisReplayExecution = {
+  id: string
+  replayID: string
+  status: "queued" | "running" | "completed" | "error"
+  fixtureOnly: boolean
+  assertions: Array<JarvisReplayAssertion>
+  metrics: JarvisTurnMetrics
+  error?: string
+  createdAt: number
+  updatedAt: number
+}
+
+export type JarvisReplayCompare = {
+  baselineExecutionID: string
+  candidateExecutionID: string
+}
+
+export type JarvisReplayComparison = {
+  baselineExecutionID: string
+  candidateExecutionID: string
+  regressions: Array<string>
+  improvements: Array<string>
+  passed: boolean
+}
+
 export type JarvisWakeCandidate = {
   id: string
   profileID: string
@@ -7029,6 +7480,92 @@ export type JarvisWakeCreate = {
   text: string
   priority: number
   notBefore?: number
+}
+
+export type JarvisDailyCompanionConfig = {
+  enabled: boolean
+  schedule: string
+  timezone: string
+  catchUpUntil: string
+  sources: {
+    gmail: boolean
+    calendar: boolean
+    drive: boolean
+    goals: boolean
+    promises: boolean
+    inbox: boolean
+  }
+  updatedAt: number
+}
+
+export type JarvisGoogleConnectionStatus = {
+  available: boolean
+  phase: "unavailable" | "disconnected" | "connecting" | "connected" | "expired" | "error"
+  accountID?: string
+  email?: string
+  scopes: Array<string>
+  writeScopes: Array<string>
+  checkedAt: number
+  error?: string
+}
+
+export type JarvisDailyBriefingRun = {
+  id: string
+  briefingID?: string
+  trigger: "scheduled" | "catch_up" | "manual"
+  status: "queued" | "collecting" | "completed" | "partial" | "error" | "skipped"
+  localDate: string
+  accountID?: string
+  sourceCounts: {
+    [key: string]: number
+  }
+  error?: string
+  startedAt: number
+  completedAt?: number
+}
+
+export type JarvisDailyCompanionStatus = {
+  config: JarvisDailyCompanionConfig
+  google: JarvisGoogleConnectionStatus
+  lastRun?: JarvisDailyBriefingRun
+  nextRunAt?: number
+  catchUpAvailable: boolean
+  bridgeAvailable: boolean
+  error?: string
+}
+
+export type JarvisDailyBriefingRunRequest = {
+  trigger?: "scheduled" | "catch_up" | "manual"
+  force?: boolean
+}
+
+export type JarvisCompanionActionPrepare = {
+  briefingID?: string
+  kind: JarvisCompanionActionKind
+  title: string
+  preview: string
+  input: {
+    [key: string]: unknown
+  }
+  requiredScopes?: Array<string>
+  idempotencyKey: string
+  externalRevision?: string
+}
+
+export type JarvisCompanionActionApprove = {
+  externalRevision?: string
+}
+
+export type JarvisCompanionActionExecution = {
+  id: string
+  proposalID: string
+  status: "approved" | "executing" | "completed" | "cancelled" | "conflict" | "error"
+  result?: {
+    [key: string]: unknown
+  }
+  error?: string
+  createdAt: number
+  updatedAt: number
 }
 
 export type EventModelsDevRefreshed = {
@@ -7716,6 +8253,46 @@ export type EventQuestionV2Rejected = {
   properties: {
     sessionID: string
     requestID: string
+  }
+}
+
+export type JarvisPresentationCue3 = {
+  emotion: string
+  intensity: number | "NaN" | "Infinity" | "-Infinity"
+  gestureHint?: string
+  gazeTarget?: string
+  expectedDurationMs?: number
+}
+
+export type EventJarvisTurnUpdated = {
+  id: string
+  type: "jarvis.turn.updated"
+  properties: {
+    turn: JarvisTurn
+  }
+}
+
+export type EventJarvisPresenceUpdated = {
+  id: string
+  type: "jarvis.presence.updated"
+  properties: {
+    presence: JarvisPresence
+  }
+}
+
+export type EventJarvisReplayUpdated = {
+  id: string
+  type: "jarvis.replay.updated"
+  properties: {
+    replay: JarvisReplayRun
+  }
+}
+
+export type EventJarvisCompanionBriefingUpdated = {
+  id: string
+  type: "jarvis.companion.briefing.updated"
+  properties: {
+    briefing: JarvisDailyBriefing
   }
 }
 
@@ -15475,6 +16052,420 @@ export type V2RepositoryMapClearKnowledgeResponses = {
 export type V2RepositoryMapClearKnowledgeResponse =
   V2RepositoryMapClearKnowledgeResponses[keyof V2RepositoryMapClearKnowledgeResponses]
 
+export type V2JarvisConversationData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/api/jarvis/conversation"
+}
+
+export type V2JarvisConversationErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2JarvisConversationError = V2JarvisConversationErrors[keyof V2JarvisConversationErrors]
+
+export type V2JarvisConversationResponses = {
+  /**
+   * Jarvis.ConversationState
+   */
+  200: JarvisConversationState
+}
+
+export type V2JarvisConversationResponse = V2JarvisConversationResponses[keyof V2JarvisConversationResponses]
+
+export type V2JarvisAdoptConversationData = {
+  body: JarvisConversationAdopt
+  path?: never
+  query?: never
+  url: "/api/jarvis/conversation/adopt"
+}
+
+export type V2JarvisAdoptConversationErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2JarvisAdoptConversationError = V2JarvisAdoptConversationErrors[keyof V2JarvisAdoptConversationErrors]
+
+export type V2JarvisAdoptConversationResponses = {
+  /**
+   * Jarvis.ConversationState
+   */
+  200: JarvisConversationState
+}
+
+export type V2JarvisAdoptConversationResponse =
+  V2JarvisAdoptConversationResponses[keyof V2JarvisAdoptConversationResponses]
+
+export type V2JarvisPrewarmData = {
+  body: JarvisPartialTranscript
+  path?: never
+  query?: never
+  url: "/api/jarvis/turns/prewarm"
+}
+
+export type V2JarvisPrewarmErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2JarvisPrewarmError = V2JarvisPrewarmErrors[keyof V2JarvisPrewarmErrors]
+
+export type V2JarvisPrewarmResponses = {
+  /**
+   * Jarvis.PrewarmState
+   */
+  200: JarvisPrewarmState
+}
+
+export type V2JarvisPrewarmResponse = V2JarvisPrewarmResponses[keyof V2JarvisPrewarmResponses]
+
+export type V2JarvisAdmitFinalData = {
+  body: JarvisFinalAdmission
+  path?: never
+  query?: never
+  url: "/api/jarvis/turns/admit"
+}
+
+export type V2JarvisAdmitFinalErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2JarvisAdmitFinalError = V2JarvisAdmitFinalErrors[keyof V2JarvisAdmitFinalErrors]
+
+export type V2JarvisAdmitFinalResponses = {
+  /**
+   * Jarvis.FinalAdmissionResult
+   */
+  200: JarvisFinalAdmissionResult
+}
+
+export type V2JarvisAdmitFinalResponse = V2JarvisAdmitFinalResponses[keyof V2JarvisAdmitFinalResponses]
+
+export type V2JarvisControlStatusData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/api/jarvis/control"
+}
+
+export type V2JarvisControlStatusErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2JarvisControlStatusError = V2JarvisControlStatusErrors[keyof V2JarvisControlStatusErrors]
+
+export type V2JarvisControlStatusResponses = {
+  /**
+   * Jarvis.ControlStatus
+   */
+  200: JarvisControlStatus
+}
+
+export type V2JarvisControlStatusResponse = V2JarvisControlStatusResponses[keyof V2JarvisControlStatusResponses]
+
+export type V2JarvisUpdateMediaStateData = {
+  body: JarvisMediaStateUpdate
+  path?: never
+  query?: never
+  url: "/api/jarvis/media"
+}
+
+export type V2JarvisUpdateMediaStateErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2JarvisUpdateMediaStateError = V2JarvisUpdateMediaStateErrors[keyof V2JarvisUpdateMediaStateErrors]
+
+export type V2JarvisUpdateMediaStateResponses = {
+  /**
+   * Jarvis.MediaState
+   */
+  200: JarvisMediaState
+}
+
+export type V2JarvisUpdateMediaStateResponse =
+  V2JarvisUpdateMediaStateResponses[keyof V2JarvisUpdateMediaStateResponses]
+
+export type V2JarvisRunDiagnosticsData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/api/jarvis/diagnostics"
+}
+
+export type V2JarvisRunDiagnosticsErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2JarvisRunDiagnosticsError = V2JarvisRunDiagnosticsErrors[keyof V2JarvisRunDiagnosticsErrors]
+
+export type V2JarvisRunDiagnosticsResponses = {
+  /**
+   * Jarvis.Diagnostics
+   */
+  200: JarvisDiagnostics
+}
+
+export type V2JarvisRunDiagnosticsResponse = V2JarvisRunDiagnosticsResponses[keyof V2JarvisRunDiagnosticsResponses]
+
+export type V2JarvisCreateTurnData = {
+  body: JarvisTurnCreate
+  path?: never
+  query?: never
+  url: "/api/jarvis/turns"
+}
+
+export type V2JarvisCreateTurnErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2JarvisCreateTurnError = V2JarvisCreateTurnErrors[keyof V2JarvisCreateTurnErrors]
+
+export type V2JarvisCreateTurnResponses = {
+  /**
+   * Jarvis.Turn
+   */
+  200: JarvisTurn
+}
+
+export type V2JarvisCreateTurnResponse = V2JarvisCreateTurnResponses[keyof V2JarvisCreateTurnResponses]
+
+export type V2JarvisCurrentTurnData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/api/jarvis/turns/current"
+}
+
+export type V2JarvisCurrentTurnErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2JarvisCurrentTurnError = V2JarvisCurrentTurnErrors[keyof V2JarvisCurrentTurnErrors]
+
+export type V2JarvisCurrentTurnResponses = {
+  /**
+   * Success
+   */
+  200: JarvisTurn
+}
+
+export type V2JarvisCurrentTurnResponse = V2JarvisCurrentTurnResponses[keyof V2JarvisCurrentTurnResponses]
+
+export type V2JarvisTurnData = {
+  body?: never
+  path: {
+    turnID: string
+  }
+  query?: never
+  url: "/api/jarvis/turns/{turnID}"
+}
+
+export type V2JarvisTurnErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2JarvisTurnError = V2JarvisTurnErrors[keyof V2JarvisTurnErrors]
+
+export type V2JarvisTurnResponses = {
+  /**
+   * Success
+   */
+  200: JarvisTurn
+}
+
+export type V2JarvisTurnResponse = V2JarvisTurnResponses[keyof V2JarvisTurnResponses]
+
+export type V2JarvisUpdateTurnData = {
+  body: JarvisTurnUpdate
+  path: {
+    turnID: string
+  }
+  query?: never
+  url: "/api/jarvis/turns/{turnID}"
+}
+
+export type V2JarvisUpdateTurnErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2JarvisUpdateTurnError = V2JarvisUpdateTurnErrors[keyof V2JarvisUpdateTurnErrors]
+
+export type V2JarvisUpdateTurnResponses = {
+  /**
+   * Success
+   */
+  200: JarvisTurn
+}
+
+export type V2JarvisUpdateTurnResponse = V2JarvisUpdateTurnResponses[keyof V2JarvisUpdateTurnResponses]
+
+export type V2JarvisCancelTurnData = {
+  body: JarvisTurnCancel
+  path: {
+    turnID: string
+  }
+  query?: never
+  url: "/api/jarvis/turns/{turnID}/cancel"
+}
+
+export type V2JarvisCancelTurnErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2JarvisCancelTurnError = V2JarvisCancelTurnErrors[keyof V2JarvisCancelTurnErrors]
+
+export type V2JarvisCancelTurnResponses = {
+  /**
+   * Success
+   */
+  200: JarvisTurn
+}
+
+export type V2JarvisCancelTurnResponse = V2JarvisCancelTurnResponses[keyof V2JarvisCancelTurnResponses]
+
+export type V2JarvisPresenceData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/api/jarvis/presence"
+}
+
+export type V2JarvisPresenceErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2JarvisPresenceError = V2JarvisPresenceErrors[keyof V2JarvisPresenceErrors]
+
+export type V2JarvisPresenceResponses = {
+  /**
+   * Jarvis.Presence
+   */
+  200: JarvisPresence
+}
+
+export type V2JarvisPresenceResponse = V2JarvisPresenceResponses[keyof V2JarvisPresenceResponses]
+
+export type V2JarvisHandoffPresenceData = {
+  body: JarvisPresenceHandoff
+  path?: never
+  query?: never
+  url: "/api/jarvis/presence/handoff"
+}
+
+export type V2JarvisHandoffPresenceErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2JarvisHandoffPresenceError = V2JarvisHandoffPresenceErrors[keyof V2JarvisHandoffPresenceErrors]
+
+export type V2JarvisHandoffPresenceResponses = {
+  /**
+   * Jarvis.Presence
+   */
+  200: JarvisPresence
+}
+
+export type V2JarvisHandoffPresenceResponse = V2JarvisHandoffPresenceResponses[keyof V2JarvisHandoffPresenceResponses]
+
 export type V2JarvisStatusData = {
   body?: never
   path?: never
@@ -16135,6 +17126,281 @@ export type V2JarvisReindexMemoryResponses = {
 
 export type V2JarvisReindexMemoryResponse = V2JarvisReindexMemoryResponses[keyof V2JarvisReindexMemoryResponses]
 
+export type V2JarvisMemoryUsesData = {
+  body?: never
+  path?: never
+  query?: {
+    memoryID?: string
+    turnID?: string
+    limit?: string
+  }
+  url: "/api/jarvis/memory/uses"
+}
+
+export type V2JarvisMemoryUsesErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2JarvisMemoryUsesError = V2JarvisMemoryUsesErrors[keyof V2JarvisMemoryUsesErrors]
+
+export type V2JarvisMemoryUsesResponses = {
+  /**
+   * Success
+   */
+  200: Array<JarvisMemoryUse>
+}
+
+export type V2JarvisMemoryUsesResponse = V2JarvisMemoryUsesResponses[keyof V2JarvisMemoryUsesResponses]
+
+export type V2JarvisRecordMemoryUseData = {
+  body: JarvisMemoryUseCreate
+  path?: never
+  query?: never
+  url: "/api/jarvis/memory/uses"
+}
+
+export type V2JarvisRecordMemoryUseErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2JarvisRecordMemoryUseError = V2JarvisRecordMemoryUseErrors[keyof V2JarvisRecordMemoryUseErrors]
+
+export type V2JarvisRecordMemoryUseResponses = {
+  /**
+   * Jarvis.MemoryUse
+   */
+  200: JarvisMemoryUse
+}
+
+export type V2JarvisRecordMemoryUseResponse = V2JarvisRecordMemoryUseResponses[keyof V2JarvisRecordMemoryUseResponses]
+
+export type V2JarvisReplaysData = {
+  body?: never
+  path?: never
+  query?: {
+    limit?: string
+  }
+  url: "/api/jarvis/replays"
+}
+
+export type V2JarvisReplaysErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2JarvisReplaysError = V2JarvisReplaysErrors[keyof V2JarvisReplaysErrors]
+
+export type V2JarvisReplaysResponses = {
+  /**
+   * Success
+   */
+  200: Array<JarvisReplayRun>
+}
+
+export type V2JarvisReplaysResponse = V2JarvisReplaysResponses[keyof V2JarvisReplaysResponses]
+
+export type V2JarvisRecordReplayData = {
+  body: JarvisReplayCreate
+  path?: never
+  query?: never
+  url: "/api/jarvis/replays"
+}
+
+export type V2JarvisRecordReplayErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2JarvisRecordReplayError = V2JarvisRecordReplayErrors[keyof V2JarvisRecordReplayErrors]
+
+export type V2JarvisRecordReplayResponses = {
+  /**
+   * Jarvis.ReplayRun
+   */
+  200: JarvisReplayRun
+}
+
+export type V2JarvisRecordReplayResponse = V2JarvisRecordReplayResponses[keyof V2JarvisRecordReplayResponses]
+
+export type V2JarvisRemoveReplayData = {
+  body?: never
+  path: {
+    replayID: string
+  }
+  query?: never
+  url: "/api/jarvis/replays/{replayID}"
+}
+
+export type V2JarvisRemoveReplayErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2JarvisRemoveReplayError = V2JarvisRemoveReplayErrors[keyof V2JarvisRemoveReplayErrors]
+
+export type V2JarvisRemoveReplayResponses = {
+  /**
+   * Jarvis.ReplayMutation
+   */
+  200: JarvisReplayMutation
+}
+
+export type V2JarvisRemoveReplayResponse = V2JarvisRemoveReplayResponses[keyof V2JarvisRemoveReplayResponses]
+
+export type V2JarvisReplayData = {
+  body?: never
+  path: {
+    replayID: string
+  }
+  query?: never
+  url: "/api/jarvis/replays/{replayID}"
+}
+
+export type V2JarvisReplayErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2JarvisReplayError = V2JarvisReplayErrors[keyof V2JarvisReplayErrors]
+
+export type V2JarvisReplayResponses = {
+  /**
+   * Success
+   */
+  200: JarvisReplayRun
+}
+
+export type V2JarvisReplayResponse = V2JarvisReplayResponses[keyof V2JarvisReplayResponses]
+
+export type V2JarvisExecuteReplayData = {
+  body: JarvisReplayExecute
+  path: {
+    replayID: string
+  }
+  query?: never
+  url: "/api/jarvis/replays/{replayID}/execute"
+}
+
+export type V2JarvisExecuteReplayErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2JarvisExecuteReplayError = V2JarvisExecuteReplayErrors[keyof V2JarvisExecuteReplayErrors]
+
+export type V2JarvisExecuteReplayResponses = {
+  /**
+   * Success
+   */
+  200: JarvisReplayExecution
+}
+
+export type V2JarvisExecuteReplayResponse = V2JarvisExecuteReplayResponses[keyof V2JarvisExecuteReplayResponses]
+
+export type V2JarvisReplayExecutionData = {
+  body?: never
+  path: {
+    executionID: string
+  }
+  query?: never
+  url: "/api/jarvis/replay-executions/{executionID}"
+}
+
+export type V2JarvisReplayExecutionErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2JarvisReplayExecutionError = V2JarvisReplayExecutionErrors[keyof V2JarvisReplayExecutionErrors]
+
+export type V2JarvisReplayExecutionResponses = {
+  /**
+   * Success
+   */
+  200: JarvisReplayExecution
+}
+
+export type V2JarvisReplayExecutionResponse = V2JarvisReplayExecutionResponses[keyof V2JarvisReplayExecutionResponses]
+
+export type V2JarvisCompareReplaysData = {
+  body: JarvisReplayCompare
+  path?: never
+  query?: never
+  url: "/api/jarvis/replay-executions/compare"
+}
+
+export type V2JarvisCompareReplaysErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2JarvisCompareReplaysError = V2JarvisCompareReplaysErrors[keyof V2JarvisCompareReplaysErrors]
+
+export type V2JarvisCompareReplaysResponses = {
+  /**
+   * Success
+   */
+  200: JarvisReplayComparison
+}
+
+export type V2JarvisCompareReplaysResponse = V2JarvisCompareReplaysResponses[keyof V2JarvisCompareReplaysResponses]
+
 export type V2JarvisInboxData = {
   body?: never
   path?: never
@@ -16254,6 +17520,349 @@ export type V2JarvisRetryInboxResponses = {
 }
 
 export type V2JarvisRetryInboxResponse = V2JarvisRetryInboxResponses[keyof V2JarvisRetryInboxResponses]
+
+export type V2JarvisCompanionStatusData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/api/jarvis/companion/status"
+}
+
+export type V2JarvisCompanionStatusErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2JarvisCompanionStatusError = V2JarvisCompanionStatusErrors[keyof V2JarvisCompanionStatusErrors]
+
+export type V2JarvisCompanionStatusResponses = {
+  /**
+   * Jarvis.DailyCompanionStatus
+   */
+  200: JarvisDailyCompanionStatus
+}
+
+export type V2JarvisCompanionStatusResponse = V2JarvisCompanionStatusResponses[keyof V2JarvisCompanionStatusResponses]
+
+export type V2JarvisCompanionConfigData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/api/jarvis/companion/config"
+}
+
+export type V2JarvisCompanionConfigErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2JarvisCompanionConfigError = V2JarvisCompanionConfigErrors[keyof V2JarvisCompanionConfigErrors]
+
+export type V2JarvisCompanionConfigResponses = {
+  /**
+   * Jarvis.DailyCompanionConfig
+   */
+  200: JarvisDailyCompanionConfig
+}
+
+export type V2JarvisCompanionConfigResponse = V2JarvisCompanionConfigResponses[keyof V2JarvisCompanionConfigResponses]
+
+export type V2JarvisUpdateCompanionConfigData = {
+  body: JarvisDailyCompanionConfig
+  path?: never
+  query?: never
+  url: "/api/jarvis/companion/config"
+}
+
+export type V2JarvisUpdateCompanionConfigErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2JarvisUpdateCompanionConfigError =
+  V2JarvisUpdateCompanionConfigErrors[keyof V2JarvisUpdateCompanionConfigErrors]
+
+export type V2JarvisUpdateCompanionConfigResponses = {
+  /**
+   * Jarvis.DailyCompanionConfig
+   */
+  200: JarvisDailyCompanionConfig
+}
+
+export type V2JarvisUpdateCompanionConfigResponse =
+  V2JarvisUpdateCompanionConfigResponses[keyof V2JarvisUpdateCompanionConfigResponses]
+
+export type V2JarvisRunDailyBriefingData = {
+  body: JarvisDailyBriefingRunRequest
+  path?: never
+  query?: never
+  url: "/api/jarvis/companion/briefings/run"
+}
+
+export type V2JarvisRunDailyBriefingErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2JarvisRunDailyBriefingError = V2JarvisRunDailyBriefingErrors[keyof V2JarvisRunDailyBriefingErrors]
+
+export type V2JarvisRunDailyBriefingResponses = {
+  /**
+   * Jarvis.DailyBriefingRun
+   */
+  200: JarvisDailyBriefingRun
+}
+
+export type V2JarvisRunDailyBriefingResponse =
+  V2JarvisRunDailyBriefingResponses[keyof V2JarvisRunDailyBriefingResponses]
+
+export type V2JarvisDailyBriefingsData = {
+  body?: never
+  path?: never
+  query?: {
+    limit?: string
+  }
+  url: "/api/jarvis/companion/briefings"
+}
+
+export type V2JarvisDailyBriefingsErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2JarvisDailyBriefingsError = V2JarvisDailyBriefingsErrors[keyof V2JarvisDailyBriefingsErrors]
+
+export type V2JarvisDailyBriefingsResponses = {
+  /**
+   * Success
+   */
+  200: Array<JarvisDailyBriefing>
+}
+
+export type V2JarvisDailyBriefingsResponse = V2JarvisDailyBriefingsResponses[keyof V2JarvisDailyBriefingsResponses]
+
+export type V2JarvisDailyBriefingData = {
+  body?: never
+  path: {
+    briefingID: string
+  }
+  query?: never
+  url: "/api/jarvis/companion/briefings/{briefingID}"
+}
+
+export type V2JarvisDailyBriefingErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2JarvisDailyBriefingError = V2JarvisDailyBriefingErrors[keyof V2JarvisDailyBriefingErrors]
+
+export type V2JarvisDailyBriefingResponses = {
+  /**
+   * Success
+   */
+  200: JarvisDailyBriefing
+}
+
+export type V2JarvisDailyBriefingResponse = V2JarvisDailyBriefingResponses[keyof V2JarvisDailyBriefingResponses]
+
+export type V2JarvisCompanionActionsData = {
+  body?: never
+  path?: never
+  query?: {
+    limit?: string
+  }
+  url: "/api/jarvis/companion/actions"
+}
+
+export type V2JarvisCompanionActionsErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2JarvisCompanionActionsError = V2JarvisCompanionActionsErrors[keyof V2JarvisCompanionActionsErrors]
+
+export type V2JarvisCompanionActionsResponses = {
+  /**
+   * Success
+   */
+  200: Array<JarvisCompanionActionProposal>
+}
+
+export type V2JarvisCompanionActionsResponse =
+  V2JarvisCompanionActionsResponses[keyof V2JarvisCompanionActionsResponses]
+
+export type V2JarvisPrepareCompanionActionData = {
+  body: JarvisCompanionActionPrepare
+  path?: never
+  query?: never
+  url: "/api/jarvis/companion/actions"
+}
+
+export type V2JarvisPrepareCompanionActionErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2JarvisPrepareCompanionActionError =
+  V2JarvisPrepareCompanionActionErrors[keyof V2JarvisPrepareCompanionActionErrors]
+
+export type V2JarvisPrepareCompanionActionResponses = {
+  /**
+   * Jarvis.CompanionActionProposal
+   */
+  200: JarvisCompanionActionProposal
+}
+
+export type V2JarvisPrepareCompanionActionResponse =
+  V2JarvisPrepareCompanionActionResponses[keyof V2JarvisPrepareCompanionActionResponses]
+
+export type V2JarvisApproveCompanionActionData = {
+  body: JarvisCompanionActionApprove
+  path: {
+    actionID: string
+  }
+  query?: never
+  url: "/api/jarvis/companion/actions/{actionID}/approve"
+}
+
+export type V2JarvisApproveCompanionActionErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2JarvisApproveCompanionActionError =
+  V2JarvisApproveCompanionActionErrors[keyof V2JarvisApproveCompanionActionErrors]
+
+export type V2JarvisApproveCompanionActionResponses = {
+  /**
+   * Success
+   */
+  200: JarvisCompanionActionExecution
+}
+
+export type V2JarvisApproveCompanionActionResponse =
+  V2JarvisApproveCompanionActionResponses[keyof V2JarvisApproveCompanionActionResponses]
+
+export type V2JarvisCancelCompanionActionData = {
+  body?: never
+  path: {
+    actionID: string
+  }
+  query?: never
+  url: "/api/jarvis/companion/actions/{actionID}/cancel"
+}
+
+export type V2JarvisCancelCompanionActionErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2JarvisCancelCompanionActionError =
+  V2JarvisCancelCompanionActionErrors[keyof V2JarvisCancelCompanionActionErrors]
+
+export type V2JarvisCancelCompanionActionResponses = {
+  /**
+   * Success
+   */
+  200: JarvisCompanionActionProposal
+}
+
+export type V2JarvisCancelCompanionActionResponse =
+  V2JarvisCancelCompanionActionResponses[keyof V2JarvisCancelCompanionActionResponses]
+
+export type V2JarvisCompanionActionAuditData = {
+  body?: never
+  path?: never
+  query?: {
+    limit?: string
+  }
+  url: "/api/jarvis/companion/actions/audit"
+}
+
+export type V2JarvisCompanionActionAuditErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2JarvisCompanionActionAuditError =
+  V2JarvisCompanionActionAuditErrors[keyof V2JarvisCompanionActionAuditErrors]
+
+export type V2JarvisCompanionActionAuditResponses = {
+  /**
+   * Success
+   */
+  200: Array<JarvisCompanionActionExecution>
+}
+
+export type V2JarvisCompanionActionAuditResponse =
+  V2JarvisCompanionActionAuditResponses[keyof V2JarvisCompanionActionAuditResponses]
 
 export type PtyConnectData = {
   body?: never

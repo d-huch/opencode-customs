@@ -12,6 +12,7 @@ import type {
   AgentTone,
 } from "@/utils/agent-personalization"
 import { migrateAgentPersonalization } from "@/utils/agent-personalization"
+import { applyVoiceMaster, applyVoiceMode, resolveVoiceMode, type VoiceMode } from "@/utils/voice-mode"
 
 export interface NotificationSettings {
   agent: boolean
@@ -46,6 +47,7 @@ export interface WebSearchSettings {
 export interface VoiceSettings {
   engine: VoiceEngine
   enabled: boolean
+  listeningEnabled: boolean
   autoSubmit: boolean
   speakResponses: boolean
   contextualCorrection: boolean
@@ -330,6 +332,7 @@ const defaultSettings: Settings = {
   voice: {
     engine: "cascade",
     enabled: true,
+    listeningEnabled: true,
     autoSubmit: true,
     speakResponses: true,
     contextualCorrection: true,
@@ -835,7 +838,27 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         },
         enabled: withFallback(() => store.voice?.enabled, defaultSettings.voice.enabled),
         setEnabled(value: boolean) {
-          setStore("voice", "enabled", value)
+          const next = applyVoiceMaster(value, {
+            listeningEnabled: store.voice?.listeningEnabled ?? defaultSettings.voice.listeningEnabled,
+            speakResponses: store.voice?.speakResponses ?? defaultSettings.voice.speakResponses,
+          })
+          batch(() => {
+            setStore("voice", "listeningEnabled", next.listeningEnabled)
+            setStore("voice", "speakResponses", next.speakResponses)
+            setStore("voice", "enabled", next.enabled)
+          })
+        },
+        listeningEnabled: withFallback(
+          () => store.voice?.listeningEnabled,
+          defaultSettings.voice.listeningEnabled,
+        ),
+        setListeningEnabled(value: boolean) {
+          batch(() => {
+            setStore("voice", "listeningEnabled", value)
+            if (value) setStore("voice", "enabled", true)
+            if (!value && !(store.voice?.speakResponses ?? defaultSettings.voice.speakResponses))
+              setStore("voice", "enabled", false)
+          })
         },
         autoSubmit: withFallback(() => store.voice?.autoSubmit, defaultSettings.voice.autoSubmit),
         setAutoSubmit(value: boolean) {
@@ -843,7 +866,30 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         },
         speakResponses: withFallback(() => store.voice?.speakResponses, defaultSettings.voice.speakResponses),
         setSpeakResponses(value: boolean) {
-          setStore("voice", "speakResponses", value)
+          batch(() => {
+            setStore("voice", "speakResponses", value)
+            if (value) setStore("voice", "enabled", true)
+            if (!value && !(store.voice?.listeningEnabled ?? defaultSettings.voice.listeningEnabled))
+              setStore("voice", "enabled", false)
+          })
+        },
+        mode: createMemo(() =>
+          resolveVoiceMode({
+            enabled: store.voice?.enabled ?? defaultSettings.voice.enabled,
+            listeningEnabled: store.voice?.listeningEnabled ?? defaultSettings.voice.listeningEnabled,
+            speakResponses: store.voice?.speakResponses ?? defaultSettings.voice.speakResponses,
+          }),
+        ),
+        setMode(value: VoiceMode) {
+          const next = applyVoiceMode(value, {
+            listeningEnabled: store.voice?.listeningEnabled ?? defaultSettings.voice.listeningEnabled,
+            speakResponses: store.voice?.speakResponses ?? defaultSettings.voice.speakResponses,
+          })
+          batch(() => {
+            setStore("voice", "listeningEnabled", next.listeningEnabled)
+            setStore("voice", "speakResponses", next.speakResponses)
+            setStore("voice", "enabled", next.enabled)
+          })
         },
         contextualCorrection: withFallback(
           () => store.voice?.contextualCorrection,

@@ -574,6 +574,17 @@ export function getToolInfo(
         icon: "brain",
         title: input.name || i18n.t("ui.tool.skill"),
       }
+    case "companion_briefing":
+      return {
+        icon: "brain",
+        title: "Daily briefing",
+      }
+    case "companion_prepare_action":
+      return {
+        icon: "checklist",
+        title: "Companion action preview",
+        subtitle: input.title,
+      }
     default:
       return {
         icon: "mcp",
@@ -2661,6 +2672,84 @@ ToolRegistry.register({
                 )
               }}
             </For>
+          </div>
+        </Show>
+      </BasicTool>
+    )
+  },
+})
+
+ToolRegistry.register({
+  name: "companion_briefing",
+  render(props) {
+    const briefing = createMemo(() => {
+      if (!props.output?.startsWith("{")) return
+      try {
+        const value = JSON.parse(props.output) as Record<string, unknown>
+        return {
+          date: typeof value.localDate === "string" ? value.localDate : "",
+          summary: typeof value.summary === "string" ? value.summary : "",
+          schedule: Array.isArray(value.schedule) ? value.schedule.filter((item): item is string => typeof item === "string") : [],
+          messages: Array.isArray(value.importantMessages) ? value.importantMessages.filter((item): item is string => typeof item === "string") : [],
+          goals: Array.isArray(value.goalsAndPromises) ? value.goalsAndPromises.filter((item): item is string => typeof item === "string") : [],
+          risks: Array.isArray(value.risks) ? value.risks.filter((item): item is string => typeof item === "string") : [],
+        }
+      } catch {
+        return
+      }
+    })
+    const sections = createMemo(() => {
+      const value = briefing()
+      if (!value) return []
+      return [
+        { title: "Schedule", items: value.schedule },
+        { title: "Important messages", items: value.messages },
+        { title: "Goals and promises", items: value.goals },
+        { title: "Risks", items: value.risks },
+      ].filter((section) => section.items.length > 0)
+    })
+    return (
+      <BasicTool
+        {...props}
+        defaultOpen={props.status === "completed"}
+        icon="brain"
+        trigger={{ title: "Daily briefing", subtitle: briefing()?.date }}
+      >
+        <Show when={briefing()} fallback={<Show when={props.output}><div data-component="tool-output"><Markdown text={props.output!} /></div></Show>}>
+          {(value) => (
+            <div data-component="tool-output" class="flex flex-col gap-4 p-4" role="region" aria-label="Daily briefing">
+              <p class="text-13-regular text-text-base">{value().summary}</p>
+              <For each={sections()}>
+                {(section) => (
+                  <section class="flex flex-col gap-1.5">
+                    <h4 class="text-12-medium text-text-strong">{section.title}</h4>
+                    <ul class="flex flex-col gap-1 pl-4 list-disc">
+                      <For each={section.items}>{(item) => <li class="text-12-regular text-text-weak">{item}</li>}</For>
+                    </ul>
+                  </section>
+                )}
+              </For>
+            </div>
+          )}
+        </Show>
+      </BasicTool>
+    )
+  },
+})
+
+ToolRegistry.register({
+  name: "companion_prepare_action",
+  render(props) {
+    return (
+      <BasicTool
+        {...props}
+        icon="checklist"
+        trigger={{ title: "Companion action preview", subtitle: typeof props.input.title === "string" ? props.input.title : undefined }}
+      >
+        <Show when={props.output}>
+          <div data-component="tool-output" class="p-4">
+            <p class="text-13-regular text-text-base">{typeof props.input.preview === "string" ? props.input.preview : props.output}</p>
+            <p class="mt-2 text-12-regular text-text-weak">Review and approve this action in Settings → Jarvis → Companion.</p>
           </div>
         </Show>
       </BasicTool>

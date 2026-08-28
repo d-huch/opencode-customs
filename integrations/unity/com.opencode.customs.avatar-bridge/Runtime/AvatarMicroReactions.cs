@@ -23,6 +23,15 @@ namespace OpenCode.Customs.AvatarBridge
         Coroutine clearGestureRoutine;
         float nextReactionAt;
 
+        void Update()
+        {
+            if (Time.unscaledTime < nextReactionAt || CurrentGesture != "—") return;
+            var gesture = PickLocalReaction(CurrentState);
+            if (gesture == null) return;
+            TriggerGesture(gesture);
+            nextReactionAt = Time.unscaledTime + ReactionCooldown(CurrentState);
+        }
+
         public void SetState(string state)
         {
             var next = string.IsNullOrWhiteSpace(state) ? "idle" : state;
@@ -106,6 +115,24 @@ namespace OpenCode.Customs.AvatarBridge
         {
             if (state == "speaking" || state == "thinking" || state == "planning" || state == "responding") return 0;
             return StateID(state);
+        }
+
+        static string PickLocalReaction(string state)
+        {
+            var roll = Random.value;
+            if (state == "listening") return roll < 0.5f ? "nod" : roll < 0.8f ? "acknowledge" : "weight_shift";
+            if (state == "thinking" || state == "planning")
+                return roll < 0.35f ? "thinking" : roll < 0.6f ? "thoughtful_head_shake" : roll < 0.82f ? "look_away" : "weight_shift";
+            if (state == "speaking" || state == "responding")
+                return roll < 0.45f ? "nod" : roll < 0.75f ? "acknowledge" : "weight_shift";
+            return null;
+        }
+
+        static float ReactionCooldown(string state)
+        {
+            if (state == "listening") return Random.Range(3.5f, 6.5f);
+            if (state == "thinking" || state == "planning") return Random.Range(2.8f, 5.5f);
+            return Random.Range(4f, 7.5f);
         }
 
         static string GestureTrigger(string gesture)

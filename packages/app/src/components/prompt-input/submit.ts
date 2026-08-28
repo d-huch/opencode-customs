@@ -316,9 +316,18 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       pending.delete(key)
       return Promise.resolve()
     }
-    return sdk()
-      .api.session.interrupt({ sessionID })
-      .catch(() => {})
+    const cancelJarvis = sdk().client.v2.jarvis
+      .currentTurn()
+      .then((result) => {
+        const turn = result.data
+        if (!turn || turn.sessionID !== sessionID || ["completed", "cancelled", "error"].includes(turn.phase)) return
+        return sdk().client.v2.jarvis.cancelTurn({ turnID: turn.id, jarvisTurnCancel: { reason: "user_interrupted" } })
+      })
+      .catch(() => undefined)
+    return Promise.all([
+      sdk().api.session.interrupt({ sessionID }).catch(() => undefined),
+      cancelJarvis,
+    ]).then(() => undefined)
   }
 
   const restoreCommentItems = (
@@ -684,15 +693,40 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       return true
     }
 
-    void sendFollowupDraft({
-      api: sdk().api.session,
-      sync: sync(),
-      serverSync: serverSync(),
-      draft,
-      messageID,
-      optimisticBusy: sessionDirectory === projectDirectory,
-      before: waitForWorktree,
-    }).catch((err) => {
+    const send = async () => {
+      if (chat) {
+        const turn = await sdk().client.v2.jarvis.createTurn({
+          jarvisTurnCreate: {
+            requestID: messageID,
+            sessionID: session.id,
+            profileID: jarvis?.profileID,
+            surface: "desktop",
+            responseMode: "text",
+            phase: "understanding",
+          },
+        })
+        await sdk().client.v2.jarvis.handoffPresence({
+          jarvisPresenceHandoff: {
+            to: "desktop",
+            sessionID: session.id,
+            turnID: turn.data?.id,
+            microphone: false,
+            playback: false,
+          },
+        })
+      }
+      return sendFollowupDraft({
+        api: sdk().api.session,
+        sync: sync(),
+        serverSync: serverSync(),
+        draft,
+        messageID,
+        optimisticBusy: sessionDirectory === projectDirectory,
+        before: waitForWorktree,
+      })
+    }
+
+    void send().catch((err) => {
       pending.delete(pendingKey(session.id))
       if (sessionDirectory === projectDirectory) {
         sync().set("session_status", session.id, { type: "idle" })

@@ -10,7 +10,7 @@ namespace OpenCode.Customs.AvatarBridge
     public static class AvatarProtocol
     {
         public const int Version = 2;
-        public const int Minor = 5;
+        public const int Minor = 7;
         public const int MaxCapabilities = 128;
         public const int MaxEntities = 256;
         public const int MaxPayloadBytes = 64 * 1024;
@@ -199,6 +199,38 @@ namespace OpenCode.Customs.AvatarBridge
         public string goal;
         public string requestID;
         public long updatedAt;
+    }
+
+    [Serializable]
+    public sealed class JarvisTurnFrame
+    {
+        public string turnID;
+        public string requestID;
+        public string sessionID;
+        public string surface;
+        public string phase;
+        public long sequence;
+        public string cancelReason;
+        public string error;
+    }
+
+    [Serializable]
+    public sealed class JarvisPresentationCue
+    {
+        public string emotion = "neutral";
+        public float intensity = 0.4f;
+        public string gestureHint;
+        public string gazeTarget;
+        public int expectedDurationMs;
+    }
+
+    [Serializable]
+    public sealed class JarvisMediaFrame
+    {
+        public string state = "idle";
+        public string owner;
+        public int queued;
+        public int active;
     }
 
     [Serializable]

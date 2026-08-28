@@ -46,11 +46,11 @@ import { llmClient } from "../../effect/app-node-platform"
 import { JarvisRuntime } from "../../jarvis"
 import { Jarvis } from "@opencode-ai/schema/jarvis"
 
-const CHAT_TOOLS = new Set(["websearch", "webfetch"])
+const CHAT_TOOLS = new Set(["websearch", "webfetch", "companion_briefing", "companion_prepare_action"])
 const CHAT_SYSTEM_PROMPT = [
   "You are in projectless Chat mode.",
   "Answer general questions naturally without assuming that the user is asking about a repository.",
-  "You may use web search, web fetch, and explicitly connected MCP capabilities when available.",
+  "You may use web search, web fetch, typed Daily Companion capabilities, and explicitly connected MCP capabilities when available.",
   "Do not inspect, modify, summarize, or reason from local project files, Git state, repository indexes, memories, or verification pipelines.",
 ].join("\n")
 
@@ -113,6 +113,16 @@ function renderJarvisGoals(goals: ReadonlyArray<Jarvis.Goal>) {
     "Do not silently resume suspended goals. A fresh observation and capability validation are required.",
     "</jarvis_goals>",
   ].join("\n")
+}
+
+function jarvisMemoryCommand(text: string) {
+  const remember = text.match(/^\s*(?:запам(?:'|’)?ятай(?:,?\s+що)?|remember(?:\s+that)?)\s+(.+)$/iu)
+  if (remember?.[1]) return { type: "remember" as const, text: remember[1].trim() }
+  const forget = text.match(/^\s*(?:забудь|forget)\s+(.+)$/iu)
+  if (forget?.[1]) return { type: "forget" as const, query: forget[1].trim() }
+  const correct = text.match(/^\s*(?:виправ|correct)\s+(.+?)\s+(?:на|to)\s+(.+)$/iu)
+  if (correct?.[1] && correct[2]) return { type: "correct" as const, query: correct[1].trim(), text: correct[2].trim() }
+  return undefined
 }
 
 /**
@@ -358,6 +368,52 @@ const layer = Layer.effect(
         chat && latestUser?.type === "user"
           ? JarvisRuntime.shouldPlan({ text: latestUser.text, minWords: jarvisConfig?.plannerEscalationMinWords })
           : false
+      const memoryCommand = chat && latestUser?.type === "user" && jarvisProfile
+        ? jarvisMemoryCommand(latestUser.text)
+        : undefined
+      if (chat && latestUser?.type === "user" && /^(?:не нагадуй (?:мені )?про це|don'?t remind me (?:about )?this)[.!]?$/iu.test(latestUser.text.trim())) {
+        const latestWake = (yield* JarvisRuntime.inbox(db).pipe(Effect.orDie)).find((wake) => wake.status !== "dismissed")
+        if (latestWake) yield* JarvisRuntime.dismissWake(db, latestWake.id).pipe(Effect.orDie)
+      }
+      if (memoryCommand?.type === "remember" && jarvisProfile) {
+        yield* JarvisRuntime.remember(db, {
+          id: crypto.randomUUID(),
+          profileID: jarvisProfile.id,
+          scope: "user",
+          kind: "preference",
+          text: memoryCommand.text,
+          sourceID: `explicit:${session.id}:${latestUser?.type === "user" ? latestUser.text : memoryCommand.text}`,
+          confidence: 1,
+          importance: 0.8,
+          lifecycle: "verified",
+          pinned: false,
+          conflictsWith: [],
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        }).pipe(Effect.orDie)
+      }
+      if (memoryCommand?.type === "forget" && jarvisProfile) {
+        const matches = yield* JarvisRuntime.searchMemory(db, {
+          query: memoryCommand.query,
+          profileID: jarvisProfile.id,
+          limit: 1,
+        }).pipe(Effect.orDie)
+        if (matches[0]) yield* JarvisRuntime.removeMemory(db, matches[0].id).pipe(Effect.orDie)
+      }
+      if (memoryCommand?.type === "correct" && jarvisProfile) {
+        const matches = yield* JarvisRuntime.searchMemory(db, {
+          query: memoryCommand.query,
+          profileID: jarvisProfile.id,
+          limit: 1,
+        }).pipe(Effect.orDie)
+        if (matches[0]) {
+          yield* JarvisRuntime.patchMemory(db, matches[0].id, {
+            text: memoryCommand.text,
+            lifecycle: "verified",
+            confidence: 1,
+          }).pipe(Effect.orDie)
+        }
+      }
       const jarvisMemory =
         chat && latestUser?.type === "user" && jarvisProfile
           ? yield* JarvisRuntime.searchMemory(db, {
@@ -366,6 +422,20 @@ const layer = Layer.effect(
               limit: complexJarvisIntent ? 12 : 4,
             }).pipe(Effect.orDie)
           : []
+      const activeJarvisTurn = chat ? yield* JarvisRuntime.activeTurn(db, session.id).pipe(Effect.orDie) : undefined
+      if (activeJarvisTurn?.sessionID === session.id) {
+        yield* Effect.forEach(
+          jarvisMemory,
+          (memory, rank) =>
+            JarvisRuntime.recordMemoryUse(db, {
+              turnID: activeJarvisTurn.id,
+              memoryID: memory.id,
+              rank,
+              reason: `Relevant ${memory.kind} memory matched the current request.`,
+            }).pipe(Effect.orDie),
+          { concurrency: 1 },
+        )
+      }
       const jarvisGoals = chat
         ? (yield* JarvisRuntime.goals(db).pipe(Effect.orDie)).filter(
             (goal) =>
@@ -559,6 +629,14 @@ const layer = Layer.effect(
         withPublication(publisher.publish(event, outputPaths))
       let overflowFailure: ProviderErrorEvent | undefined
       if (chat) JarvisRuntime.dialogueStarted()
+      if (activeJarvisTurn?.sessionID === session.id) {
+        const turn = yield* JarvisRuntime.updateTurn(db, activeJarvisTurn.id, {
+          phase: "responding",
+          sequence: activeJarvisTurn.sequence + 1,
+          metrics: { ...activeJarvisTurn.metrics, providerStartedAt: Date.now() },
+        }).pipe(Effect.orDie)
+        if (turn) yield* events.publish(Jarvis.TurnUpdated, { turn })
+      }
       const providerStream = llm.stream(request).pipe(
         Stream.runForEach((event) =>
           Effect.gen(function* () {
@@ -690,6 +768,43 @@ const layer = Layer.effect(
             yield* withPublication(publisher.failUnsettledTools("Tool execution interrupted"))
           if (stream._tag === "Success" && !publisher.hasProviderError())
             yield* withPublication(publisher.failUnsettledTools("Provider did not return a tool result", true))
+          const currentJarvisTurn = chat ? yield* JarvisRuntime.activeTurn(db, session.id).pipe(Effect.orDie) : undefined
+          if (currentJarvisTurn?.sessionID === session.id) {
+            const failed = stream._tag === "Failure" || publisher.hasProviderError()
+            const phase = failed ? "error" as const : needsContinuation ? "responding" as const : "completed" as const
+            const turn = yield* JarvisRuntime.updateTurn(db, currentJarvisTurn.id, {
+              phase,
+              sequence: currentJarvisTurn.sequence + 1,
+              metrics: {
+                ...currentJarvisTurn.metrics,
+                ...(phase === "completed" || phase === "error" ? { completedAt: Date.now() } : {}),
+              },
+              ...(failed ? { error: "Provider turn failed." } : {}),
+            }).pipe(Effect.orDie)
+            if (turn) {
+              yield* events.publish(Jarvis.TurnUpdated, { turn })
+              if (phase === "completed" || phase === "error") {
+                const replay = yield* JarvisRuntime.recordReplay(db, {
+                  turnID: turn.id,
+                  sessionID: session.id,
+                  surface: turn.surface,
+                  status: phase,
+                  metrics: turn.metrics,
+                  error: turn.error,
+                  events: [
+                    { sequence: 0, type: "turn.admitted", timestamp: turn.createdAt, data: {} },
+                    {
+                      sequence: turn.sequence,
+                      type: `turn.${phase}`,
+                      timestamp: turn.updatedAt,
+                      data: { model: `${model.provider}/${model.id}` },
+                    },
+                  ],
+                }).pipe(Effect.orDie)
+                yield* events.publish(Jarvis.ReplayUpdated, { replay })
+              }
+            }
+          }
           if (stream._tag === "Failure") return yield* Effect.failCause(stream.cause)
           if (settled._tag === "Failure" && Cause.hasInterrupts(settled.cause))
             return yield* Effect.failCause(settled.cause)

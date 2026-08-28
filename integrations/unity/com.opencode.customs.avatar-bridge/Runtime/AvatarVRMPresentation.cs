@@ -64,6 +64,7 @@ namespace OpenCode.Customs.AvatarBridge
             bridge.onAssistantState?.AddListener(SetState);
             bridge.onSpeechEmotion?.AddListener(SetEmotion);
             bridge.onViseme?.AddListener(SetViseme);
+            bridge.onGestureHint?.AddListener(TriggerGesture);
         }
 
         void OnDisable()
@@ -72,6 +73,7 @@ namespace OpenCode.Customs.AvatarBridge
             bridge.onAssistantState?.RemoveListener(SetState);
             bridge.onSpeechEmotion?.RemoveListener(SetEmotion);
             bridge.onViseme?.RemoveListener(SetViseme);
+            bridge.onGestureHint?.RemoveListener(TriggerGesture);
         }
 
         void Update()
@@ -87,6 +89,12 @@ namespace OpenCode.Customs.AvatarBridge
         }
 
         public void SetState(string state) => reactions?.SetState(state);
+
+        public void TriggerGesture(string gesture)
+        {
+            if (string.IsNullOrWhiteSpace(gesture)) return;
+            reactions?.TriggerGesture(gesture);
+        }
 
         public void SetEmotion(string emotion, float intensity)
         {

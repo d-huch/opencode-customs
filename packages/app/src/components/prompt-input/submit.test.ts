@@ -32,6 +32,8 @@ const promotedDrafts: Array<{ draftID: string; server: string; sessionId: string
 const sentPrompts: string[] = []
 const promptInputs: unknown[] = []
 const sentCommands: unknown[] = []
+const jarvisTurns: unknown[] = []
+const jarvisHandoffs: unknown[] = []
 const commands: Array<{ name: string }> = []
 let serverSessionSyncs = 0
 
@@ -75,6 +77,22 @@ const prompt = {
 const clientFor = (directory: string) => {
   createdClients.push(directory)
   return {
+    v2: {
+      jarvis: {
+        status: async () => ({ data: { config: {} } }),
+        syncProfiles: async () => ({ data: undefined }),
+        createTurn: async (input: unknown) => {
+          jarvisTurns.push(input)
+          return { data: { id: "turn-desktop" } }
+        },
+        handoffPresence: async (input: unknown) => {
+          jarvisHandoffs.push(input)
+          return { data: undefined }
+        },
+        currentTurn: async () => ({ data: undefined }),
+        cancelTurn: async () => ({ data: undefined }),
+      },
+    },
     api: {
       session: {
         create: async (input: (typeof sessionCreateInputs)[number]) => {
@@ -301,6 +319,8 @@ beforeEach(() => {
   sentPrompts.length = 0
   promptInputs.length = 0
   sentCommands.length = 0
+  jarvisTurns.length = 0
+  jarvisHandoffs.length = 0
   commands.length = 0
   promptValue = [{ type: "text", content: "ls", start: 0, end: 2 }]
   params = {}
@@ -487,6 +507,12 @@ describe("prompt submit worktree selection", () => {
     expect(sessionCreateInputs[0]).toMatchObject({ agent: "chat", mode: "chat" })
     expect(optimistic[0]?.message.agent).toBe("chat")
     expect(promptInputs[0]).toMatchObject({ agent: "chat" })
+    expect(jarvisTurns).toEqual([
+      expect.objectContaining({ jarvisTurnCreate: expect.objectContaining({ sessionID: "session-1", surface: "desktop" }) }),
+    ])
+    expect(jarvisHandoffs).toEqual([
+      expect.objectContaining({ jarvisPresenceHandoff: expect.objectContaining({ to: "desktop", sessionID: "session-1", turnID: "turn-desktop" }) }),
+    ])
   })
 
   test("forces the chat agent for an existing projectless chat", async () => {

@@ -8,6 +8,7 @@ import { tmpdir } from "node:os"
 import { WebSocket, WebSocketServer } from "ws"
 import type { AvatarBridgeStatus } from "../preload/types"
 import type { NemotronVoiceController } from "./nemotron-voice"
+import { JarvisMediaCoordinator } from "./jarvis-media-coordinator"
 import { AvatarPairingManager, avatarBridgeLanAddresses, loadAvatarBridgeCertificate } from "./avatar-bridge-lan"
 import {
   AVATAR_ACTIONS,
@@ -81,7 +82,17 @@ type ClientState = AvatarHello & {
   cooldowns: Map<string, number>
   turn?: AbortController
   turnRequestID?: string
+  serverTurn?: {
+    id: string
+    phase: JarvisTurnPhase
+    sequence: number
+    metrics: Record<string, number>
+    presentation?: { emotion: string; intensity: number; gestureHint?: string; gazeTarget?: string; expectedDurationMs?: number }
+    events: Array<{ sequence: number; type: string; timestamp: number; data: Record<string, string | number | boolean | null> }>
+    recorded?: boolean
+  }
   partialTranscript?: string
+  partialSequence: number
   attentionEvents: AvatarWorldEvent[]
   attentionTimer?: NodeJS.Timeout
   attentionCooldowns: Map<string, number>
@@ -103,6 +114,17 @@ type ClientState = AvatarHello & {
     unsubscribe: () => void
   }
 }
+type JarvisTurnPhase =
+  | "listening"
+  | "transcribing"
+  | "understanding"
+  | "planning"
+  | "responding"
+  | "speaking"
+  | "acting"
+  | "completed"
+  | "cancelled"
+  | "error"
 type PendingAction = {
   socket: WebSocket
   timer: NodeJS.Timeout
@@ -194,6 +216,8 @@ export async function startAvatarBridge(
     reason: undefined as string | undefined,
     lastPlannerAt: undefined as number | undefined,
   }
+  const media = new JarvisMediaCoordinator()
+  let activeVoiceClient: ClientState | undefined
   const presence = new Map<string, NonNullable<AvatarBridgeStatus["presence"]>>()
   const serverConnection = { current: undefined as ServerConnection | undefined }
   const importedLegacyMemoryServers = new Set<string>()
@@ -739,6 +763,7 @@ export async function startAvatarBridge(
           cooldowns: new Map(),
           attentionEvents: [],
           attentionCooldowns: new Map(),
+          partialSequence: 0,
         }
         streams.set(message.clientID, stream)
         clients.set(socket, connected)
@@ -763,6 +788,7 @@ export async function startAvatarBridge(
             maximumActionsPerCycle: persistent.config().maximumActionsPerCycle,
             cycleTimeoutMs: persistent.config().cycleTimeoutMs,
             voiceEngine: options.nemotronVoice?.engine() ?? "cascade",
+            media: media.snapshot(),
           },
           false,
         )
@@ -773,6 +799,25 @@ export async function startAvatarBridge(
           remote,
         })
         setPresence(connected, "idle")
+        void adoptCanonicalSession(connected)
+          .then(() => {
+            sendState(connected, {
+              type: "jarvis.snapshot",
+              sessionID: connected.sessionID,
+              surface: avatarSurface(connected),
+              presence: presence.get(connected.characterID),
+              media: media.snapshot(),
+            }, false)
+            return handoffServerPresence(connected, false, false)
+          })
+          .catch((error) => {
+            if (isExpectedTurnCancellation(error)) return
+            writeLog("avatar", "Jarvis canonical session adoption failed", {
+              clientID: connected.clientID,
+              characterID: connected.characterID,
+              error: error instanceof Error ? error.message.slice(0, 1_000) : String(error).slice(0, 1_000),
+            })
+          })
         return
       }
       state.lastHeartbeatAt = Date.now()
@@ -817,6 +862,7 @@ export async function startAvatarBridge(
     if (message.type === "speech.partial") {
       state.partialTranscript = message.text
       setPresence(state, "listening", { requestID: message.requestID, subtitle: message.text })
+      void prewarmPartial(state, message.requestID, message.text, message.language)
       return
     }
     if (message.type === "capability.manifest") {
@@ -886,10 +932,12 @@ export async function startAvatarBridge(
       state.turn = undefined
       state.turnRequestID = undefined
       if (isExpectedTurnCancellation(error)) {
+        void cancelServerTurn(state, "interrupted")
         setPresence(state, "idle", { requestID: undefined, subtitle: undefined })
         return
       }
       const detail = error instanceof Error ? error.message : String(error)
+      void failServerTurn(state, detail)
       writeLog("avatar", "Unity transcript failed", {
         clientID: state.clientID,
         characterID: state.characterID,
@@ -916,6 +964,7 @@ export async function startAvatarBridge(
     }
     cancelAudioInput(state, "superseded")
     cancelTurn(state, frame.requestID)
+    void handoffServerPresence(state, true, true)
     const recognition = options.startRecognition({
       locale: frame.locale ?? "uk-UA",
       sampleRate: frame.sampleRate,
@@ -925,6 +974,7 @@ export async function startAvatarBridge(
           state.partialTranscript = event.text
           setPresence(state, "listening", { requestID: frame.requestID, subtitle: event.text })
           sendState(state, { type: "user.transcript.partial", requestID: frame.requestID, text: event.text }, false)
+          void prewarmPartial(state, frame.requestID, event.text, frame.locale)
         }
       },
       onDrain: () => {
@@ -969,6 +1019,7 @@ export async function startAvatarBridge(
         state.partialTranscript = (state.partialTranscript ?? "") + event.delta
         setPresence(state, "listening", { requestID: frame.requestID, subtitle: state.partialTranscript })
         sendState(state, { type: "user.transcript.partial", requestID: frame.requestID, text: state.partialTranscript }, false)
+        void prewarmPartial(state, frame.requestID, state.partialTranscript, frame.locale)
         return
       }
       if (event.type === "text.delta") {
@@ -1078,7 +1129,7 @@ export async function startAvatarBridge(
       characterID: state.characterID,
       sessionID: state.sessionID,
       profileID: state.profileID,
-      surface: "unity",
+      surface: state.surface ?? (state.remote ? "quest" : "unity-editor"),
       state: next,
       emotion: patch.emotion ?? previous?.emotion ?? "neutral",
       intensity: patch.intensity ?? previous?.intensity ?? 0.4,
@@ -1280,6 +1331,13 @@ export async function startAvatarBridge(
     state.turn = controller
     state.turnRequestID = message.requestID
     setPresence(state, "thinking", { requestID: message.requestID, subtitle: message.text })
+    sendPresentationCue(state, {
+      emotion: "thoughtful",
+      intensity: 0.45,
+      gestureHint: "thinking",
+      gazeTarget: "player",
+      expectedDurationMs: 2_500,
+    })
     sendState(state, { type: "assistant.started", requestID: message.requestID })
     writeLog("avatar", "Unity transcript accepted", {
       clientID: state.clientID,
@@ -1287,17 +1345,47 @@ export async function startAvatarBridge(
       requestID: message.requestID,
       responseMode: message.responseMode ?? "voice",
     })
+    const sessionID = await adoptCanonicalSession(state, controller.signal)
+    state.serverTurn = await createServerTurn(connection, state, message, sessionID, controller.signal)
+    await advanceServerTurn(connection, state, "transcribing")
+    await advanceServerTurn(connection, state, "understanding")
     const route = await selectTurnModel(connection, state, message.text, controller.signal)
-    const existing = state.sessionID ? await sessionExists(connection, state.sessionID, controller.signal) : false
-    const sessionID = existing ? state.sessionID! : await createChatSession(connection, state, controller.signal)
-    state.sessionID = sessionID
-    state.stream.sessionID = sessionID
-    writeLog("avatar", existing ? "Unity session adopted" : "Unity session created", {
+    void handoffServerPresence(state, message.responseMode !== "text", message.responseMode !== "text")
+    writeLog("avatar", "Unity canonical session adopted", {
       clientID: state.clientID,
       characterID: state.characterID,
       sessionID,
     })
     const context = gameContext(state, message.text)
+    const shouldSpeak = message.responseMode !== "text" && !!state.voice
+    if (shouldSpeak) handoffVoiceClient(state, message.requestID)
+    const ttsStartedAt = Date.now()
+    const mediaTurn = shouldSpeak && state.voice && options.synthesize
+      ? media.start({
+          turnID: state.serverTurn.id,
+          owner: avatarSurface(state),
+          synthesize: (text, signal) => options.synthesize!({ ...state.voice!, text }, signal),
+          play: (text, audio) => sendAudio(state, message.requestID, sessionID, text, audio.contentType, Buffer.from(audio.audio)),
+          state: (value) => {
+            void updateServerMediaState(connection, state, value)
+            if ((state.protocolMinor ?? 0) >= 7)
+              sendState(state, {
+                type: "jarvis.media.queue",
+                requestID: message.requestID,
+                turnID: state.serverTurn?.id,
+                sessionID,
+                owner: avatarSurface(state),
+                ...value,
+              }, false)
+            if (value.state === "playing") {
+              void advanceServerTurn(connection, state, "speaking", {
+                firstAudioAt: state.serverTurn?.metrics.firstAudioAt ?? Date.now(),
+              })
+              setPresence(state, "speaking", { requestID: message.requestID })
+            }
+          },
+        })
+      : undefined
     modelRuntime.activeRole = route.role
     modelRuntime.selectedModel = route.model
     modelRuntime.reason = route.reason
@@ -1307,12 +1395,15 @@ export async function startAvatarBridge(
       model: route.model ? `${route.model.providerID}/${route.model.modelID}` : "server default",
       reason: route.reason,
     })
-    let stream = await assistantStream(
+    const stream = await assistantStream(
       connection,
       sessionID,
       AbortSignal.any([controller.signal, AbortSignal.timeout(TURN_TIMEOUT)]),
       {
         start: (assistantMessageID, model) => {
+          void advanceServerTurn(connection, state, "responding", {
+            providerStartedAt: Date.now(),
+          })
           writeLog("avatar", "Unity provider started", {
             characterID: state.characterID,
             requestID: message.requestID,
@@ -1329,7 +1420,18 @@ export async function startAvatarBridge(
           })
         },
         delta: (delta, assistantMessageID, ttftMs) => {
+          mediaTurn?.append(delta)
+          void advanceServerTurn(connection, state, "responding", {
+            firstTextAt: Date.now(),
+            ttftMs,
+          })
           setPresence(state, "responding", { requestID: message.requestID, subtitle: undefined })
+          sendPresentationCue(state, {
+            emotion: "neutral",
+            intensity: 0.35,
+            gazeTarget: "player",
+            expectedDurationMs: 900,
+          })
           if ((state.protocolMinor ?? 0) < 4) return
           sendState(state, {
             type: "assistant.text.delta",
@@ -1342,63 +1444,49 @@ export async function startAvatarBridge(
         },
       },
     )
-    const prompt = {
+    const admitted = await request(connection, "/api/jarvis/turns/admit", {
       method: "POST",
-      body: JSON.stringify({ prompt: { text: context ? `${message.text}\n\n${context}` : message.text } }),
+      body: JSON.stringify({
+        requestID: `${state.clientID}:${message.requestID}`,
+        transcript: message.text,
+        surface: avatarSurface(state),
+        responseMode: message.responseMode ?? "voice",
+        profileID: state.profileID,
+        profileRevision: state.profileRevision,
+        worldContext: context,
+      }),
       signal: AbortSignal.any([controller.signal, AbortSignal.timeout(TURN_TIMEOUT)]),
-    } satisfies RequestInit
-    const admittedSessionID = await request(connection, `/api/session/${encodeURIComponent(sessionID)}/prompt`, prompt)
-      .then(() => sessionID)
-      .catch(async (error) => {
-        if (!(error instanceof OpenCodeHttpError) || error.status !== 404) throw error
-        stream.cancel()
-        const recovered = await createChatSession(connection, state, controller.signal)
-        state.sessionID = recovered
-        state.stream.sessionID = recovered
-        writeLog("avatar", "Unity session recovered", {
-          clientID: state.clientID,
-          characterID: state.characterID,
-          previousSessionID: sessionID,
-          sessionID: recovered,
-        })
-        stream = await assistantStream(
-          connection,
-          recovered,
-          AbortSignal.any([controller.signal, AbortSignal.timeout(TURN_TIMEOUT)]),
-          {
-            start: (assistantMessageID, model) => {
-              writeLog("avatar", "Unity provider started", {
-                characterID: state.characterID,
-                requestID: message.requestID,
-                sessionID: recovered,
-                model: model ?? "server default",
-              })
-              if ((state.protocolMinor ?? 0) < 4) return
-              sendState(state, {
-                type: "assistant.text.start",
-                requestID: message.requestID,
-                sessionID: recovered,
-                assistantMessageID,
-                model: model ?? (route.model ? `${route.model.providerID}/${route.model.modelID}` : undefined),
-              })
-            },
-            delta: (delta, assistantMessageID, ttftMs) => {
-              setPresence(state, "responding", { requestID: message.requestID, subtitle: undefined })
-              if ((state.protocolMinor ?? 0) < 4) return
-              sendState(state, {
-                type: "assistant.text.delta",
-                requestID: message.requestID,
-                sessionID: recovered,
-                assistantMessageID,
-                delta,
-                ttftMs,
-              })
-            },
-          },
-        )
-        await request(connection, `/api/session/${encodeURIComponent(recovered)}/prompt`, prompt)
-        return recovered
+    }).then((response) => response.json())
+    const admittedSessionID =
+      isRecord(admitted) && isRecord(admitted.conversation) && typeof admitted.conversation.sessionID === "string"
+        ? admitted.conversation.sessionID
+        : sessionID
+    if (
+      isRecord(admitted) &&
+      isRecord(admitted.turn) &&
+      admitted.turn.phase === "planning" &&
+      state.serverTurn?.phase === "understanding"
+    ) {
+      state.serverTurn.phase = "planning"
+      state.serverTurn.sequence = typeof admitted.turn.sequence === "number" ? admitted.turn.sequence : state.serverTurn.sequence + 1
+      state.serverTurn.events.push({
+        sequence: state.serverTurn.sequence,
+        type: "turn.planning",
+        timestamp: Date.now(),
+        data: {},
       })
+      sendState(state, {
+        type: "jarvis.turn",
+        turnID: state.serverTurn.id,
+        requestID: message.requestID,
+        sessionID: admittedSessionID,
+        surface: avatarSurface(state),
+        phase: "planning",
+        sequence: state.serverTurn.sequence,
+      }, false)
+    }
+    state.sessionID = admittedSessionID
+    state.stream.sessionID = admittedSessionID
     writeLog("avatar", "Unity prompt admitted", {
       characterID: state.characterID,
       requestID: message.requestID,
@@ -1411,12 +1499,21 @@ export async function startAvatarBridge(
       requestID: message.requestID,
       sessionID: admittedSessionID,
     })
-    const shouldSpeak = message.responseMode !== "text" && !!state.voice
+    await advanceServerTurn(connection, state, shouldSpeak ? "speaking" : "responding", {
+      ttftMs: streamed.ttftMs,
+    })
     setPresence(state, shouldSpeak ? "speaking" : "idle", {
       requestID: message.requestID,
       subtitle: text,
       emotion: inferSpeechEmotion(text),
       intensity: Math.min(1, 0.35 + Math.min(0.5, (text.match(/[!?]/g)?.length ?? 0) * 0.12)),
+    })
+    sendPresentationCue(state, {
+      emotion: inferSpeechEmotion(text),
+      intensity: Math.min(1, 0.35 + Math.min(0.5, (text.match(/[!?]/g)?.length ?? 0) * 0.12)),
+      gestureHint: speechGesture(text),
+      gazeTarget: "player",
+      expectedDurationMs: Math.min(8_000, Math.max(1_200, text.length * 45)),
     })
     if ((state.protocolMinor ?? 0) >= 4) {
       sendState(state, {
@@ -1434,30 +1531,44 @@ export async function startAvatarBridge(
       })
     } else sendState(state, { type: "assistant.text", requestID: message.requestID, sessionID: admittedSessionID, text })
     if (shouldSpeak && state.voice) {
-      if (!options.synthesize) throw new Error("Local voice synthesis is unavailable")
-      const audio = await options.synthesize({ ...state.voice, text }, controller.signal)
-      if (state.protocol === 1) {
-        send(state.socket, {
-          type: "assistant.audio",
-          requestID: message.requestID,
-          sessionID: admittedSessionID,
-          contentType: audio.contentType,
-          data: Buffer.from(new Uint8Array(audio.audio)).toString("base64"),
-        })
-      } else sendAudio(state, message.requestID, admittedSessionID, text, audio.contentType, Buffer.from(audio.audio))
+      if (!mediaTurn) throw new Error("Local voice synthesis is unavailable")
+      await mediaTurn.finish().then(
+        () =>
+          advanceServerTurn(connection, state, "speaking", {
+            firstAudioAt: state.serverTurn?.metrics.firstAudioAt ?? Date.now(),
+            ttsMs: Date.now() - ttsStartedAt,
+          }),
+        (error) => {
+          media.cancel(state.serverTurn?.id, "tts_error")
+          sendState(state, {
+            type: "assistant.audio.error",
+            requestID: message.requestID,
+            sessionID: admittedSessionID,
+            error: error instanceof Error ? error.message : String(error),
+          }, false)
+          setPresence(state, "idle", { requestID: message.requestID, subtitle: text })
+          sendPresentationCue(state, { emotion: "neutral", intensity: 0, gazeTarget: "player", expectedDurationMs: 150 })
+        },
+      )
     }
     if (state.turn === controller) {
       state.turn = undefined
       state.turnRequestID = undefined
     }
     sendState(state, { type: "assistant.done", requestID: message.requestID, sessionID: admittedSessionID })
+    await advanceServerTurn(connection, state, "completed", {
+      completedAt: Date.now(),
+      ttftMs: streamed.ttftMs,
+    })
     setPresence(state, "idle", { subtitle: text, requestID: undefined })
+    sendPresentationCue(state, { emotion: "neutral", intensity: 0.2, gazeTarget: "player", expectedDurationMs: 600 })
   }
 
   async function speakSession(sessionID: string, text: string) {
     const state = [...clients.values()].find((client) => client.sessionID === sessionID)
     if (!state || !state.voice || !options.synthesize) return false
     const requestID = `surface_${randomUUID()}`
+    handoffVoiceClient(state, requestID)
     cancelTurn(state, requestID)
     const controller = new AbortController()
     state.turn = controller
@@ -1468,16 +1579,7 @@ export async function startAvatarBridge(
       emotion: inferSpeechEmotion(text),
       intensity: Math.min(1, 0.35 + Math.min(0.5, (text.match(/[!?]/g)?.length ?? 0) * 0.12)),
     })
-    const audio = await options.synthesize({ ...state.voice, text }, controller.signal)
-    if (state.protocol === 1) {
-      send(state.socket, {
-        type: "assistant.audio",
-        requestID,
-        sessionID,
-        contentType: audio.contentType,
-        data: Buffer.from(new Uint8Array(audio.audio)).toString("base64"),
-      })
-    } else sendAudio(state, requestID, sessionID, text, audio.contentType, Buffer.from(audio.audio))
+    await synthesizeAndSend(state, requestID, sessionID, text, controller.signal)
     if (state.turn === controller) {
       state.turn = undefined
       state.turnRequestID = undefined
@@ -1571,7 +1673,9 @@ export async function startAvatarBridge(
   function cancelTurn(state: ClientState, requestID: string) {
     const controller = state.turn
     if (controller) {
+      const startedAt = Date.now()
       controller.abort()
+      media.cancel(state.serverTurn?.id, "barge_in")
       state.turn = undefined
       const cancelledRequestID = state.turnRequestID ?? requestID
       state.turnRequestID = undefined
@@ -1580,12 +1684,255 @@ export async function startAvatarBridge(
       if (connection && state.sessionID) {
         void request(connection, `/api/session/${encodeURIComponent(state.sessionID)}/abort`, { method: "POST" }).catch(() => undefined)
       }
+      void cancelServerTurn(state, "barge_in")
+      sendPresentationCue(state, { emotion: "neutral", intensity: 0, gazeTarget: "player", expectedDurationMs: 150 })
+      if ((state.protocolMinor ?? 0) >= 7)
+        sendState(state, {
+          type: "jarvis.cancellation.ack",
+          requestID: cancelledRequestID,
+          turnID: state.serverTurn?.id,
+          latencyMs: Date.now() - startedAt,
+          neutral: true,
+        }, false)
     }
     for (const [id, action] of pendingActions) {
       if (action.socket !== state.socket || !action.cancellable) continue
       sendState(state, { type: "game.action.cancel", id, cycleID: action.cycleID, reason: "player_interrupted" })
     }
     if (controller) setPresence(state, "listening", { requestID, subtitle: undefined })
+  }
+
+  function handoffVoiceClient(state: ClientState, requestID: string) {
+    const previous = activeVoiceClient
+    activeVoiceClient = state
+    if (!previous || previous === state) return
+    const hadTurn = !!previous.turn
+    cancelTurn(previous, requestID)
+    if (!hadTurn) {
+      sendState(previous, { type: "assistant.cancelled", requestID: previous.turnRequestID ?? requestID }, false)
+      sendPresentationCue(previous, { emotion: "neutral", intensity: 0, gazeTarget: "player", expectedDurationMs: 150 })
+      setPresence(previous, "idle", { requestID: undefined, subtitle: undefined })
+    }
+  }
+
+  async function createServerTurn(
+    connection: ServerConnection,
+    state: ClientState,
+    message: AvatarTranscript,
+    sessionID: string,
+    signal: AbortSignal,
+  ) {
+    const response = await request(connection, "/api/jarvis/turns", {
+      method: "POST",
+      body: JSON.stringify({
+        requestID: `${state.clientID}:${message.requestID}`,
+        sessionID,
+        profileID: state.profileID,
+        surface: avatarSurface(state),
+        responseMode: message.responseMode ?? "voice",
+        phase: "listening",
+      }),
+      signal,
+    }).then((value) => value.json())
+    if (!isRecord(response) || typeof response.id !== "string" || typeof response.sequence !== "number") {
+      throw new Error("Jarvis Turn Coordinator returned an invalid turn")
+    }
+    const turn = {
+      id: response.id,
+      phase: "listening" as const,
+      sequence: response.sequence,
+      metrics: {},
+      events: [{ sequence: response.sequence, type: "turn.listening", timestamp: Date.now(), data: {} }],
+    }
+    sendState(state, {
+      type: "jarvis.turn",
+      turnID: turn.id,
+      requestID: message.requestID,
+      sessionID,
+      surface: avatarSurface(state),
+      phase: turn.phase,
+      sequence: turn.sequence,
+    }, false)
+    return turn
+  }
+
+  async function advanceServerTurn(
+    connection: ServerConnection,
+    state: ClientState,
+    phase: JarvisTurnPhase,
+    metrics: Record<string, number> = {},
+    error?: string,
+    presentation?: { emotion: string; intensity: number; gestureHint?: string; gazeTarget?: string; expectedDurationMs?: number },
+  ) {
+    const turn = state.serverTurn
+    if (!turn || turn.phase === "completed" || turn.phase === "cancelled" || turn.phase === "error") return
+    const changed =
+      turn.phase !== phase ||
+      Object.entries(metrics).some(([key, value]) => turn.metrics[key] !== value) ||
+      (presentation !== undefined && JSON.stringify(turn.presentation) !== JSON.stringify(presentation))
+    if (!changed) return
+    const sequence = turn.sequence + 1
+    turn.phase = phase
+    turn.sequence = sequence
+    turn.metrics = { ...turn.metrics, ...metrics }
+    turn.presentation = presentation ?? turn.presentation
+    turn.events.push({
+      sequence,
+      type: `turn.${phase}`,
+      timestamp: Date.now(),
+      data: {
+        ...(error ? { error } : {}),
+        ...(presentation?.gestureHint ? { gestureHint: presentation.gestureHint } : {}),
+      },
+    })
+    sendState(state, {
+      type: "jarvis.turn",
+      turnID: turn.id,
+      requestID: state.turnRequestID,
+      sessionID: state.sessionID,
+      surface: avatarSurface(state),
+      phase,
+      sequence,
+      metrics: turn.metrics,
+      error,
+    }, false)
+    await request(connection, `/api/jarvis/turns/${encodeURIComponent(turn.id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ phase, sequence, metrics: turn.metrics, error, presentation: turn.presentation }),
+    }).catch((error) => {
+      writeLog("avatar", "Jarvis turn update failed", {
+        turnID: turn.id,
+        phase,
+        error: error instanceof Error ? error.message : String(error),
+      }, "warn")
+    })
+    if (phase === "completed" || phase === "error") await recordServerReplay(state, phase, error)
+  }
+
+  async function cancelServerTurn(state: ClientState, reason: string) {
+    const connection = serverConnection.current
+    const turn = state.serverTurn
+    if (!connection || !turn || turn.phase === "completed" || turn.phase === "cancelled" || turn.phase === "error") return
+    turn.phase = "cancelled"
+    turn.sequence += 1
+    turn.events.push({ sequence: turn.sequence, type: "turn.cancelled", timestamp: Date.now(), data: { reason } })
+    sendState(state, {
+      type: "jarvis.turn",
+      turnID: turn.id,
+      requestID: state.turnRequestID,
+      sessionID: state.sessionID,
+      surface: avatarSurface(state),
+      phase: "cancelled",
+      sequence: turn.sequence,
+      cancelReason: reason,
+    }, false)
+    await request(connection, `/api/jarvis/turns/${encodeURIComponent(turn.id)}/cancel`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    }).catch(() => undefined)
+    await recordServerReplay(state, "cancelled")
+  }
+
+  async function failServerTurn(state: ClientState, error: string) {
+    const connection = serverConnection.current
+    const turn = state.serverTurn
+    if (!connection || !turn || turn.phase === "completed" || turn.phase === "cancelled" || turn.phase === "error") return
+    await advanceServerTurn(connection, state, "error", { completedAt: Date.now() }, error)
+  }
+
+  async function handoffServerPresence(state: ClientState, microphone: boolean, playback: boolean) {
+    const connection = serverConnection.current
+    if (!connection) return
+    await request(connection, "/api/jarvis/presence/handoff", {
+      method: "POST",
+      body: JSON.stringify({
+        to: avatarSurface(state),
+        sessionID: state.sessionID,
+        turnID: state.serverTurn?.id,
+        microphone,
+        playback,
+      }),
+    }).catch((error) => {
+      writeLog("avatar", "Jarvis surface handoff failed", {
+        clientID: state.clientID,
+        surface: avatarSurface(state),
+        error: error instanceof Error ? error.message : String(error),
+      }, "warn")
+    })
+  }
+
+  async function recordServerReplay(state: ClientState, status: "completed" | "cancelled" | "error", error?: string) {
+    const connection = serverConnection.current
+    const turn = state.serverTurn
+    if (!connection || !turn || turn.recorded) return
+    turn.recorded = true
+    await request(connection, "/api/jarvis/replays", {
+      method: "POST",
+      body: JSON.stringify({
+        turnID: turn.id,
+        sessionID: state.sessionID,
+        surface: avatarSurface(state),
+        status,
+        events: turn.events,
+        metrics: turn.metrics,
+        error,
+      }),
+    }).catch((cause) => {
+      turn.recorded = false
+      writeLog("avatar", "Jarvis replay trace was not recorded", {
+        turnID: turn.id,
+        error: cause instanceof Error ? cause.message : String(cause),
+      }, "warn")
+    })
+  }
+
+  function avatarSurface(state: ClientState) {
+    return state.surface ?? (state.remote ? "quest" : "unity-editor")
+  }
+
+  function sendPresentationCue(
+    state: ClientState,
+    cue: { emotion: string; intensity: number; gestureHint?: string; gazeTarget?: string; expectedDurationMs?: number },
+  ) {
+    sendState(state, {
+      type: "jarvis.presentation.cue",
+      turnID: state.serverTurn?.id,
+      requestID: state.turnRequestID,
+      cue,
+    }, false)
+    const connection = serverConnection.current
+    if (connection && state.serverTurn) {
+      void advanceServerTurn(connection, state, state.serverTurn.phase, {}, undefined, cue)
+    }
+  }
+
+  function updateServerMediaState(
+    connection: ServerConnection,
+    state: ClientState,
+    mediaState: {
+      state: "buffering" | "synthesizing" | "playing" | "idle" | "cancelling" | "error"
+      queued: number
+      active: number
+    },
+  ) {
+    return request(connection, "/api/jarvis/media", {
+      method: "POST",
+      body: JSON.stringify({
+        turnID: state.serverTurn?.id,
+        owner: avatarSurface(state),
+        state: mediaState.state,
+        queuedSentences: mediaState.queued,
+        activeJobs: mediaState.active,
+        acknowledgedCancellation: mediaState.state !== "cancelling",
+      }),
+      signal: AbortSignal.timeout(3_000),
+    }).catch((error) => {
+      if (isExpectedTurnCancellation(error)) return
+      writeLog("avatar", "Jarvis media snapshot update failed", {
+        turnID: state.serverTurn?.id,
+        error: error instanceof Error ? error.message : String(error),
+      }, "warn")
+    })
   }
 
   function sendAudio(
@@ -1618,6 +1965,36 @@ export async function startAvatarBridge(
       if (state.socket.readyState === WebSocket.OPEN) state.socket.send(Buffer.concat([header, chunk]), { binary: true })
     }
     sendState(state, { type: "assistant.audio.end", audioID, requestID, sessionID })
+  }
+
+  async function synthesizeAndSend(
+    state: ClientState,
+    requestID: string,
+    sessionID: string,
+    text: string,
+    signal: AbortSignal,
+  ) {
+    if (!state.voice || !options.synthesize) throw new Error("Local voice synthesis is unavailable")
+    const sentences = (state.protocolMinor ?? 0) >= 6 ? speechSentences(text) : [text]
+    let pending = options.synthesize({ ...state.voice, text: sentences[0] ?? text }, signal)
+    for (let index = 0; index < sentences.length; index++) {
+      const audio = await pending
+      const sentence = sentences[index] ?? text
+      pending = index + 1 < sentences.length
+        ? options.synthesize({ ...state.voice, text: sentences[index + 1]! }, signal)
+        : Promise.resolve(audio)
+      if (state.protocol === 1) {
+        send(state.socket, {
+          type: "assistant.audio",
+          requestID,
+          sessionID,
+          contentType: audio.contentType,
+          data: Buffer.from(new Uint8Array(audio.audio)).toString("base64"),
+        })
+        continue
+      }
+      sendAudio(state, requestID, sessionID, sentence, audio.contentType, Buffer.from(audio.audio))
+    }
   }
 
   function scheduleAttention(state: ClientState, event: AvatarWorldEvent) {
@@ -1721,6 +2098,7 @@ function gameContext(state: ClientState, query: string) {
     const state = clients.get(socket)
     clients.delete(socket)
     if (!state) return
+    if (activeVoiceClient === state) activeVoiceClient = undefined
     state.turn?.abort()
     cancelAudioInput(state, "disconnected")
     presence.delete(state.characterID)
@@ -1785,6 +2163,96 @@ function gameContext(state: ClientState, query: string) {
     return body.data.id
   }
 
+  async function adoptCanonicalSession(state: ClientState, signal = AbortSignal.timeout(30_000)) {
+    const connection = serverConnection.current
+    if (!connection) throw new Error("OpenCode server is not ready")
+    const response = await request(connection, "/api/jarvis/conversation/adopt", {
+      method: "POST",
+      body: JSON.stringify({
+        sessionID: state.sessionID,
+        profileID: state.profileID,
+        profileRevision: state.profileRevision,
+        surface: avatarSurface(state),
+      }),
+      signal,
+    }).then((value) => value.json())
+    if (!isRecord(response) || typeof response.sessionID !== "string")
+      throw new Error("Jarvis canonical session response is invalid")
+    state.sessionID = response.sessionID
+    state.stream.sessionID = response.sessionID
+    sendState(state, { type: "session.adopted", sessionID: response.sessionID }, false)
+    return response.sessionID
+  }
+
+  async function prewarmPartial(state: ClientState, requestID: string, text: string, language?: string) {
+    const connection = serverConnection.current
+    if (!connection || !text.trim()) return
+    const sequence = ++state.partialSequence
+    await request(connection, "/api/jarvis/turns/prewarm", {
+      method: "POST",
+      body: JSON.stringify({
+        turnID: state.serverTurn?.id,
+        requestID: `${state.clientID}:${requestID}`,
+        surface: avatarSurface(state),
+        text: text.slice(0, 2_000),
+        sequence,
+        language,
+        profileRevision: state.profileRevision,
+        capturedAt: Date.now(),
+      }),
+      signal: AbortSignal.timeout(5_000),
+    }).catch((error) => {
+      if (isExpectedTurnCancellation(error)) return
+      writeLog("avatar", "Jarvis partial prewarm failed", {
+        clientID: state.clientID,
+        requestID,
+        error: error instanceof Error ? error.message : String(error),
+      }, "warn")
+    })
+  }
+
+  async function executeReplayFixture(replayID: string) {
+    const connection = serverConnection.current
+    if (!connection) throw new Error("OpenCode server is unavailable")
+    const replayResponse = await request(connection, `/api/jarvis/replays/${encodeURIComponent(replayID)}`)
+    const replay = (await replayResponse.json()) as {
+      id?: string
+      events?: Array<{ type?: string; timestamp?: number; data?: Record<string, unknown> }>
+    } | null
+    if (!replay?.id || !Array.isArray(replay.events)) throw new Error("Jarvis replay was not found")
+    const executionResponse = await request(connection, `/api/jarvis/replays/${encodeURIComponent(replayID)}/execute`, {
+      method: "POST",
+      body: JSON.stringify({ fixtureOnly: true }),
+    })
+    const execution = (await executionResponse.json()) as {
+      id?: string
+      status?: string
+      assertions?: Array<{ passed?: boolean }>
+    } | null
+    if (!execution?.id) throw new Error("Jarvis replay fixture could not be executed")
+    const targets = [...clients.values()].filter((state) => state.protocol === 2 && (state.protocolMinor ?? 0) >= 7)
+    for (const state of targets) {
+      for (const event of replay.events) {
+        sendState(state, {
+          type: "jarvis.replay.fixture",
+          replayID,
+          event: {
+            type: event.type ?? "unknown",
+            timestamp: event.timestamp ?? Date.now(),
+            data: event.data ?? {},
+          },
+        })
+      }
+      sendState(state, { type: "jarvis.replay.fixture.done", replayID, executionID: execution.id })
+    }
+    return {
+      executionID: execution.id,
+      status: execution.status ?? "completed",
+      passed: execution.assertions?.every((assertion) => assertion.passed === true) ?? false,
+      deliveredClients: targets.length,
+    }
+  }
+
   return {
     url,
     token,
@@ -1797,6 +2265,7 @@ function gameContext(state: ClientState, query: string) {
     cancelPairing() {
       pairing.cancel()
     },
+    executeReplayFixture,
     speakSession,
     revokeDevice: async (id: string) => {
       const revoked = await persistent.revokeDevice(id)
@@ -2270,6 +2739,30 @@ function inferSpeechEmotion(text: string) {
   if (/\b(шкода|сумно|sorry|sad)\b/iu.test(text)) return "concerned"
   if (/\?|\b(можливо|perhaps|maybe)\b/iu.test(text)) return "thoughtful"
   return "neutral"
+}
+
+function speechGesture(text: string) {
+  if (/\b(привіт|вітаю|hello|hi)\b/iu.test(text)) return "wave"
+  if (/\b(так|звісно|yes|correct|agreed)\b/iu.test(text)) return "nod"
+  if (/\b(це|ось|там|here|there|look)\b/iu.test(text)) return "point"
+  return undefined
+}
+
+function speechSentences(text: string) {
+  const chunks = text
+    .split(/(?<=[.!?…])\s+(?=[\p{Lu}\p{Lt}\p{N}«“"'])/u)
+    .flatMap((sentence) =>
+      sentence.length <= 280
+        ? [sentence]
+        : sentence.split(/(?<=[,;:])\s+/u).reduce<string[]>((result, part) => {
+            const last = result.at(-1)
+            if (!last || last.length + part.length + 1 > 280) return [...result, part]
+            return [...result.slice(0, -1), `${last} ${part}`]
+          }, []),
+    )
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => sentence.length > 0)
+  return chunks.length > 0 ? chunks : [text]
 }
 
 function isStepStatus(value: unknown): value is "pending" | "active" | "completed" | "failed" | "skipped" {

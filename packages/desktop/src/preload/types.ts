@@ -146,6 +146,17 @@ export type ResearchBrowserStatus = {
   message?: string
 }
 
+export type GoogleCompanionStatus = {
+  available: boolean
+  phase: "unavailable" | "disconnected" | "connecting" | "connected" | "expired" | "error"
+  accountID?: string
+  email?: string
+  scopes: string[]
+  writeScopes: string[]
+  checkedAt: number
+  error?: string
+}
+
 export type AvatarBridgeStatus = {
   available: boolean
   protocol: number
@@ -162,7 +173,7 @@ export type AvatarBridgeStatus = {
     characterID: string
     sessionID?: string
     profileID?: string
-    surface: "desktop" | "unity"
+    surface: "desktop" | "unity-editor" | "pcvr" | "quest"
     state: "idle" | "listening" | "thinking" | "planning" | "responding" | "speaking" | "acting" | "uncertain" | "error"
     emotion: string
     intensity: number
@@ -395,6 +406,11 @@ export type ElectronAPI = {
   getResearchBrowserStatus: () => Promise<ResearchBrowserStatus>
   showResearchBrowser: () => Promise<void>
   clearResearchBrowserData: () => Promise<void>
+  getGoogleCompanionStatus: () => Promise<GoogleCompanionStatus>
+  importGoogleOAuthClient: () => Promise<GoogleCompanionStatus>
+  connectGoogleCompanion: (writeScopes?: string[]) => Promise<GoogleCompanionStatus>
+  testGoogleCompanion: () => Promise<GoogleCompanionStatus>
+  disconnectGoogleCompanion: () => Promise<GoogleCompanionStatus>
   getAvatarBridgeStatus: () => Promise<AvatarBridgeStatus>
   routeAvatarSpeech: (sessionID: string, text: string) => Promise<boolean>
   selectAvatarModel: () => Promise<{ name: string; bytes: number; updatedAt: number } | null>
@@ -425,6 +441,12 @@ export type ElectronAPI = {
   startAvatarBridgePairing: () => Promise<NonNullable<NonNullable<AvatarBridgeStatus["lan"]>["pairing"]>>
   cancelAvatarBridgePairing: () => Promise<void>
   retryAvatarBridgeSync: () => Promise<void>
+  executeJarvisReplayFixture: (replayID: string) => Promise<{
+    executionID: string
+    status: string
+    passed: boolean
+    deliveredClients: number
+  }>
   revokeAvatarBridgeDevice: (id: string) => Promise<void>
   resolveAvatarBridgeApproval: (id: string, approved: boolean) => Promise<boolean>
   deleteAvatarBridgeMemory: (id: string) => Promise<void>

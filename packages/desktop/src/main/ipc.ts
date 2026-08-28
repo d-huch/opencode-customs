@@ -9,6 +9,7 @@ import { parseDesktopNativeBundle, type DesktopNativeBundle } from "@opencode-ai
 import type {
   AvatarBridgeStatus,
   FatalRendererError,
+  GoogleCompanionStatus,
   ResearchBrowserStatus,
   ServerReadyData,
   TitlebarTheme,
@@ -88,6 +89,11 @@ type Deps = {
   getResearchBrowserStatus: () => ResearchBrowserStatus
   showResearchBrowser: () => Promise<void>
   clearResearchBrowserData: () => Promise<void>
+  getGoogleCompanionStatus: () => GoogleCompanionStatus
+  importGoogleOAuthClient: () => Promise<GoogleCompanionStatus>
+  connectGoogleCompanion: (writeScopes?: string[]) => Promise<GoogleCompanionStatus>
+  testGoogleCompanion: () => Promise<GoogleCompanionStatus>
+  disconnectGoogleCompanion: () => Promise<GoogleCompanionStatus>
   getAvatarBridgeStatus: () => AvatarBridgeStatus
   routeAvatarSpeech: (sessionID: string, text: string) => Promise<boolean>
   updateAvatarBridgeConfig: (input: {
@@ -110,6 +116,12 @@ type Deps = {
   startAvatarBridgePairing: () => unknown
   cancelAvatarBridgePairing: () => unknown
   retryAvatarBridgeSync: () => unknown
+  executeJarvisReplayFixture: (replayID: string) => Promise<{
+    executionID: string
+    status: string
+    passed: boolean
+    deliveredClients: number
+  }>
   revokeAvatarBridgeDevice: (id: string) => Promise<unknown>
   resolveAvatarBridgeApproval: (id: string, approved: boolean) => boolean
   deleteAvatarBridgeMemory: (id: string) => Promise<unknown>
@@ -186,6 +198,11 @@ export function registerIpcHandlers(deps: Deps) {
   ipcMain.handle("get-research-browser-status", () => deps.getResearchBrowserStatus())
   ipcMain.handle("show-research-browser", () => deps.showResearchBrowser())
   ipcMain.handle("clear-research-browser-data", () => deps.clearResearchBrowserData())
+  ipcMain.handle("get-google-companion-status", () => deps.getGoogleCompanionStatus())
+  ipcMain.handle("import-google-oauth-client", () => deps.importGoogleOAuthClient())
+  ipcMain.handle("connect-google-companion", (_event, writeScopes?: string[]) => deps.connectGoogleCompanion(writeScopes))
+  ipcMain.handle("test-google-companion", () => deps.testGoogleCompanion())
+  ipcMain.handle("disconnect-google-companion", () => deps.disconnectGoogleCompanion())
   ipcMain.handle("get-avatar-bridge-status", () => deps.getAvatarBridgeStatus())
   ipcMain.handle("get-nemotron-voice-status", () => deps.getNemotronVoiceStatus())
   ipcMain.handle("configure-nemotron-voice", (_event, input: { engine: NemotronVoiceEngine; systemPrompt?: string }) =>
@@ -241,6 +258,10 @@ export function registerIpcHandlers(deps: Deps) {
   ipcMain.handle("start-avatar-bridge-pairing", () => deps.startAvatarBridgePairing())
   ipcMain.handle("cancel-avatar-bridge-pairing", () => deps.cancelAvatarBridgePairing())
   ipcMain.handle("retry-avatar-bridge-sync", () => deps.retryAvatarBridgeSync())
+  ipcMain.handle("execute-jarvis-replay-fixture", (_event: IpcMainInvokeEvent, replayID: string) => {
+    if (!replayID || replayID.length > 256) throw new Error("Invalid Jarvis replay ID")
+    return deps.executeJarvisReplayFixture(replayID)
+  })
   ipcMain.handle("revoke-avatar-bridge-device", (_event: IpcMainInvokeEvent, id: string) =>
     deps.revokeAvatarBridgeDevice(id),
   )

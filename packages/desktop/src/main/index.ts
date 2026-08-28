@@ -6,7 +6,7 @@ import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import { getCACertificates, setDefaultCACertificates } from "node:tls"
 import type { Event } from "electron"
-import { app, BrowserWindow } from "electron"
+import { app, BrowserWindow, dialog } from "electron"
 
 import { Deferred, Effect, Fiber } from "effect"
 import contextMenu from "electron-context-menu"
@@ -61,6 +61,7 @@ import { startAvatarBridge, type AvatarBridgeController } from "./avatar-bridge"
 import { startPCMRecognition } from "./native-voice"
 import { synthesizeLocalSpeech } from "./local-tts"
 import { createNemotronVoiceController, type NemotronVoiceController } from "./nemotron-voice"
+import { startGoogleCompanion, type GoogleCompanionController } from "./google-companion"
 
 const APP_NAMES: Record<string, string> = {
   dev: "OpenCode Dev",
@@ -81,6 +82,7 @@ let server: SidecarListener | null = null
 let researchBrowser: ResearchBrowserController | undefined
 let avatarBridge: AvatarBridgeController | undefined
 let nemotronVoice: NemotronVoiceController | undefined
+let googleCompanion: GoogleCompanionController | undefined
 
 const pendingDeepLinks: string[] = []
 
@@ -187,6 +189,8 @@ const main = Effect.gen(function* () {
     avatarBridge = undefined
     await nemotronVoice?.stop()
     nemotronVoice = undefined
+    await googleCompanion?.stop()
+    googleCompanion = undefined
     wslServers.stopAll()
   }
   const relaunch = () => {
@@ -288,6 +292,20 @@ const main = Effect.gen(function* () {
     process.env.OPENCODE_RESEARCH_BROWSER_URL = researchBrowser.url
     process.env.OPENCODE_RESEARCH_BROWSER_TOKEN = researchBrowser.token
   }
+  googleCompanion = yield* Effect.promise(() =>
+    startGoogleCompanion({ stateDirectory: join(app.getPath("userData"), "google-companion"), log: writeLog }),
+  ).pipe(
+    Effect.catch((error) =>
+      Effect.sync(() => {
+        logger.warn("failed to start Google Companion bridge", error)
+        return undefined
+      }),
+    ),
+  )
+  if (googleCompanion) {
+    process.env.OPENCODE_GOOGLE_COMPANION_URL = googleCompanion.url
+    process.env.OPENCODE_GOOGLE_COMPANION_TOKEN = googleCompanion.token
+  }
   nemotronVoice = createNemotronVoiceController({
     stateDirectory: join(app.getPath("userData"), "nemotron-voice"),
     log: writeLog,
@@ -376,6 +394,24 @@ const main = Effect.gen(function* () {
       },
     showResearchBrowser: () => researchBrowser?.show() ?? Promise.reject(new Error("Research Browser is unavailable")),
     clearResearchBrowserData: () => researchBrowser?.clear() ?? Promise.resolve(),
+    getGoogleCompanionStatus: () =>
+      googleCompanion?.status() ?? {
+        available: false,
+        phase: "unavailable",
+        scopes: [],
+        writeScopes: [],
+        checkedAt: Date.now(),
+        error: "Google Companion is unavailable",
+      },
+    importGoogleOAuthClient: async () => {
+      if (!googleCompanion) throw new Error("Google Companion is unavailable")
+      const result = await dialog.showOpenDialog({ properties: ["openFile"], filters: [{ name: "Google OAuth JSON", extensions: ["json"] }] })
+      if (result.canceled || !result.filePaths[0]) return googleCompanion.status()
+      return googleCompanion.importClient(result.filePaths[0])
+    },
+    connectGoogleCompanion: (writeScopes) => googleCompanion?.connect(writeScopes) ?? Promise.reject(new Error("Google Companion is unavailable")),
+    testGoogleCompanion: () => googleCompanion?.test() ?? Promise.reject(new Error("Google Companion is unavailable")),
+    disconnectGoogleCompanion: () => googleCompanion?.disconnect() ?? Promise.reject(new Error("Google Companion is unavailable")),
     getAvatarBridgeStatus: () =>
       avatarBridge?.status() ?? {
         available: false,
@@ -396,6 +432,8 @@ const main = Effect.gen(function* () {
     },
     retryAvatarBridgeSync: () =>
       avatarBridge?.retrySync() ?? Promise.reject(new Error("Unity Avatar Bridge is unavailable")),
+    executeJarvisReplayFixture: (replayID) =>
+      avatarBridge?.executeReplayFixture(replayID) ?? Promise.reject(new Error("Unity Avatar Bridge is unavailable")),
     revokeAvatarBridgeDevice: (id) =>
       avatarBridge?.revokeDevice(id) ?? Promise.reject(new Error("Unity Avatar Bridge is unavailable")),
     resolveAvatarBridgeApproval: (id, approved) => avatarBridge?.resolveApproval(id, approved) ?? false,

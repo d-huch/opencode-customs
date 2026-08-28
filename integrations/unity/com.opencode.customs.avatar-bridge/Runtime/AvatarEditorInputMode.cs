@@ -146,6 +146,14 @@ namespace OpenCode.Customs.AvatarBridge
             EnsureEditorRigHeight();
             var position = xrOrigin.InverseTransformPoint(head.position);
             var rotation = Quaternion.Inverse(xrOrigin.rotation) * head.rotation;
+            if (!hasStableSimulatorPose && position.y < 0.5f)
+            {
+                stableHeadHeight = standingHeadHeight;
+                CaptureSimulatorPose(new Vector3(position.x, standingHeadHeight, position.z), rotation);
+                RestoreSimulatorPose(stableHeadPosition, stableHeadRotation);
+                RestoreCollapsedSimulatorControllers();
+                return;
+            }
             var resetPosition = Mathf.Abs(position.x) < 0.02f && Mathf.Abs(position.z) < 0.02f &&
                 (position.y < 0.5f || Mathf.Abs(position.y - standingHeadHeight) < 0.08f);
             var resetRotation = Quaternion.Angle(rotation, Quaternion.identity) < 1f;

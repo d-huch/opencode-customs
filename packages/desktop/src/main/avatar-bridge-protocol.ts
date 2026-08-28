@@ -1,6 +1,6 @@
 export const AVATAR_BRIDGE_PROTOCOL = 2
-export const AVATAR_BRIDGE_PROTOCOL_MINOR = 5
-export const AVATAR_BRIDGE_VERSION = "2.5"
+export const AVATAR_BRIDGE_PROTOCOL_MINOR = 7
+export const AVATAR_BRIDGE_VERSION = "2.7"
 export const AVATAR_BRIDGE_PROTOCOLS = [1, 2] as const
 export const AVATAR_ACTIONS = [
   "animation.trigger",
@@ -26,11 +26,33 @@ export type AvatarPresentationState =
   | "uncertain"
   | "error"
 
+export type JarvisSurface = "desktop" | "unity-editor" | "pcvr" | "quest"
+
+export type JarvisTurnPhase =
+  | "listening"
+  | "transcribing"
+  | "understanding"
+  | "planning"
+  | "responding"
+  | "speaking"
+  | "acting"
+  | "completed"
+  | "cancelled"
+  | "error"
+
+export type JarvisPresentationCue = {
+  emotion: string
+  intensity: number
+  gestureHint?: string
+  gazeTarget?: string
+  expectedDurationMs?: number
+}
+
 export type JarvisPresence = {
   characterID: string
   sessionID?: string
   profileID?: string
-  surface: "desktop" | "unity"
+  surface: JarvisSurface
   state: AvatarPresentationState
   emotion: string
   intensity: number
@@ -163,6 +185,7 @@ export type AvatarHello = {
   resumeSequence?: number
   profileID?: string
   profileRevision?: number
+  surface?: Exclude<JarvisSurface, "desktop">
 }
 
 export type AvatarTranscript = {
@@ -360,10 +383,12 @@ function parseHello(value: Record<string, unknown>): AvatarHello | undefined {
   const protocolMinor = value.protocolMinor === undefined ? undefined : value.protocolMinor
   const profileID = optionalString(value.profileID, 128)
   const profileRevision = value.profileRevision === undefined ? undefined : value.profileRevision
+  const surface = value.surface === undefined ? undefined : value.surface
   if ([sessionID, gameID, saveSlotID, profileID].includes(invalid)) return
   if (resumeSequence !== undefined && !integer(resumeSequence, 0, Number.MAX_SAFE_INTEGER)) return
   if (protocolMinor !== undefined && !integer(protocolMinor, 0, 99)) return
   if (profileRevision !== undefined && !integer(profileRevision, 0, Number.MAX_SAFE_INTEGER)) return
+  if (surface !== undefined && surface !== "unity-editor" && surface !== "pcvr" && surface !== "quest") return
   const model = parseModel(value.model)
   const voice = parseVoice(value.voice)
   if (model === invalid || voice === invalid) return
@@ -383,6 +408,7 @@ function parseHello(value: Record<string, unknown>): AvatarHello | undefined {
     ...(typeof resumeSequence === "number" ? { resumeSequence } : {}),
     ...(typeof profileID === "string" ? { profileID } : {}),
     ...(typeof profileRevision === "number" ? { profileRevision } : {}),
+    ...(typeof surface === "string" ? { surface } : {}),
   }
 }
 

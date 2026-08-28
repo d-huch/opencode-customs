@@ -1,9 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "96a6a284-459c-4731-85cd-0449faadcf92",
+  "id": "d484243d-11c6-4eca-9fab-c45d45d2f0a8",
   "prevIds": [
-    "33c92ed2-236e-4a2c-96ae-4500d15f82b7"
+    "cc9976e4-88c6-4063-9d4d-7a7df3b78c1e"
   ],
   "ddl": [
     {
@@ -15,7 +15,31 @@
       "entityType": "tables"
     },
     {
+      "name": "jarvis_companion_action_execution",
+      "entityType": "tables"
+    },
+    {
+      "name": "jarvis_companion_action",
+      "entityType": "tables"
+    },
+    {
+      "name": "jarvis_companion_config",
+      "entityType": "tables"
+    },
+    {
       "name": "jarvis_config",
+      "entityType": "tables"
+    },
+    {
+      "name": "jarvis_conversation",
+      "entityType": "tables"
+    },
+    {
+      "name": "jarvis_daily_briefing_run",
+      "entityType": "tables"
+    },
+    {
+      "name": "jarvis_daily_briefing",
       "entityType": "tables"
     },
     {
@@ -27,7 +51,19 @@
       "entityType": "tables"
     },
     {
+      "name": "jarvis_media_state",
+      "entityType": "tables"
+    },
+    {
       "name": "jarvis_memory",
+      "entityType": "tables"
+    },
+    {
+      "name": "jarvis_memory_tombstone",
+      "entityType": "tables"
+    },
+    {
+      "name": "jarvis_memory_use",
       "entityType": "tables"
     },
     {
@@ -35,7 +71,23 @@
       "entityType": "tables"
     },
     {
+      "name": "jarvis_presence",
+      "entityType": "tables"
+    },
+    {
       "name": "jarvis_profile",
+      "entityType": "tables"
+    },
+    {
+      "name": "jarvis_replay_execution",
+      "entityType": "tables"
+    },
+    {
+      "name": "jarvis_replay",
+      "entityType": "tables"
+    },
+    {
+      "name": "jarvis_turn",
       "entityType": "tables"
     },
     {
@@ -215,6 +267,236 @@
       "table": "data_migration"
     },
     {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "jarvis_companion_action_execution"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "proposal_id",
+      "entityType": "columns",
+      "table": "jarvis_companion_action_execution"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "status",
+      "entityType": "columns",
+      "table": "jarvis_companion_action_execution"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "result",
+      "entityType": "columns",
+      "table": "jarvis_companion_action_execution"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "error",
+      "entityType": "columns",
+      "table": "jarvis_companion_action_execution"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_created",
+      "entityType": "columns",
+      "table": "jarvis_companion_action_execution"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_updated",
+      "entityType": "columns",
+      "table": "jarvis_companion_action_execution"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "jarvis_companion_action"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "briefing_id",
+      "entityType": "columns",
+      "table": "jarvis_companion_action"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "kind",
+      "entityType": "columns",
+      "table": "jarvis_companion_action"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "title",
+      "entityType": "columns",
+      "table": "jarvis_companion_action"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "preview",
+      "entityType": "columns",
+      "table": "jarvis_companion_action"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "access",
+      "entityType": "columns",
+      "table": "jarvis_companion_action"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "input",
+      "entityType": "columns",
+      "table": "jarvis_companion_action"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "required_scopes",
+      "entityType": "columns",
+      "table": "jarvis_companion_action"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "idempotency_key",
+      "entityType": "columns",
+      "table": "jarvis_companion_action"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "external_revision",
+      "entityType": "columns",
+      "table": "jarvis_companion_action"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "status",
+      "entityType": "columns",
+      "table": "jarvis_companion_action"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_created",
+      "entityType": "columns",
+      "table": "jarvis_companion_action"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_updated",
+      "entityType": "columns",
+      "table": "jarvis_companion_action"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "jarvis_companion_config"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "data",
+      "entityType": "columns",
+      "table": "jarvis_companion_config"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_updated",
+      "entityType": "columns",
+      "table": "jarvis_companion_config"
+    },
+    {
       "type": "integer",
       "notNull": false,
       "autoincrement": false,
@@ -243,6 +525,246 @@
       "name": "time_updated",
       "entityType": "columns",
       "table": "jarvis_config"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "jarvis_conversation"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "session_id",
+      "entityType": "columns",
+      "table": "jarvis_conversation"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "profile_id",
+      "entityType": "columns",
+      "table": "jarvis_conversation"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "profile_revision",
+      "entityType": "columns",
+      "table": "jarvis_conversation"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "recovered_at",
+      "entityType": "columns",
+      "table": "jarvis_conversation"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_updated",
+      "entityType": "columns",
+      "table": "jarvis_conversation"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "jarvis_daily_briefing_run"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "briefing_id",
+      "entityType": "columns",
+      "table": "jarvis_daily_briefing_run"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "trigger",
+      "entityType": "columns",
+      "table": "jarvis_daily_briefing_run"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "status",
+      "entityType": "columns",
+      "table": "jarvis_daily_briefing_run"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "local_date",
+      "entityType": "columns",
+      "table": "jarvis_daily_briefing_run"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "account_id",
+      "entityType": "columns",
+      "table": "jarvis_daily_briefing_run"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "source_counts",
+      "entityType": "columns",
+      "table": "jarvis_daily_briefing_run"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "error",
+      "entityType": "columns",
+      "table": "jarvis_daily_briefing_run"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "started_at",
+      "entityType": "columns",
+      "table": "jarvis_daily_briefing_run"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "completed_at",
+      "entityType": "columns",
+      "table": "jarvis_daily_briefing_run"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "jarvis_daily_briefing"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "local_date",
+      "entityType": "columns",
+      "table": "jarvis_daily_briefing"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "account_id",
+      "entityType": "columns",
+      "table": "jarvis_daily_briefing"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "session_id",
+      "entityType": "columns",
+      "table": "jarvis_daily_briefing"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "status",
+      "entityType": "columns",
+      "table": "jarvis_daily_briefing"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "data",
+      "entityType": "columns",
+      "table": "jarvis_daily_briefing"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_created",
+      "entityType": "columns",
+      "table": "jarvis_daily_briefing"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_updated",
+      "entityType": "columns",
+      "table": "jarvis_daily_briefing"
     },
     {
       "type": "text",
@@ -482,6 +1004,86 @@
       "generated": null,
       "name": "id",
       "entityType": "columns",
+      "table": "jarvis_media_state"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "turn_id",
+      "entityType": "columns",
+      "table": "jarvis_media_state"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "owner",
+      "entityType": "columns",
+      "table": "jarvis_media_state"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "state",
+      "entityType": "columns",
+      "table": "jarvis_media_state"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "queued_sentences",
+      "entityType": "columns",
+      "table": "jarvis_media_state"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "active_jobs",
+      "entityType": "columns",
+      "table": "jarvis_media_state"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "acknowledged_cancellation",
+      "entityType": "columns",
+      "table": "jarvis_media_state"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_updated",
+      "entityType": "columns",
+      "table": "jarvis_media_state"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
       "table": "jarvis_memory"
     },
     {
@@ -670,6 +1272,106 @@
       "autoincrement": false,
       "default": null,
       "generated": null,
+      "name": "source_id",
+      "entityType": "columns",
+      "table": "jarvis_memory_tombstone"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_created",
+      "entityType": "columns",
+      "table": "jarvis_memory_tombstone"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "jarvis_memory_use"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "turn_id",
+      "entityType": "columns",
+      "table": "jarvis_memory_use"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "memory_id",
+      "entityType": "columns",
+      "table": "jarvis_memory_use"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "rank",
+      "entityType": "columns",
+      "table": "jarvis_memory_use"
+    },
+    {
+      "type": "real",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "lexical_score",
+      "entityType": "columns",
+      "table": "jarvis_memory_use"
+    },
+    {
+      "type": "real",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "semantic_score",
+      "entityType": "columns",
+      "table": "jarvis_memory_use"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "reason",
+      "entityType": "columns",
+      "table": "jarvis_memory_use"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_created",
+      "entityType": "columns",
+      "table": "jarvis_memory_use"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
       "name": "id",
       "entityType": "columns",
       "table": "jarvis_plan_step"
@@ -775,6 +1477,36 @@
       "table": "jarvis_plan_step"
     },
     {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "jarvis_presence"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "data",
+      "entityType": "columns",
+      "table": "jarvis_presence"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_updated",
+      "entityType": "columns",
+      "table": "jarvis_presence"
+    },
+    {
       "type": "text",
       "notNull": false,
       "autoincrement": false,
@@ -843,6 +1575,336 @@
       "name": "time_updated",
       "entityType": "columns",
       "table": "jarvis_profile"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "jarvis_replay_execution"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "replay_id",
+      "entityType": "columns",
+      "table": "jarvis_replay_execution"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "status",
+      "entityType": "columns",
+      "table": "jarvis_replay_execution"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "true",
+      "generated": null,
+      "name": "fixture_only",
+      "entityType": "columns",
+      "table": "jarvis_replay_execution"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "assertions",
+      "entityType": "columns",
+      "table": "jarvis_replay_execution"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "metrics",
+      "entityType": "columns",
+      "table": "jarvis_replay_execution"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "error",
+      "entityType": "columns",
+      "table": "jarvis_replay_execution"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_created",
+      "entityType": "columns",
+      "table": "jarvis_replay_execution"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_updated",
+      "entityType": "columns",
+      "table": "jarvis_replay_execution"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "jarvis_replay"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "turn_id",
+      "entityType": "columns",
+      "table": "jarvis_replay"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "session_id",
+      "entityType": "columns",
+      "table": "jarvis_replay"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "surface",
+      "entityType": "columns",
+      "table": "jarvis_replay"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "status",
+      "entityType": "columns",
+      "table": "jarvis_replay"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "events",
+      "entityType": "columns",
+      "table": "jarvis_replay"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "metrics",
+      "entityType": "columns",
+      "table": "jarvis_replay"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "error",
+      "entityType": "columns",
+      "table": "jarvis_replay"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_created",
+      "entityType": "columns",
+      "table": "jarvis_replay"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_updated",
+      "entityType": "columns",
+      "table": "jarvis_replay"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "jarvis_turn"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "request_id",
+      "entityType": "columns",
+      "table": "jarvis_turn"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "session_id",
+      "entityType": "columns",
+      "table": "jarvis_turn"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "profile_id",
+      "entityType": "columns",
+      "table": "jarvis_turn"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "surface",
+      "entityType": "columns",
+      "table": "jarvis_turn"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "response_mode",
+      "entityType": "columns",
+      "table": "jarvis_turn"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "phase",
+      "entityType": "columns",
+      "table": "jarvis_turn"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "sequence",
+      "entityType": "columns",
+      "table": "jarvis_turn"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "presentation",
+      "entityType": "columns",
+      "table": "jarvis_turn"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "metrics",
+      "entityType": "columns",
+      "table": "jarvis_turn"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "error",
+      "entityType": "columns",
+      "table": "jarvis_turn"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "cancel_reason",
+      "entityType": "columns",
+      "table": "jarvis_turn"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_created",
+      "entityType": "columns",
+      "table": "jarvis_turn"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_updated",
+      "entityType": "columns",
+      "table": "jarvis_turn"
     },
     {
       "type": "text",
@@ -2646,6 +3708,21 @@
     },
     {
       "columns": [
+        "turn_id"
+      ],
+      "tableTo": "jarvis_turn",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_jarvis_memory_use_turn_id_jarvis_turn_id_fk",
+      "entityType": "fks",
+      "table": "jarvis_memory_use"
+    },
+    {
+      "columns": [
         "goal_id"
       ],
       "tableTo": "jarvis_goal",
@@ -2907,8 +3984,62 @@
         "id"
       ],
       "nameExplicit": false,
+      "name": "jarvis_companion_action_execution_pk",
+      "table": "jarvis_companion_action_execution",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "jarvis_companion_action_pk",
+      "table": "jarvis_companion_action",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "jarvis_companion_config_pk",
+      "table": "jarvis_companion_config",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
       "name": "jarvis_config_pk",
       "table": "jarvis_config",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "jarvis_conversation_pk",
+      "table": "jarvis_conversation",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "jarvis_daily_briefing_run_pk",
+      "table": "jarvis_daily_briefing_run",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "jarvis_daily_briefing_pk",
+      "table": "jarvis_daily_briefing",
       "entityType": "pks"
     },
     {
@@ -2934,8 +4065,35 @@
         "id"
       ],
       "nameExplicit": false,
+      "name": "jarvis_media_state_pk",
+      "table": "jarvis_media_state",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
       "name": "jarvis_memory_pk",
       "table": "jarvis_memory",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "source_id"
+      ],
+      "nameExplicit": false,
+      "name": "jarvis_memory_tombstone_pk",
+      "table": "jarvis_memory_tombstone",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "jarvis_memory_use_pk",
+      "table": "jarvis_memory_use",
       "entityType": "pks"
     },
     {
@@ -2952,8 +4110,44 @@
         "id"
       ],
       "nameExplicit": false,
+      "name": "jarvis_presence_pk",
+      "table": "jarvis_presence",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
       "name": "jarvis_profile_pk",
       "table": "jarvis_profile",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "jarvis_replay_execution_pk",
+      "table": "jarvis_replay_execution",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "jarvis_replay_pk",
+      "table": "jarvis_replay",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "jarvis_turn_pk",
+      "table": "jarvis_turn",
       "entityType": "pks"
     },
     {
@@ -3103,6 +4297,98 @@
     {
       "columns": [
         {
+          "value": "proposal_id",
+          "isExpression": false
+        },
+        {
+          "value": "time_created",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "jarvis_companion_action_execution_proposal_idx",
+      "entityType": "indexes",
+      "table": "jarvis_companion_action_execution"
+    },
+    {
+      "columns": [
+        {
+          "value": "idempotency_key",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "jarvis_companion_action_idempotency_idx",
+      "entityType": "indexes",
+      "table": "jarvis_companion_action"
+    },
+    {
+      "columns": [
+        {
+          "value": "briefing_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "jarvis_companion_action_briefing_idx",
+      "entityType": "indexes",
+      "table": "jarvis_companion_action"
+    },
+    {
+      "columns": [
+        {
+          "value": "started_at",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "jarvis_daily_briefing_run_time_idx",
+      "entityType": "indexes",
+      "table": "jarvis_daily_briefing_run"
+    },
+    {
+      "columns": [
+        {
+          "value": "local_date",
+          "isExpression": false
+        },
+        {
+          "value": "account_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "jarvis_daily_briefing_day_account_idx",
+      "entityType": "indexes",
+      "table": "jarvis_daily_briefing"
+    },
+    {
+      "columns": [
+        {
+          "value": "time_created",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "jarvis_daily_briefing_time_idx",
+      "entityType": "indexes",
+      "table": "jarvis_daily_briefing"
+    },
+    {
+      "columns": [
+        {
           "value": "goal_id",
           "isExpression": false
         }
@@ -3203,6 +4489,42 @@
     {
       "columns": [
         {
+          "value": "turn_id",
+          "isExpression": false
+        },
+        {
+          "value": "memory_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "jarvis_memory_use_turn_memory_idx",
+      "entityType": "indexes",
+      "table": "jarvis_memory_use"
+    },
+    {
+      "columns": [
+        {
+          "value": "memory_id",
+          "isExpression": false
+        },
+        {
+          "value": "time_created",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "jarvis_memory_use_memory_idx",
+      "entityType": "indexes",
+      "table": "jarvis_memory_use"
+    },
+    {
+      "columns": [
+        {
           "value": "goal_id",
           "isExpression": false
         },
@@ -3231,6 +4553,98 @@
       "name": "jarvis_profile_primary_idx",
       "entityType": "indexes",
       "table": "jarvis_profile"
+    },
+    {
+      "columns": [
+        {
+          "value": "replay_id",
+          "isExpression": false
+        },
+        {
+          "value": "time_created",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "jarvis_replay_execution_replay_idx",
+      "entityType": "indexes",
+      "table": "jarvis_replay_execution"
+    },
+    {
+      "columns": [
+        {
+          "value": "turn_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "jarvis_replay_turn_idx",
+      "entityType": "indexes",
+      "table": "jarvis_replay"
+    },
+    {
+      "columns": [
+        {
+          "value": "time_created",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "jarvis_replay_time_idx",
+      "entityType": "indexes",
+      "table": "jarvis_replay"
+    },
+    {
+      "columns": [
+        {
+          "value": "request_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "jarvis_turn_request_idx",
+      "entityType": "indexes",
+      "table": "jarvis_turn"
+    },
+    {
+      "columns": [
+        {
+          "value": "session_id",
+          "isExpression": false
+        },
+        {
+          "value": "time_updated",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "jarvis_turn_session_time_idx",
+      "entityType": "indexes",
+      "table": "jarvis_turn"
+    },
+    {
+      "columns": [
+        {
+          "value": "phase",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "jarvis_turn_phase_idx",
+      "entityType": "indexes",
+      "table": "jarvis_turn"
     },
     {
       "columns": [

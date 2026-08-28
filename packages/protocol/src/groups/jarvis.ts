@@ -2,7 +2,90 @@ import { Jarvis } from "@opencode-ai/schema/jarvis"
 import { Schema } from "effect"
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 
+export { Jarvis }
+
 export const JarvisGroup = HttpApiGroup.make("server.jarvis")
+  .add(
+    HttpApiEndpoint.get("jarvis.conversation", "/api/jarvis/conversation", {
+      success: Jarvis.ConversationState,
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.jarvis.conversation", summary: "Get or recover the canonical Primary Jarvis session" })),
+  )
+  .add(
+    HttpApiEndpoint.post("jarvis.adoptConversation", "/api/jarvis/conversation/adopt", {
+      payload: Jarvis.ConversationAdopt,
+      success: Jarvis.ConversationState,
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.jarvis.adoptConversation", summary: "Atomically adopt or recover the canonical Jarvis session" })),
+  )
+  .add(
+    HttpApiEndpoint.post("jarvis.prewarm", "/api/jarvis/turns/prewarm", {
+      payload: Jarvis.PartialTranscript,
+      success: Jarvis.PrewarmState,
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.jarvis.prewarm", summary: "Prewarm a Jarvis turn without admitting a message" })),
+  )
+  .add(
+    HttpApiEndpoint.post("jarvis.admitFinal", "/api/jarvis/turns/admit", {
+      payload: Jarvis.FinalAdmission,
+      success: Jarvis.FinalAdmissionResult,
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.jarvis.admitFinal", summary: "Atomically admit a final transcript to the canonical Jarvis session" })),
+  )
+  .add(
+    HttpApiEndpoint.get("jarvis.controlStatus", "/api/jarvis/control", { success: Jarvis.ControlStatus }).annotateMerge(
+      OpenApi.annotations({ identifier: "v2.jarvis.controlStatus", summary: "Get aggregated Jarvis Live status" }),
+    ),
+  )
+  .add(
+    HttpApiEndpoint.post("jarvis.updateMediaState", "/api/jarvis/media", {
+      payload: Jarvis.MediaStateUpdate,
+      success: Jarvis.MediaState,
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.jarvis.updateMediaState", summary: "Update the live Jarvis media queue snapshot" })),
+  )
+  .add(
+    HttpApiEndpoint.post("jarvis.runDiagnostics", "/api/jarvis/diagnostics", { success: Jarvis.Diagnostics }).annotateMerge(
+      OpenApi.annotations({ identifier: "v2.jarvis.runDiagnostics", summary: "Run bounded Jarvis diagnostics" }),
+    ),
+  )
+  .add(
+    HttpApiEndpoint.post("jarvis.createTurn", "/api/jarvis/turns", {
+      payload: Jarvis.TurnCreate,
+      success: Jarvis.Turn,
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.jarvis.createTurn", summary: "Create or adopt an idempotent Jarvis turn" })),
+  )
+  .add(
+    HttpApiEndpoint.get("jarvis.currentTurn", "/api/jarvis/turns/current", {
+      success: Schema.NullOr(Jarvis.Turn),
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.jarvis.currentTurn", summary: "Get the latest Jarvis turn" })),
+  )
+  .add(
+    HttpApiEndpoint.get("jarvis.turn", "/api/jarvis/turns/:turnID", {
+      params: { turnID: Schema.String },
+      success: Schema.NullOr(Jarvis.Turn),
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.jarvis.turn", summary: "Get a Jarvis turn" })),
+  )
+  .add(
+    HttpApiEndpoint.patch("jarvis.updateTurn", "/api/jarvis/turns/:turnID", {
+      params: { turnID: Schema.String },
+      payload: Jarvis.TurnUpdate,
+      success: Schema.NullOr(Jarvis.Turn),
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.jarvis.updateTurn", summary: "Advance a Jarvis turn" })),
+  )
+  .add(
+    HttpApiEndpoint.post("jarvis.cancelTurn", "/api/jarvis/turns/:turnID/cancel", {
+      params: { turnID: Schema.String },
+      payload: Jarvis.TurnCancel,
+      success: Schema.NullOr(Jarvis.Turn),
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.jarvis.cancelTurn", summary: "Cancel a Jarvis turn" })),
+  )
+  .add(
+    HttpApiEndpoint.get("jarvis.presence", "/api/jarvis/presence", { success: Jarvis.Presence }).annotateMerge(
+      OpenApi.annotations({ identifier: "v2.jarvis.presence", summary: "Get Jarvis surface ownership" }),
+    ),
+  )
+  .add(
+    HttpApiEndpoint.post("jarvis.handoffPresence", "/api/jarvis/presence/handoff", {
+      payload: Jarvis.PresenceHandoff,
+      success: Jarvis.Presence,
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.jarvis.handoffPresence", summary: "Transfer Jarvis media ownership" })),
+  )
   .add(
     HttpApiEndpoint.get("jarvis.status", "/api/jarvis/status", { success: Jarvis.RuntimeStatus }).annotateMerge(
       OpenApi.annotations({
@@ -141,6 +224,65 @@ export const JarvisGroup = HttpApiGroup.make("server.jarvis")
     }).annotateMerge(OpenApi.annotations({ identifier: "v2.jarvis.reindexMemory", summary: "Schedule bounded Jarvis memory embedding backfill" })),
   )
   .add(
+    HttpApiEndpoint.get("jarvis.memoryUses", "/api/jarvis/memory/uses", {
+      query: Schema.Struct({
+        memoryID: Schema.optional(Schema.String),
+        turnID: Schema.optional(Schema.String),
+        limit: Schema.optional(Schema.NumberFromString),
+      }),
+      success: Schema.Array(Jarvis.MemoryUse),
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.jarvis.memoryUses", summary: "Explain Jarvis memory recall" })),
+  )
+  .add(
+    HttpApiEndpoint.post("jarvis.recordMemoryUse", "/api/jarvis/memory/uses", {
+      payload: Jarvis.MemoryUseCreate,
+      success: Jarvis.MemoryUse,
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.jarvis.recordMemoryUse", summary: "Record a Jarvis memory recall decision" })),
+  )
+  .add(
+    HttpApiEndpoint.get("jarvis.replays", "/api/jarvis/replays", {
+      query: Schema.Struct({ limit: Schema.optional(Schema.NumberFromString) }),
+      success: Schema.Array(Jarvis.ReplayRun),
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.jarvis.replays", summary: "List bounded Jarvis replay runs" })),
+  )
+  .add(
+    HttpApiEndpoint.post("jarvis.recordReplay", "/api/jarvis/replays", {
+      payload: Jarvis.ReplayCreate,
+      success: Jarvis.ReplayRun,
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.jarvis.recordReplay", summary: "Store a sanitized Jarvis replay run" })),
+  )
+  .add(
+    HttpApiEndpoint.get("jarvis.replay", "/api/jarvis/replays/:replayID", {
+      params: { replayID: Schema.String },
+      success: Schema.NullOr(Jarvis.ReplayRun),
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.jarvis.replay", summary: "Get a Jarvis replay run" })),
+  )
+  .add(
+    HttpApiEndpoint.delete("jarvis.removeReplay", "/api/jarvis/replays/:replayID", {
+      params: { replayID: Schema.String },
+      success: Jarvis.ReplayMutation,
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.jarvis.removeReplay", summary: "Delete a Jarvis replay run" })),
+  )
+  .add(
+    HttpApiEndpoint.post("jarvis.executeReplay", "/api/jarvis/replays/:replayID/execute", {
+      params: { replayID: Schema.String },
+      payload: Jarvis.ReplayExecute,
+      success: Schema.NullOr(Jarvis.ReplayExecution),
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.jarvis.executeReplay", summary: "Execute a Jarvis replay through fixture-only adapters" })),
+  )
+  .add(
+    HttpApiEndpoint.get("jarvis.replayExecution", "/api/jarvis/replay-executions/:executionID", {
+      params: { executionID: Schema.String },
+      success: Schema.NullOr(Jarvis.ReplayExecution),
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.jarvis.replayExecution", summary: "Get a Jarvis replay execution" })),
+  )
+  .add(
+    HttpApiEndpoint.post("jarvis.compareReplays", "/api/jarvis/replay-executions/compare", {
+      payload: Jarvis.ReplayCompare,
+      success: Schema.NullOr(Jarvis.ReplayComparison),
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.jarvis.compareReplays", summary: "Compare two Jarvis replay executions" })),
+  )
+  .add(
     HttpApiEndpoint.get("jarvis.inbox", "/api/jarvis/inbox", {
       success: Schema.Array(Jarvis.WakeCandidate),
     }).annotateMerge(OpenApi.annotations({ identifier: "v2.jarvis.inbox", summary: "List Primary Jarvis Inbox candidates" })),
@@ -162,6 +304,71 @@ export const JarvisGroup = HttpApiGroup.make("server.jarvis")
       params: { wakeID: Schema.String },
       success: Schema.NullOr(Jarvis.WakeCandidate),
     }).annotateMerge(OpenApi.annotations({ identifier: "v2.jarvis.retryInbox", summary: "Retry a blocked Jarvis Inbox item" })),
+  )
+  .add(
+    HttpApiEndpoint.get("jarvis.companionStatus", "/api/jarvis/companion/status", {
+      success: Jarvis.DailyCompanionStatus,
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.jarvis.companionStatus", summary: "Get Daily Companion status" })),
+  )
+  .add(
+    HttpApiEndpoint.get("jarvis.companionConfig", "/api/jarvis/companion/config", {
+      success: Jarvis.DailyCompanionConfig,
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.jarvis.companionConfig", summary: "Get Daily Companion configuration" })),
+  )
+  .add(
+    HttpApiEndpoint.put("jarvis.updateCompanionConfig", "/api/jarvis/companion/config", {
+      payload: Jarvis.DailyCompanionConfig,
+      success: Jarvis.DailyCompanionConfig,
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.jarvis.updateCompanionConfig", summary: "Update Daily Companion configuration" })),
+  )
+  .add(
+    HttpApiEndpoint.post("jarvis.runDailyBriefing", "/api/jarvis/companion/briefings/run", {
+      payload: Jarvis.DailyBriefingRunRequest,
+      success: Jarvis.DailyBriefingRun,
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.jarvis.runDailyBriefing", summary: "Run a bounded daily briefing" })),
+  )
+  .add(
+    HttpApiEndpoint.get("jarvis.dailyBriefings", "/api/jarvis/companion/briefings", {
+      query: Schema.Struct({ limit: Schema.optional(Schema.NumberFromString) }),
+      success: Schema.Array(Jarvis.DailyBriefing),
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.jarvis.dailyBriefings", summary: "List daily briefings" })),
+  )
+  .add(
+    HttpApiEndpoint.get("jarvis.dailyBriefing", "/api/jarvis/companion/briefings/:briefingID", {
+      params: { briefingID: Schema.String },
+      success: Schema.NullOr(Jarvis.DailyBriefing),
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.jarvis.dailyBriefing", summary: "Get a daily briefing" })),
+  )
+  .add(
+    HttpApiEndpoint.post("jarvis.prepareCompanionAction", "/api/jarvis/companion/actions", {
+      payload: Jarvis.CompanionActionPrepare,
+      success: Jarvis.CompanionActionProposal,
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.jarvis.prepareCompanionAction", summary: "Prepare a companion action for approval" })),
+  )
+  .add(
+    HttpApiEndpoint.get("jarvis.companionActions", "/api/jarvis/companion/actions", {
+      query: Schema.Struct({ limit: Schema.optional(Schema.NumberFromString) }),
+      success: Schema.Array(Jarvis.CompanionActionProposal),
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.jarvis.companionActions", summary: "List companion action proposals" })),
+  )
+  .add(
+    HttpApiEndpoint.post("jarvis.approveCompanionAction", "/api/jarvis/companion/actions/:actionID/approve", {
+      params: { actionID: Schema.String },
+      payload: Jarvis.CompanionActionApprove,
+      success: Schema.NullOr(Jarvis.CompanionActionExecution),
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.jarvis.approveCompanionAction", summary: "Approve one companion action" })),
+  )
+  .add(
+    HttpApiEndpoint.post("jarvis.cancelCompanionAction", "/api/jarvis/companion/actions/:actionID/cancel", {
+      params: { actionID: Schema.String },
+      success: Schema.NullOr(Jarvis.CompanionActionProposal),
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.jarvis.cancelCompanionAction", summary: "Cancel a prepared companion action" })),
+  )
+  .add(
+    HttpApiEndpoint.get("jarvis.companionActionAudit", "/api/jarvis/companion/actions/audit", {
+      query: Schema.Struct({ limit: Schema.optional(Schema.NumberFromString) }),
+      success: Schema.Array(Jarvis.CompanionActionExecution),
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.jarvis.companionActionAudit", summary: "List confirmed companion action executions" })),
   )
   .annotateMerge(
     OpenApi.annotations({

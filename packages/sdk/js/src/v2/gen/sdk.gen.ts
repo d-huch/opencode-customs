@@ -93,19 +93,35 @@ import type {
   InstanceDisposeErrors,
   InstanceDisposeResponses,
   JarvisBenchmarkRun,
+  JarvisCompanionActionApprove,
+  JarvisCompanionActionPrepare,
   JarvisConfig,
+  JarvisConversationAdopt,
+  JarvisDailyBriefingRunRequest,
+  JarvisDailyCompanionConfig,
+  JarvisFinalAdmission,
   JarvisGoalCancel,
   JarvisGoalCreate,
   JarvisGoalOutcomeCreate,
   JarvisGoalReplan,
   JarvisGoalResume,
   JarvisGoalStepResult,
+  JarvisMediaStateUpdate,
   JarvisMemoryConflictResolution,
   JarvisMemoryPatch,
   JarvisMemoryRecord,
   JarvisMemorySearch,
+  JarvisMemoryUseCreate,
+  JarvisPartialTranscript,
+  JarvisPresenceHandoff,
   JarvisProfileSync,
+  JarvisReplayCompare,
+  JarvisReplayCreate,
+  JarvisReplayExecute,
   JarvisSessionMetadata,
+  JarvisTurnCancel,
+  JarvisTurnCreate,
+  JarvisTurnUpdate,
   JarvisWakeCreate,
   LocationRef,
   LspStatusErrors,
@@ -331,40 +347,96 @@ import type {
   V2IntegrationGetResponses,
   V2IntegrationListErrors,
   V2IntegrationListResponses,
+  V2JarvisAdmitFinalErrors,
+  V2JarvisAdmitFinalResponses,
+  V2JarvisAdoptConversationErrors,
+  V2JarvisAdoptConversationResponses,
+  V2JarvisApproveCompanionActionErrors,
+  V2JarvisApproveCompanionActionResponses,
   V2JarvisBenchmarkStatusErrors,
   V2JarvisBenchmarkStatusResponses,
   V2JarvisCancelBenchmarkErrors,
   V2JarvisCancelBenchmarkResponses,
+  V2JarvisCancelCompanionActionErrors,
+  V2JarvisCancelCompanionActionResponses,
   V2JarvisCancelGoalErrors,
   V2JarvisCancelGoalResponses,
+  V2JarvisCancelTurnErrors,
+  V2JarvisCancelTurnResponses,
+  V2JarvisCompanionActionAuditErrors,
+  V2JarvisCompanionActionAuditResponses,
+  V2JarvisCompanionActionsErrors,
+  V2JarvisCompanionActionsResponses,
+  V2JarvisCompanionConfigErrors,
+  V2JarvisCompanionConfigResponses,
+  V2JarvisCompanionStatusErrors,
+  V2JarvisCompanionStatusResponses,
+  V2JarvisCompareReplaysErrors,
+  V2JarvisCompareReplaysResponses,
   V2JarvisCompleteGoalErrors,
   V2JarvisCompleteGoalResponses,
   V2JarvisConfigErrors,
   V2JarvisConfigResponses,
+  V2JarvisControlStatusErrors,
+  V2JarvisControlStatusResponses,
+  V2JarvisConversationErrors,
+  V2JarvisConversationResponses,
   V2JarvisCreateGoalErrors,
   V2JarvisCreateGoalResponses,
+  V2JarvisCreateTurnErrors,
+  V2JarvisCreateTurnResponses,
+  V2JarvisCurrentTurnErrors,
+  V2JarvisCurrentTurnResponses,
+  V2JarvisDailyBriefingErrors,
+  V2JarvisDailyBriefingResponses,
+  V2JarvisDailyBriefingsErrors,
+  V2JarvisDailyBriefingsResponses,
   V2JarvisDismissInboxErrors,
   V2JarvisDismissInboxResponses,
+  V2JarvisExecuteReplayErrors,
+  V2JarvisExecuteReplayResponses,
   V2JarvisGoalsErrors,
   V2JarvisGoalsResponses,
+  V2JarvisHandoffPresenceErrors,
+  V2JarvisHandoffPresenceResponses,
   V2JarvisInboxErrors,
   V2JarvisInboxResponses,
+  V2JarvisMemoryUsesErrors,
+  V2JarvisMemoryUsesResponses,
   V2JarvisOutcomesErrors,
   V2JarvisOutcomesResponses,
   V2JarvisPatchMemoryErrors,
   V2JarvisPatchMemoryResponses,
+  V2JarvisPrepareCompanionActionErrors,
+  V2JarvisPrepareCompanionActionResponses,
+  V2JarvisPresenceErrors,
+  V2JarvisPresenceResponses,
+  V2JarvisPrewarmErrors,
+  V2JarvisPrewarmResponses,
   V2JarvisProfilesErrors,
   V2JarvisProfilesResponses,
   V2JarvisRecordGoalStepErrors,
   V2JarvisRecordGoalStepResponses,
+  V2JarvisRecordMemoryUseErrors,
+  V2JarvisRecordMemoryUseResponses,
+  V2JarvisRecordReplayErrors,
+  V2JarvisRecordReplayResponses,
   V2JarvisReindexMemoryErrors,
   V2JarvisReindexMemoryResponses,
   V2JarvisRememberErrors,
   V2JarvisRememberResponses,
   V2JarvisRemoveMemoryErrors,
   V2JarvisRemoveMemoryResponses,
+  V2JarvisRemoveReplayErrors,
+  V2JarvisRemoveReplayResponses,
   V2JarvisReplanGoalErrors,
   V2JarvisReplanGoalResponses,
+  V2JarvisReplayErrors,
+  V2JarvisReplayExecutionErrors,
+  V2JarvisReplayExecutionResponses,
+  V2JarvisReplayResponses,
+  V2JarvisReplaysErrors,
+  V2JarvisReplaysResponses,
   V2JarvisResolveMemoryConflictErrors,
   V2JarvisResolveMemoryConflictResponses,
   V2JarvisResumeGoalErrors,
@@ -373,14 +445,26 @@ import type {
   V2JarvisRetryInboxResponses,
   V2JarvisRunBenchmarkErrors,
   V2JarvisRunBenchmarkResponses,
+  V2JarvisRunDailyBriefingErrors,
+  V2JarvisRunDailyBriefingResponses,
+  V2JarvisRunDiagnosticsErrors,
+  V2JarvisRunDiagnosticsResponses,
   V2JarvisSearchMemoryErrors,
   V2JarvisSearchMemoryResponses,
   V2JarvisStatusErrors,
   V2JarvisStatusResponses,
   V2JarvisSyncProfilesErrors,
   V2JarvisSyncProfilesResponses,
+  V2JarvisTurnErrors,
+  V2JarvisTurnResponses,
+  V2JarvisUpdateCompanionConfigErrors,
+  V2JarvisUpdateCompanionConfigResponses,
   V2JarvisUpdateConfigErrors,
   V2JarvisUpdateConfigResponses,
+  V2JarvisUpdateMediaStateErrors,
+  V2JarvisUpdateMediaStateResponses,
+  V2JarvisUpdateTurnErrors,
+  V2JarvisUpdateTurnResponses,
   V2JarvisWakeErrors,
   V2JarvisWakeResponses,
   V2LocationGetErrors,
@@ -7884,6 +7968,286 @@ export class RepositoryMap extends HeyApiClient {
 
 export class Jarvis extends HeyApiClient {
   /**
+   * Get or recover the canonical Primary Jarvis session
+   */
+  public conversation<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<
+      V2JarvisConversationResponses,
+      V2JarvisConversationErrors,
+      ThrowOnError
+    >({ url: "/api/jarvis/conversation", ...options })
+  }
+
+  /**
+   * Atomically adopt or recover the canonical Jarvis session
+   */
+  public adoptConversation<ThrowOnError extends boolean = false>(
+    parameters: {
+      jarvisConversationAdopt: JarvisConversationAdopt
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ key: "jarvisConversationAdopt", map: "body" }] }])
+    return (options?.client ?? this.client).post<
+      V2JarvisAdoptConversationResponses,
+      V2JarvisAdoptConversationErrors,
+      ThrowOnError
+    >({
+      url: "/api/jarvis/conversation/adopt",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Prewarm a Jarvis turn without admitting a message
+   */
+  public prewarm<ThrowOnError extends boolean = false>(
+    parameters: {
+      jarvisPartialTranscript: JarvisPartialTranscript
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ key: "jarvisPartialTranscript", map: "body" }] }])
+    return (options?.client ?? this.client).post<V2JarvisPrewarmResponses, V2JarvisPrewarmErrors, ThrowOnError>({
+      url: "/api/jarvis/turns/prewarm",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Atomically admit a final transcript to the canonical Jarvis session
+   */
+  public admitFinal<ThrowOnError extends boolean = false>(
+    parameters: {
+      jarvisFinalAdmission: JarvisFinalAdmission
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ key: "jarvisFinalAdmission", map: "body" }] }])
+    return (options?.client ?? this.client).post<V2JarvisAdmitFinalResponses, V2JarvisAdmitFinalErrors, ThrowOnError>({
+      url: "/api/jarvis/turns/admit",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Get aggregated Jarvis Live status
+   */
+  public controlStatus<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<
+      V2JarvisControlStatusResponses,
+      V2JarvisControlStatusErrors,
+      ThrowOnError
+    >({ url: "/api/jarvis/control", ...options })
+  }
+
+  /**
+   * Update the live Jarvis media queue snapshot
+   */
+  public updateMediaState<ThrowOnError extends boolean = false>(
+    parameters: {
+      jarvisMediaStateUpdate: JarvisMediaStateUpdate
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ key: "jarvisMediaStateUpdate", map: "body" }] }])
+    return (options?.client ?? this.client).post<
+      V2JarvisUpdateMediaStateResponses,
+      V2JarvisUpdateMediaStateErrors,
+      ThrowOnError
+    >({
+      url: "/api/jarvis/media",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Run bounded Jarvis diagnostics
+   */
+  public runDiagnostics<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).post<
+      V2JarvisRunDiagnosticsResponses,
+      V2JarvisRunDiagnosticsErrors,
+      ThrowOnError
+    >({ url: "/api/jarvis/diagnostics", ...options })
+  }
+
+  /**
+   * Create or adopt an idempotent Jarvis turn
+   */
+  public createTurn<ThrowOnError extends boolean = false>(
+    parameters: {
+      jarvisTurnCreate: JarvisTurnCreate
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ key: "jarvisTurnCreate", map: "body" }] }])
+    return (options?.client ?? this.client).post<V2JarvisCreateTurnResponses, V2JarvisCreateTurnErrors, ThrowOnError>({
+      url: "/api/jarvis/turns",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Get the latest Jarvis turn
+   */
+  public currentTurn<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<V2JarvisCurrentTurnResponses, V2JarvisCurrentTurnErrors, ThrowOnError>({
+      url: "/api/jarvis/turns/current",
+      ...options,
+    })
+  }
+
+  /**
+   * Get a Jarvis turn
+   */
+  public turn<ThrowOnError extends boolean = false>(
+    parameters: {
+      turnID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "turnID" }] }])
+    return (options?.client ?? this.client).get<V2JarvisTurnResponses, V2JarvisTurnErrors, ThrowOnError>({
+      url: "/api/jarvis/turns/{turnID}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Advance a Jarvis turn
+   */
+  public updateTurn<ThrowOnError extends boolean = false>(
+    parameters: {
+      turnID: string
+      jarvisTurnUpdate: JarvisTurnUpdate
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "turnID" },
+            { key: "jarvisTurnUpdate", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).patch<V2JarvisUpdateTurnResponses, V2JarvisUpdateTurnErrors, ThrowOnError>({
+      url: "/api/jarvis/turns/{turnID}",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Cancel a Jarvis turn
+   */
+  public cancelTurn<ThrowOnError extends boolean = false>(
+    parameters: {
+      turnID: string
+      jarvisTurnCancel: JarvisTurnCancel
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "turnID" },
+            { key: "jarvisTurnCancel", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<V2JarvisCancelTurnResponses, V2JarvisCancelTurnErrors, ThrowOnError>({
+      url: "/api/jarvis/turns/{turnID}/cancel",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Get Jarvis surface ownership
+   */
+  public presence<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<V2JarvisPresenceResponses, V2JarvisPresenceErrors, ThrowOnError>({
+      url: "/api/jarvis/presence",
+      ...options,
+    })
+  }
+
+  /**
+   * Transfer Jarvis media ownership
+   */
+  public handoffPresence<ThrowOnError extends boolean = false>(
+    parameters: {
+      jarvisPresenceHandoff: JarvisPresenceHandoff
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ key: "jarvisPresenceHandoff", map: "body" }] }])
+    return (options?.client ?? this.client).post<
+      V2JarvisHandoffPresenceResponses,
+      V2JarvisHandoffPresenceErrors,
+      ThrowOnError
+    >({
+      url: "/api/jarvis/presence/handoff",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
    * Get Jarvis runtime status
    *
    * Inspect the Primary Jarvis profile, local model roles, goals, Inbox, and memory diagnostics.
@@ -8399,6 +8763,227 @@ export class Jarvis extends HeyApiClient {
   }
 
   /**
+   * Explain Jarvis memory recall
+   */
+  public memoryUses<ThrowOnError extends boolean = false>(
+    parameters?: {
+      memoryID?: string
+      turnID?: string
+      limit?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "memoryID" },
+            { in: "query", key: "turnID" },
+            { in: "query", key: "limit" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<V2JarvisMemoryUsesResponses, V2JarvisMemoryUsesErrors, ThrowOnError>({
+      url: "/api/jarvis/memory/uses",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Record a Jarvis memory recall decision
+   */
+  public recordMemoryUse<ThrowOnError extends boolean = false>(
+    parameters: {
+      jarvisMemoryUseCreate: JarvisMemoryUseCreate
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ key: "jarvisMemoryUseCreate", map: "body" }] }])
+    return (options?.client ?? this.client).post<
+      V2JarvisRecordMemoryUseResponses,
+      V2JarvisRecordMemoryUseErrors,
+      ThrowOnError
+    >({
+      url: "/api/jarvis/memory/uses",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * List bounded Jarvis replay runs
+   */
+  public replays<ThrowOnError extends boolean = false>(
+    parameters?: {
+      limit?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "query", key: "limit" }] }])
+    return (options?.client ?? this.client).get<V2JarvisReplaysResponses, V2JarvisReplaysErrors, ThrowOnError>({
+      url: "/api/jarvis/replays",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Store a sanitized Jarvis replay run
+   */
+  public recordReplay<ThrowOnError extends boolean = false>(
+    parameters: {
+      jarvisReplayCreate: JarvisReplayCreate
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ key: "jarvisReplayCreate", map: "body" }] }])
+    return (options?.client ?? this.client).post<
+      V2JarvisRecordReplayResponses,
+      V2JarvisRecordReplayErrors,
+      ThrowOnError
+    >({
+      url: "/api/jarvis/replays",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Delete a Jarvis replay run
+   */
+  public removeReplay<ThrowOnError extends boolean = false>(
+    parameters: {
+      replayID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "replayID" }] }])
+    return (options?.client ?? this.client).delete<
+      V2JarvisRemoveReplayResponses,
+      V2JarvisRemoveReplayErrors,
+      ThrowOnError
+    >({
+      url: "/api/jarvis/replays/{replayID}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get a Jarvis replay run
+   */
+  public replay<ThrowOnError extends boolean = false>(
+    parameters: {
+      replayID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "replayID" }] }])
+    return (options?.client ?? this.client).get<V2JarvisReplayResponses, V2JarvisReplayErrors, ThrowOnError>({
+      url: "/api/jarvis/replays/{replayID}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Execute a Jarvis replay through fixture-only adapters
+   */
+  public executeReplay<ThrowOnError extends boolean = false>(
+    parameters: {
+      replayID: string
+      jarvisReplayExecute: JarvisReplayExecute
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "replayID" },
+            { key: "jarvisReplayExecute", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      V2JarvisExecuteReplayResponses,
+      V2JarvisExecuteReplayErrors,
+      ThrowOnError
+    >({
+      url: "/api/jarvis/replays/{replayID}/execute",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Get a Jarvis replay execution
+   */
+  public replayExecution<ThrowOnError extends boolean = false>(
+    parameters: {
+      executionID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "executionID" }] }])
+    return (options?.client ?? this.client).get<
+      V2JarvisReplayExecutionResponses,
+      V2JarvisReplayExecutionErrors,
+      ThrowOnError
+    >({
+      url: "/api/jarvis/replay-executions/{executionID}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Compare two Jarvis replay executions
+   */
+  public compareReplays<ThrowOnError extends boolean = false>(
+    parameters: {
+      jarvisReplayCompare: JarvisReplayCompare
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ key: "jarvisReplayCompare", map: "body" }] }])
+    return (options?.client ?? this.client).post<
+      V2JarvisCompareReplaysResponses,
+      V2JarvisCompareReplaysErrors,
+      ThrowOnError
+    >({
+      url: "/api/jarvis/replay-executions/compare",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
    * List Primary Jarvis Inbox candidates
    */
   public inbox<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
@@ -8463,6 +9048,248 @@ export class Jarvis extends HeyApiClient {
     const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "wakeID" }] }])
     return (options?.client ?? this.client).post<V2JarvisRetryInboxResponses, V2JarvisRetryInboxErrors, ThrowOnError>({
       url: "/api/jarvis/inbox/{wakeID}/retry",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get Daily Companion status
+   */
+  public companionStatus<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<
+      V2JarvisCompanionStatusResponses,
+      V2JarvisCompanionStatusErrors,
+      ThrowOnError
+    >({ url: "/api/jarvis/companion/status", ...options })
+  }
+
+  /**
+   * Get Daily Companion configuration
+   */
+  public companionConfig<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<
+      V2JarvisCompanionConfigResponses,
+      V2JarvisCompanionConfigErrors,
+      ThrowOnError
+    >({ url: "/api/jarvis/companion/config", ...options })
+  }
+
+  /**
+   * Update Daily Companion configuration
+   */
+  public updateCompanionConfig<ThrowOnError extends boolean = false>(
+    parameters: {
+      jarvisDailyCompanionConfig: JarvisDailyCompanionConfig
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ key: "jarvisDailyCompanionConfig", map: "body" }] }])
+    return (options?.client ?? this.client).put<
+      V2JarvisUpdateCompanionConfigResponses,
+      V2JarvisUpdateCompanionConfigErrors,
+      ThrowOnError
+    >({
+      url: "/api/jarvis/companion/config",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Run a bounded daily briefing
+   */
+  public runDailyBriefing<ThrowOnError extends boolean = false>(
+    parameters: {
+      jarvisDailyBriefingRunRequest: JarvisDailyBriefingRunRequest
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ key: "jarvisDailyBriefingRunRequest", map: "body" }] }])
+    return (options?.client ?? this.client).post<
+      V2JarvisRunDailyBriefingResponses,
+      V2JarvisRunDailyBriefingErrors,
+      ThrowOnError
+    >({
+      url: "/api/jarvis/companion/briefings/run",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * List daily briefings
+   */
+  public dailyBriefings<ThrowOnError extends boolean = false>(
+    parameters?: {
+      limit?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "query", key: "limit" }] }])
+    return (options?.client ?? this.client).get<
+      V2JarvisDailyBriefingsResponses,
+      V2JarvisDailyBriefingsErrors,
+      ThrowOnError
+    >({
+      url: "/api/jarvis/companion/briefings",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get a daily briefing
+   */
+  public dailyBriefing<ThrowOnError extends boolean = false>(
+    parameters: {
+      briefingID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "briefingID" }] }])
+    return (options?.client ?? this.client).get<
+      V2JarvisDailyBriefingResponses,
+      V2JarvisDailyBriefingErrors,
+      ThrowOnError
+    >({
+      url: "/api/jarvis/companion/briefings/{briefingID}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * List companion action proposals
+   */
+  public companionActions<ThrowOnError extends boolean = false>(
+    parameters?: {
+      limit?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "query", key: "limit" }] }])
+    return (options?.client ?? this.client).get<
+      V2JarvisCompanionActionsResponses,
+      V2JarvisCompanionActionsErrors,
+      ThrowOnError
+    >({
+      url: "/api/jarvis/companion/actions",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Prepare a companion action for approval
+   */
+  public prepareCompanionAction<ThrowOnError extends boolean = false>(
+    parameters: {
+      jarvisCompanionActionPrepare: JarvisCompanionActionPrepare
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ key: "jarvisCompanionActionPrepare", map: "body" }] }])
+    return (options?.client ?? this.client).post<
+      V2JarvisPrepareCompanionActionResponses,
+      V2JarvisPrepareCompanionActionErrors,
+      ThrowOnError
+    >({
+      url: "/api/jarvis/companion/actions",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Approve one companion action
+   */
+  public approveCompanionAction<ThrowOnError extends boolean = false>(
+    parameters: {
+      actionID: string
+      jarvisCompanionActionApprove: JarvisCompanionActionApprove
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "actionID" },
+            { key: "jarvisCompanionActionApprove", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      V2JarvisApproveCompanionActionResponses,
+      V2JarvisApproveCompanionActionErrors,
+      ThrowOnError
+    >({
+      url: "/api/jarvis/companion/actions/{actionID}/approve",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Cancel a prepared companion action
+   */
+  public cancelCompanionAction<ThrowOnError extends boolean = false>(
+    parameters: {
+      actionID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "actionID" }] }])
+    return (options?.client ?? this.client).post<
+      V2JarvisCancelCompanionActionResponses,
+      V2JarvisCancelCompanionActionErrors,
+      ThrowOnError
+    >({
+      url: "/api/jarvis/companion/actions/{actionID}/cancel",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * List confirmed companion action executions
+   */
+  public companionActionAudit<ThrowOnError extends boolean = false>(
+    parameters?: {
+      limit?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "query", key: "limit" }] }])
+    return (options?.client ?? this.client).get<
+      V2JarvisCompanionActionAuditResponses,
+      V2JarvisCompanionActionAuditErrors,
+      ThrowOnError
+    >({
+      url: "/api/jarvis/companion/actions/audit",
       ...options,
       ...params,
     })

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { desktopNativePluralCategories } from "./desktop-native"
+import { CUSTOMS_FALLBACK, isCustomsFallbackKey } from "./customs-fallback"
 
 const appLocales = [
   "ar",
@@ -102,7 +103,9 @@ describe("i18n parity", () => {
       const source = await dictionary(domain.source)
       for (const locale of domain.locales) {
         const target = await dictionary(domain.target(locale))
-        const missing = Object.keys(source).filter((key) => !Object.hasOwn(target, key))
+        const missing = Object.keys(source).filter(
+          (key) => !Object.hasOwn(target, key) && !isCustomsFallbackKey(key),
+        )
         const extra = Object.keys(target)
           .filter((key) => !Object.hasOwn(source, key))
           .sort()
@@ -198,6 +201,13 @@ describe("i18n plural parity", () => {
         })
       }
     }
+  })
+})
+
+describe("Customs fallback manifest", () => {
+  test("contains defined English values matching the source dictionary", async () => {
+    const source = await dictionary("./en.ts")
+    expect(Object.entries(CUSTOMS_FALLBACK).every(([key, value]) => value.length > 0 && source[key] === value)).toBe(true)
   })
 })
 

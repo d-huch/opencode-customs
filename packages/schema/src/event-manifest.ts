@@ -7,6 +7,7 @@ import { FileSystem } from "./filesystem"
 import { FileSystemWatcher } from "./filesystem-watcher"
 import { InstallationEvent } from "./installation-event"
 import { Integration } from "./integration"
+import { Jarvis } from "./jarvis"
 import { LegacyEvent } from "./legacy-event"
 import { LspEvent } from "./lsp-event"
 import { McpEvent } from "./mcp-event"
@@ -57,6 +58,10 @@ const featureDefinitions = Event.inventory(
 export const ServerDefinitions = Event.inventory(
   ...foundationDefinitions,
   ...featureDefinitions,
+  Jarvis.TurnUpdated,
+  Jarvis.PresenceUpdated,
+  Jarvis.ReplayUpdated,
+  Jarvis.DailyBriefingUpdated,
   ...SessionTodo.Event.Definitions,
 )
 
@@ -65,6 +70,10 @@ export const Definitions = Event.inventory(
   ...sessionV1LiveDefinitions,
   ...InstallationEvent.Definitions,
   ...featureDefinitions,
+  Jarvis.TurnUpdated,
+  Jarvis.PresenceUpdated,
+  Jarvis.ReplayUpdated,
+  Jarvis.DailyBriefingUpdated,
   ...SessionTodo.Event.Definitions,
   ...LspEvent.Definitions,
   ...PermissionV1.Event.Definitions,

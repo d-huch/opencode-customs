@@ -874,25 +874,208 @@ const adaptGroup18 = (raw: RawClient["server.repositoryMap"]) => ({
 })
 
 const Endpoint19_0 = (raw: RawClient["server.jarvis"]) => () =>
-  raw["jarvis.status"]({}).pipe(Effect.mapError(mapClientError))
+  raw["jarvis.conversation"]({}).pipe(Effect.mapError(mapClientError))
 
-const Endpoint19_1 = (raw: RawClient["server.jarvis"]) => () =>
-  raw["jarvis.config"]({}).pipe(Effect.mapError(mapClientError))
+type Endpoint19_1Request = Parameters<RawClient["server.jarvis"]["jarvis.adoptConversation"]>[0]
+type Endpoint19_1Input = {
+  readonly sessionID?: Endpoint19_1Request["payload"]["sessionID"]
+  readonly profileID?: Endpoint19_1Request["payload"]["profileID"]
+  readonly profileRevision?: Endpoint19_1Request["payload"]["profileRevision"]
+  readonly surface: Endpoint19_1Request["payload"]["surface"]
+}
+const Endpoint19_1 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_1Input) =>
+  raw["jarvis.adoptConversation"]({
+    payload: {
+      sessionID: input["sessionID"],
+      profileID: input["profileID"],
+      profileRevision: input["profileRevision"],
+      surface: input["surface"],
+    },
+  }).pipe(Effect.mapError(mapClientError))
 
-type Endpoint19_2Request = Parameters<RawClient["server.jarvis"]["jarvis.updateConfig"]>[0]
+type Endpoint19_2Request = Parameters<RawClient["server.jarvis"]["jarvis.prewarm"]>[0]
 type Endpoint19_2Input = {
-  readonly primaryProfileID?: Endpoint19_2Request["payload"]["primaryProfileID"]
-  readonly inboxSessionID?: Endpoint19_2Request["payload"]["inboxSessionID"]
-  readonly models: Endpoint19_2Request["payload"]["models"]
-  readonly plannerTimeoutMs: Endpoint19_2Request["payload"]["plannerTimeoutMs"]
-  readonly plannerIdleUnloadMs: Endpoint19_2Request["payload"]["plannerIdleUnloadMs"]
-  readonly plannerEscalationMinWords: Endpoint19_2Request["payload"]["plannerEscalationMinWords"]
-  readonly reactor: Endpoint19_2Request["payload"]["reactor"]
-  readonly benchmark: Endpoint19_2Request["payload"]["benchmark"]
-  readonly initiative: Endpoint19_2Request["payload"]["initiative"]
-  readonly updatedAt: Endpoint19_2Request["payload"]["updatedAt"]
+  readonly turnID?: Endpoint19_2Request["payload"]["turnID"]
+  readonly requestID: Endpoint19_2Request["payload"]["requestID"]
+  readonly surface: Endpoint19_2Request["payload"]["surface"]
+  readonly text: Endpoint19_2Request["payload"]["text"]
+  readonly sequence: Endpoint19_2Request["payload"]["sequence"]
+  readonly language?: Endpoint19_2Request["payload"]["language"]
+  readonly profileRevision?: Endpoint19_2Request["payload"]["profileRevision"]
+  readonly worldContext?: Endpoint19_2Request["payload"]["worldContext"]
+  readonly capturedAt: Endpoint19_2Request["payload"]["capturedAt"]
 }
 const Endpoint19_2 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_2Input) =>
+  raw["jarvis.prewarm"]({
+    payload: {
+      turnID: input["turnID"],
+      requestID: input["requestID"],
+      surface: input["surface"],
+      text: input["text"],
+      sequence: input["sequence"],
+      language: input["language"],
+      profileRevision: input["profileRevision"],
+      worldContext: input["worldContext"],
+      capturedAt: input["capturedAt"],
+    },
+  }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint19_3Request = Parameters<RawClient["server.jarvis"]["jarvis.admitFinal"]>[0]
+type Endpoint19_3Input = {
+  readonly requestID: Endpoint19_3Request["payload"]["requestID"]
+  readonly transcript: Endpoint19_3Request["payload"]["transcript"]
+  readonly surface: Endpoint19_3Request["payload"]["surface"]
+  readonly responseMode: Endpoint19_3Request["payload"]["responseMode"]
+  readonly profileID?: Endpoint19_3Request["payload"]["profileID"]
+  readonly profileRevision?: Endpoint19_3Request["payload"]["profileRevision"]
+  readonly worldContext?: Endpoint19_3Request["payload"]["worldContext"]
+}
+const Endpoint19_3 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_3Input) =>
+  raw["jarvis.admitFinal"]({
+    payload: {
+      requestID: input["requestID"],
+      transcript: input["transcript"],
+      surface: input["surface"],
+      responseMode: input["responseMode"],
+      profileID: input["profileID"],
+      profileRevision: input["profileRevision"],
+      worldContext: input["worldContext"],
+    },
+  }).pipe(Effect.mapError(mapClientError))
+
+const Endpoint19_4 = (raw: RawClient["server.jarvis"]) => () =>
+  raw["jarvis.controlStatus"]({}).pipe(Effect.mapError(mapClientError))
+
+type Endpoint19_5Request = Parameters<RawClient["server.jarvis"]["jarvis.updateMediaState"]>[0]
+type Endpoint19_5Input = {
+  readonly turnID?: Endpoint19_5Request["payload"]["turnID"]
+  readonly owner?: Endpoint19_5Request["payload"]["owner"]
+  readonly state: Endpoint19_5Request["payload"]["state"]
+  readonly queuedSentences: Endpoint19_5Request["payload"]["queuedSentences"]
+  readonly activeJobs: Endpoint19_5Request["payload"]["activeJobs"]
+  readonly acknowledgedCancellation: Endpoint19_5Request["payload"]["acknowledgedCancellation"]
+}
+const Endpoint19_5 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_5Input) =>
+  raw["jarvis.updateMediaState"]({
+    payload: {
+      turnID: input["turnID"],
+      owner: input["owner"],
+      state: input["state"],
+      queuedSentences: input["queuedSentences"],
+      activeJobs: input["activeJobs"],
+      acknowledgedCancellation: input["acknowledgedCancellation"],
+    },
+  }).pipe(Effect.mapError(mapClientError))
+
+const Endpoint19_6 = (raw: RawClient["server.jarvis"]) => () =>
+  raw["jarvis.runDiagnostics"]({}).pipe(Effect.mapError(mapClientError))
+
+type Endpoint19_7Request = Parameters<RawClient["server.jarvis"]["jarvis.createTurn"]>[0]
+type Endpoint19_7Input = {
+  readonly requestID: Endpoint19_7Request["payload"]["requestID"]
+  readonly sessionID: Endpoint19_7Request["payload"]["sessionID"]
+  readonly profileID?: Endpoint19_7Request["payload"]["profileID"]
+  readonly surface: Endpoint19_7Request["payload"]["surface"]
+  readonly responseMode: Endpoint19_7Request["payload"]["responseMode"]
+  readonly phase?: Endpoint19_7Request["payload"]["phase"]
+}
+const Endpoint19_7 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_7Input) =>
+  raw["jarvis.createTurn"]({
+    payload: {
+      requestID: input["requestID"],
+      sessionID: input["sessionID"],
+      profileID: input["profileID"],
+      surface: input["surface"],
+      responseMode: input["responseMode"],
+      phase: input["phase"],
+    },
+  }).pipe(Effect.mapError(mapClientError))
+
+const Endpoint19_8 = (raw: RawClient["server.jarvis"]) => () =>
+  raw["jarvis.currentTurn"]({}).pipe(Effect.mapError(mapClientError))
+
+type Endpoint19_9Request = Parameters<RawClient["server.jarvis"]["jarvis.turn"]>[0]
+type Endpoint19_9Input = { readonly turnID: Endpoint19_9Request["params"]["turnID"] }
+const Endpoint19_9 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_9Input) =>
+  raw["jarvis.turn"]({ params: { turnID: input["turnID"] } }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint19_10Request = Parameters<RawClient["server.jarvis"]["jarvis.updateTurn"]>[0]
+type Endpoint19_10Input = {
+  readonly turnID: Endpoint19_10Request["params"]["turnID"]
+  readonly phase: Endpoint19_10Request["payload"]["phase"]
+  readonly sequence: Endpoint19_10Request["payload"]["sequence"]
+  readonly presentation?: Endpoint19_10Request["payload"]["presentation"]
+  readonly metrics?: Endpoint19_10Request["payload"]["metrics"]
+  readonly error?: Endpoint19_10Request["payload"]["error"]
+  readonly cancelReason?: Endpoint19_10Request["payload"]["cancelReason"]
+}
+const Endpoint19_10 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_10Input) =>
+  raw["jarvis.updateTurn"]({
+    params: { turnID: input["turnID"] },
+    payload: {
+      phase: input["phase"],
+      sequence: input["sequence"],
+      presentation: input["presentation"],
+      metrics: input["metrics"],
+      error: input["error"],
+      cancelReason: input["cancelReason"],
+    },
+  }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint19_11Request = Parameters<RawClient["server.jarvis"]["jarvis.cancelTurn"]>[0]
+type Endpoint19_11Input = {
+  readonly turnID: Endpoint19_11Request["params"]["turnID"]
+  readonly reason?: Endpoint19_11Request["payload"]["reason"]
+}
+const Endpoint19_11 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_11Input) =>
+  raw["jarvis.cancelTurn"]({ params: { turnID: input["turnID"] }, payload: { reason: input["reason"] } }).pipe(
+    Effect.mapError(mapClientError),
+  )
+
+const Endpoint19_12 = (raw: RawClient["server.jarvis"]) => () =>
+  raw["jarvis.presence"]({}).pipe(Effect.mapError(mapClientError))
+
+type Endpoint19_13Request = Parameters<RawClient["server.jarvis"]["jarvis.handoffPresence"]>[0]
+type Endpoint19_13Input = {
+  readonly from?: Endpoint19_13Request["payload"]["from"]
+  readonly to: Endpoint19_13Request["payload"]["to"]
+  readonly sessionID?: Endpoint19_13Request["payload"]["sessionID"]
+  readonly turnID?: Endpoint19_13Request["payload"]["turnID"]
+  readonly microphone: Endpoint19_13Request["payload"]["microphone"]
+  readonly playback: Endpoint19_13Request["payload"]["playback"]
+}
+const Endpoint19_13 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_13Input) =>
+  raw["jarvis.handoffPresence"]({
+    payload: {
+      from: input["from"],
+      to: input["to"],
+      sessionID: input["sessionID"],
+      turnID: input["turnID"],
+      microphone: input["microphone"],
+      playback: input["playback"],
+    },
+  }).pipe(Effect.mapError(mapClientError))
+
+const Endpoint19_14 = (raw: RawClient["server.jarvis"]) => () =>
+  raw["jarvis.status"]({}).pipe(Effect.mapError(mapClientError))
+
+const Endpoint19_15 = (raw: RawClient["server.jarvis"]) => () =>
+  raw["jarvis.config"]({}).pipe(Effect.mapError(mapClientError))
+
+type Endpoint19_16Request = Parameters<RawClient["server.jarvis"]["jarvis.updateConfig"]>[0]
+type Endpoint19_16Input = {
+  readonly primaryProfileID?: Endpoint19_16Request["payload"]["primaryProfileID"]
+  readonly inboxSessionID?: Endpoint19_16Request["payload"]["inboxSessionID"]
+  readonly models: Endpoint19_16Request["payload"]["models"]
+  readonly plannerTimeoutMs: Endpoint19_16Request["payload"]["plannerTimeoutMs"]
+  readonly plannerIdleUnloadMs: Endpoint19_16Request["payload"]["plannerIdleUnloadMs"]
+  readonly plannerEscalationMinWords: Endpoint19_16Request["payload"]["plannerEscalationMinWords"]
+  readonly reactor: Endpoint19_16Request["payload"]["reactor"]
+  readonly benchmark: Endpoint19_16Request["payload"]["benchmark"]
+  readonly initiative: Endpoint19_16Request["payload"]["initiative"]
+  readonly updatedAt: Endpoint19_16Request["payload"]["updatedAt"]
+}
+const Endpoint19_16 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_16Input) =>
   raw["jarvis.updateConfig"]({
     payload: {
       primaryProfileID: input["primaryProfileID"],
@@ -908,48 +1091,48 @@ const Endpoint19_2 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_2In
     },
   }).pipe(Effect.mapError(mapClientError))
 
-const Endpoint19_3 = (raw: RawClient["server.jarvis"]) => () =>
+const Endpoint19_17 = (raw: RawClient["server.jarvis"]) => () =>
   raw["jarvis.benchmarkStatus"]({}).pipe(Effect.mapError(mapClientError))
 
-type Endpoint19_4Request = Parameters<RawClient["server.jarvis"]["jarvis.runBenchmark"]>[0]
-type Endpoint19_4Input = { readonly profile: Endpoint19_4Request["payload"]["profile"] }
-const Endpoint19_4 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_4Input) =>
+type Endpoint19_18Request = Parameters<RawClient["server.jarvis"]["jarvis.runBenchmark"]>[0]
+type Endpoint19_18Input = { readonly profile: Endpoint19_18Request["payload"]["profile"] }
+const Endpoint19_18 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_18Input) =>
   raw["jarvis.runBenchmark"]({ payload: { profile: input["profile"] } }).pipe(Effect.mapError(mapClientError))
 
-const Endpoint19_5 = (raw: RawClient["server.jarvis"]) => () =>
+const Endpoint19_19 = (raw: RawClient["server.jarvis"]) => () =>
   raw["jarvis.cancelBenchmark"]({}).pipe(Effect.mapError(mapClientError))
 
-const Endpoint19_6 = (raw: RawClient["server.jarvis"]) => () =>
+const Endpoint19_20 = (raw: RawClient["server.jarvis"]) => () =>
   raw["jarvis.profiles"]({}).pipe(Effect.mapError(mapClientError))
 
-type Endpoint19_7Request = Parameters<RawClient["server.jarvis"]["jarvis.syncProfiles"]>[0]
-type Endpoint19_7Input = {
-  readonly profiles: Endpoint19_7Request["payload"]["profiles"]
-  readonly primaryProfileID?: Endpoint19_7Request["payload"]["primaryProfileID"]
+type Endpoint19_21Request = Parameters<RawClient["server.jarvis"]["jarvis.syncProfiles"]>[0]
+type Endpoint19_21Input = {
+  readonly profiles: Endpoint19_21Request["payload"]["profiles"]
+  readonly primaryProfileID?: Endpoint19_21Request["payload"]["primaryProfileID"]
 }
-const Endpoint19_7 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_7Input) =>
+const Endpoint19_21 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_21Input) =>
   raw["jarvis.syncProfiles"]({
     payload: { profiles: input["profiles"], primaryProfileID: input["primaryProfileID"] },
   }).pipe(Effect.mapError(mapClientError))
 
-type Endpoint19_8Request = Parameters<RawClient["server.jarvis"]["jarvis.goals"]>[0]
-type Endpoint19_8Input = { readonly status?: Endpoint19_8Request["query"]["status"] }
-const Endpoint19_8 = (raw: RawClient["server.jarvis"]) => (input?: Endpoint19_8Input) =>
+type Endpoint19_22Request = Parameters<RawClient["server.jarvis"]["jarvis.goals"]>[0]
+type Endpoint19_22Input = { readonly status?: Endpoint19_22Request["query"]["status"] }
+const Endpoint19_22 = (raw: RawClient["server.jarvis"]) => (input?: Endpoint19_22Input) =>
   raw["jarvis.goals"]({ query: { status: input?.["status"] } }).pipe(Effect.mapError(mapClientError))
 
-type Endpoint19_9Request = Parameters<RawClient["server.jarvis"]["jarvis.createGoal"]>[0]
-type Endpoint19_9Input = {
-  readonly profileID: Endpoint19_9Request["payload"]["profileID"]
-  readonly sessionID?: Endpoint19_9Request["payload"]["sessionID"]
-  readonly mode: Endpoint19_9Request["payload"]["mode"]
-  readonly gameID?: Endpoint19_9Request["payload"]["gameID"]
-  readonly saveSlotID?: Endpoint19_9Request["payload"]["saveSlotID"]
-  readonly characterID?: Endpoint19_9Request["payload"]["characterID"]
-  readonly objective: Endpoint19_9Request["payload"]["objective"]
-  readonly worldRevision?: Endpoint19_9Request["payload"]["worldRevision"]
-  readonly capabilityRevision?: Endpoint19_9Request["payload"]["capabilityRevision"]
+type Endpoint19_23Request = Parameters<RawClient["server.jarvis"]["jarvis.createGoal"]>[0]
+type Endpoint19_23Input = {
+  readonly profileID: Endpoint19_23Request["payload"]["profileID"]
+  readonly sessionID?: Endpoint19_23Request["payload"]["sessionID"]
+  readonly mode: Endpoint19_23Request["payload"]["mode"]
+  readonly gameID?: Endpoint19_23Request["payload"]["gameID"]
+  readonly saveSlotID?: Endpoint19_23Request["payload"]["saveSlotID"]
+  readonly characterID?: Endpoint19_23Request["payload"]["characterID"]
+  readonly objective: Endpoint19_23Request["payload"]["objective"]
+  readonly worldRevision?: Endpoint19_23Request["payload"]["worldRevision"]
+  readonly capabilityRevision?: Endpoint19_23Request["payload"]["capabilityRevision"]
 }
-const Endpoint19_9 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_9Input) =>
+const Endpoint19_23 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_23Input) =>
   raw["jarvis.createGoal"]({
     payload: {
       profileID: input["profileID"],
@@ -964,16 +1147,16 @@ const Endpoint19_9 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_9In
     },
   }).pipe(Effect.mapError(mapClientError))
 
-type Endpoint19_10Request = Parameters<RawClient["server.jarvis"]["jarvis.resumeGoal"]>[0]
-type Endpoint19_10Input = {
-  readonly goalID: Endpoint19_10Request["params"]["goalID"]
-  readonly worldRevision: Endpoint19_10Request["payload"]["worldRevision"]
-  readonly capabilityRevision: Endpoint19_10Request["payload"]["capabilityRevision"]
-  readonly gameID?: Endpoint19_10Request["payload"]["gameID"]
-  readonly saveSlotID?: Endpoint19_10Request["payload"]["saveSlotID"]
-  readonly characterID?: Endpoint19_10Request["payload"]["characterID"]
+type Endpoint19_24Request = Parameters<RawClient["server.jarvis"]["jarvis.resumeGoal"]>[0]
+type Endpoint19_24Input = {
+  readonly goalID: Endpoint19_24Request["params"]["goalID"]
+  readonly worldRevision: Endpoint19_24Request["payload"]["worldRevision"]
+  readonly capabilityRevision: Endpoint19_24Request["payload"]["capabilityRevision"]
+  readonly gameID?: Endpoint19_24Request["payload"]["gameID"]
+  readonly saveSlotID?: Endpoint19_24Request["payload"]["saveSlotID"]
+  readonly characterID?: Endpoint19_24Request["payload"]["characterID"]
 }
-const Endpoint19_10 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_10Input) =>
+const Endpoint19_24 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_24Input) =>
   raw["jarvis.resumeGoal"]({
     params: { goalID: input["goalID"] },
     payload: {
@@ -985,70 +1168,70 @@ const Endpoint19_10 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_10
     },
   }).pipe(Effect.mapError(mapClientError))
 
-type Endpoint19_11Request = Parameters<RawClient["server.jarvis"]["jarvis.replanGoal"]>[0]
-type Endpoint19_11Input = {
-  readonly goalID: Endpoint19_11Request["params"]["goalID"]
-  readonly reason?: Endpoint19_11Request["payload"]["reason"]
+type Endpoint19_25Request = Parameters<RawClient["server.jarvis"]["jarvis.replanGoal"]>[0]
+type Endpoint19_25Input = {
+  readonly goalID: Endpoint19_25Request["params"]["goalID"]
+  readonly reason?: Endpoint19_25Request["payload"]["reason"]
 }
-const Endpoint19_11 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_11Input) =>
+const Endpoint19_25 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_25Input) =>
   raw["jarvis.replanGoal"]({ params: { goalID: input["goalID"] }, payload: { reason: input["reason"] } }).pipe(
     Effect.mapError(mapClientError),
   )
 
-type Endpoint19_12Request = Parameters<RawClient["server.jarvis"]["jarvis.cancelGoal"]>[0]
-type Endpoint19_12Input = {
-  readonly goalID: Endpoint19_12Request["params"]["goalID"]
-  readonly summary?: Endpoint19_12Request["payload"]["summary"]
-  readonly changedEntityIDs?: Endpoint19_12Request["payload"]["changedEntityIDs"]
+type Endpoint19_26Request = Parameters<RawClient["server.jarvis"]["jarvis.cancelGoal"]>[0]
+type Endpoint19_26Input = {
+  readonly goalID: Endpoint19_26Request["params"]["goalID"]
+  readonly summary?: Endpoint19_26Request["payload"]["summary"]
+  readonly changedEntityIDs?: Endpoint19_26Request["payload"]["changedEntityIDs"]
 }
-const Endpoint19_12 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_12Input) =>
+const Endpoint19_26 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_26Input) =>
   raw["jarvis.cancelGoal"]({
     params: { goalID: input["goalID"] },
     payload: { summary: input["summary"], changedEntityIDs: input["changedEntityIDs"] },
   }).pipe(Effect.mapError(mapClientError))
 
-type Endpoint19_13Request = Parameters<RawClient["server.jarvis"]["jarvis.recordGoalStep"]>[0]
-type Endpoint19_13Input = {
-  readonly goalID: Endpoint19_13Request["params"]["goalID"]
-  readonly stepID: Endpoint19_13Request["payload"]["stepID"]
-  readonly success: Endpoint19_13Request["payload"]["success"]
-  readonly error?: Endpoint19_13Request["payload"]["error"]
+type Endpoint19_27Request = Parameters<RawClient["server.jarvis"]["jarvis.recordGoalStep"]>[0]
+type Endpoint19_27Input = {
+  readonly goalID: Endpoint19_27Request["params"]["goalID"]
+  readonly stepID: Endpoint19_27Request["payload"]["stepID"]
+  readonly success: Endpoint19_27Request["payload"]["success"]
+  readonly error?: Endpoint19_27Request["payload"]["error"]
 }
-const Endpoint19_13 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_13Input) =>
+const Endpoint19_27 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_27Input) =>
   raw["jarvis.recordGoalStep"]({
     params: { goalID: input["goalID"] },
     payload: { stepID: input["stepID"], success: input["success"], error: input["error"] },
   }).pipe(Effect.mapError(mapClientError))
 
-type Endpoint19_14Request = Parameters<RawClient["server.jarvis"]["jarvis.outcomes"]>[0]
-type Endpoint19_14Input = { readonly goalID?: Endpoint19_14Request["query"]["goalID"] }
-const Endpoint19_14 = (raw: RawClient["server.jarvis"]) => (input?: Endpoint19_14Input) =>
+type Endpoint19_28Request = Parameters<RawClient["server.jarvis"]["jarvis.outcomes"]>[0]
+type Endpoint19_28Input = { readonly goalID?: Endpoint19_28Request["query"]["goalID"] }
+const Endpoint19_28 = (raw: RawClient["server.jarvis"]) => (input?: Endpoint19_28Input) =>
   raw["jarvis.outcomes"]({ query: { goalID: input?.["goalID"] } }).pipe(Effect.mapError(mapClientError))
 
-type Endpoint19_15Request = Parameters<RawClient["server.jarvis"]["jarvis.completeGoal"]>[0]
-type Endpoint19_15Input = {
-  readonly goalID: Endpoint19_15Request["params"]["goalID"]
-  readonly status: Endpoint19_15Request["payload"]["status"]
-  readonly summary: Endpoint19_15Request["payload"]["summary"]
-  readonly changedEntityIDs: Endpoint19_15Request["payload"]["changedEntityIDs"]
+type Endpoint19_29Request = Parameters<RawClient["server.jarvis"]["jarvis.completeGoal"]>[0]
+type Endpoint19_29Input = {
+  readonly goalID: Endpoint19_29Request["params"]["goalID"]
+  readonly status: Endpoint19_29Request["payload"]["status"]
+  readonly summary: Endpoint19_29Request["payload"]["summary"]
+  readonly changedEntityIDs: Endpoint19_29Request["payload"]["changedEntityIDs"]
 }
-const Endpoint19_15 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_15Input) =>
+const Endpoint19_29 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_29Input) =>
   raw["jarvis.completeGoal"]({
     params: { goalID: input["goalID"] },
     payload: { status: input["status"], summary: input["summary"], changedEntityIDs: input["changedEntityIDs"] },
   }).pipe(Effect.mapError(mapClientError))
 
-type Endpoint19_16Request = Parameters<RawClient["server.jarvis"]["jarvis.searchMemory"]>[0]
-type Endpoint19_16Input = {
-  readonly query: Endpoint19_16Request["payload"]["query"]
-  readonly profileID?: Endpoint19_16Request["payload"]["profileID"]
-  readonly gameID?: Endpoint19_16Request["payload"]["gameID"]
-  readonly saveSlotID?: Endpoint19_16Request["payload"]["saveSlotID"]
-  readonly characterID?: Endpoint19_16Request["payload"]["characterID"]
-  readonly limit?: Endpoint19_16Request["payload"]["limit"]
-  readonly embedding?: Endpoint19_16Request["payload"]["embedding"]
+type Endpoint19_30Request = Parameters<RawClient["server.jarvis"]["jarvis.searchMemory"]>[0]
+type Endpoint19_30Input = {
+  readonly query: Endpoint19_30Request["payload"]["query"]
+  readonly profileID?: Endpoint19_30Request["payload"]["profileID"]
+  readonly gameID?: Endpoint19_30Request["payload"]["gameID"]
+  readonly saveSlotID?: Endpoint19_30Request["payload"]["saveSlotID"]
+  readonly characterID?: Endpoint19_30Request["payload"]["characterID"]
+  readonly limit?: Endpoint19_30Request["payload"]["limit"]
+  readonly embedding?: Endpoint19_30Request["payload"]["embedding"]
 }
-const Endpoint19_16 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_16Input) =>
+const Endpoint19_30 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_30Input) =>
   raw["jarvis.searchMemory"]({
     payload: {
       query: input["query"],
@@ -1061,29 +1244,29 @@ const Endpoint19_16 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_16
     },
   }).pipe(Effect.mapError(mapClientError))
 
-type Endpoint19_17Request = Parameters<RawClient["server.jarvis"]["jarvis.remember"]>[0]
-type Endpoint19_17Input = {
-  readonly id: Endpoint19_17Request["payload"]["id"]
-  readonly profileID?: Endpoint19_17Request["payload"]["profileID"]
-  readonly scope: Endpoint19_17Request["payload"]["scope"]
-  readonly gameID?: Endpoint19_17Request["payload"]["gameID"]
-  readonly saveSlotID?: Endpoint19_17Request["payload"]["saveSlotID"]
-  readonly characterID?: Endpoint19_17Request["payload"]["characterID"]
-  readonly kind: Endpoint19_17Request["payload"]["kind"]
-  readonly text: Endpoint19_17Request["payload"]["text"]
-  readonly sourceID: Endpoint19_17Request["payload"]["sourceID"]
-  readonly confidence: Endpoint19_17Request["payload"]["confidence"]
-  readonly importance: Endpoint19_17Request["payload"]["importance"]
-  readonly lifecycle: Endpoint19_17Request["payload"]["lifecycle"]
-  readonly pinned: Endpoint19_17Request["payload"]["pinned"]
-  readonly conflictsWith: Endpoint19_17Request["payload"]["conflictsWith"]
-  readonly embedding?: Endpoint19_17Request["payload"]["embedding"]
-  readonly embeddingModel?: Endpoint19_17Request["payload"]["embeddingModel"]
-  readonly createdAt: Endpoint19_17Request["payload"]["createdAt"]
-  readonly updatedAt: Endpoint19_17Request["payload"]["updatedAt"]
-  readonly lastUsedAt?: Endpoint19_17Request["payload"]["lastUsedAt"]
+type Endpoint19_31Request = Parameters<RawClient["server.jarvis"]["jarvis.remember"]>[0]
+type Endpoint19_31Input = {
+  readonly id: Endpoint19_31Request["payload"]["id"]
+  readonly profileID?: Endpoint19_31Request["payload"]["profileID"]
+  readonly scope: Endpoint19_31Request["payload"]["scope"]
+  readonly gameID?: Endpoint19_31Request["payload"]["gameID"]
+  readonly saveSlotID?: Endpoint19_31Request["payload"]["saveSlotID"]
+  readonly characterID?: Endpoint19_31Request["payload"]["characterID"]
+  readonly kind: Endpoint19_31Request["payload"]["kind"]
+  readonly text: Endpoint19_31Request["payload"]["text"]
+  readonly sourceID: Endpoint19_31Request["payload"]["sourceID"]
+  readonly confidence: Endpoint19_31Request["payload"]["confidence"]
+  readonly importance: Endpoint19_31Request["payload"]["importance"]
+  readonly lifecycle: Endpoint19_31Request["payload"]["lifecycle"]
+  readonly pinned: Endpoint19_31Request["payload"]["pinned"]
+  readonly conflictsWith: Endpoint19_31Request["payload"]["conflictsWith"]
+  readonly embedding?: Endpoint19_31Request["payload"]["embedding"]
+  readonly embeddingModel?: Endpoint19_31Request["payload"]["embeddingModel"]
+  readonly createdAt: Endpoint19_31Request["payload"]["createdAt"]
+  readonly updatedAt: Endpoint19_31Request["payload"]["updatedAt"]
+  readonly lastUsedAt?: Endpoint19_31Request["payload"]["lastUsedAt"]
 }
-const Endpoint19_17 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_17Input) =>
+const Endpoint19_31 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_31Input) =>
   raw["jarvis.remember"]({
     payload: {
       id: input["id"],
@@ -1108,21 +1291,21 @@ const Endpoint19_17 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_17
     },
   }).pipe(Effect.mapError(mapClientError))
 
-type Endpoint19_18Request = Parameters<RawClient["server.jarvis"]["jarvis.removeMemory"]>[0]
-type Endpoint19_18Input = { readonly memoryID: Endpoint19_18Request["params"]["memoryID"] }
-const Endpoint19_18 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_18Input) =>
+type Endpoint19_32Request = Parameters<RawClient["server.jarvis"]["jarvis.removeMemory"]>[0]
+type Endpoint19_32Input = { readonly memoryID: Endpoint19_32Request["params"]["memoryID"] }
+const Endpoint19_32 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_32Input) =>
   raw["jarvis.removeMemory"]({ params: { memoryID: input["memoryID"] } }).pipe(Effect.mapError(mapClientError))
 
-type Endpoint19_19Request = Parameters<RawClient["server.jarvis"]["jarvis.patchMemory"]>[0]
-type Endpoint19_19Input = {
-  readonly memoryID: Endpoint19_19Request["params"]["memoryID"]
-  readonly text?: Endpoint19_19Request["payload"]["text"]
-  readonly confidence?: Endpoint19_19Request["payload"]["confidence"]
-  readonly importance?: Endpoint19_19Request["payload"]["importance"]
-  readonly lifecycle?: Endpoint19_19Request["payload"]["lifecycle"]
-  readonly pinned?: Endpoint19_19Request["payload"]["pinned"]
+type Endpoint19_33Request = Parameters<RawClient["server.jarvis"]["jarvis.patchMemory"]>[0]
+type Endpoint19_33Input = {
+  readonly memoryID: Endpoint19_33Request["params"]["memoryID"]
+  readonly text?: Endpoint19_33Request["payload"]["text"]
+  readonly confidence?: Endpoint19_33Request["payload"]["confidence"]
+  readonly importance?: Endpoint19_33Request["payload"]["importance"]
+  readonly lifecycle?: Endpoint19_33Request["payload"]["lifecycle"]
+  readonly pinned?: Endpoint19_33Request["payload"]["pinned"]
 }
-const Endpoint19_19 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_19Input) =>
+const Endpoint19_33 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_33Input) =>
   raw["jarvis.patchMemory"]({
     params: { memoryID: input["memoryID"] },
     payload: {
@@ -1134,34 +1317,130 @@ const Endpoint19_19 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_19
     },
   }).pipe(Effect.mapError(mapClientError))
 
-type Endpoint19_20Request = Parameters<RawClient["server.jarvis"]["jarvis.resolveMemoryConflict"]>[0]
-type Endpoint19_20Input = {
-  readonly memoryID: Endpoint19_20Request["params"]["memoryID"]
-  readonly action: Endpoint19_20Request["payload"]["action"]
-  readonly otherMemoryID: Endpoint19_20Request["payload"]["otherMemoryID"]
+type Endpoint19_34Request = Parameters<RawClient["server.jarvis"]["jarvis.resolveMemoryConflict"]>[0]
+type Endpoint19_34Input = {
+  readonly memoryID: Endpoint19_34Request["params"]["memoryID"]
+  readonly action: Endpoint19_34Request["payload"]["action"]
+  readonly otherMemoryID: Endpoint19_34Request["payload"]["otherMemoryID"]
 }
-const Endpoint19_20 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_20Input) =>
+const Endpoint19_34 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_34Input) =>
   raw["jarvis.resolveMemoryConflict"]({
     params: { memoryID: input["memoryID"] },
     payload: { action: input["action"], otherMemoryID: input["otherMemoryID"] },
   }).pipe(Effect.mapError(mapClientError))
 
-const Endpoint19_21 = (raw: RawClient["server.jarvis"]) => () =>
+const Endpoint19_35 = (raw: RawClient["server.jarvis"]) => () =>
   raw["jarvis.reindexMemory"]({}).pipe(Effect.mapError(mapClientError))
 
-const Endpoint19_22 = (raw: RawClient["server.jarvis"]) => () =>
+type Endpoint19_36Request = Parameters<RawClient["server.jarvis"]["jarvis.memoryUses"]>[0]
+type Endpoint19_36Input = {
+  readonly memoryID?: Endpoint19_36Request["query"]["memoryID"]
+  readonly turnID?: Endpoint19_36Request["query"]["turnID"]
+  readonly limit?: Endpoint19_36Request["query"]["limit"]
+}
+const Endpoint19_36 = (raw: RawClient["server.jarvis"]) => (input?: Endpoint19_36Input) =>
+  raw["jarvis.memoryUses"]({
+    query: { memoryID: input?.["memoryID"], turnID: input?.["turnID"], limit: input?.["limit"] },
+  }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint19_37Request = Parameters<RawClient["server.jarvis"]["jarvis.recordMemoryUse"]>[0]
+type Endpoint19_37Input = {
+  readonly turnID: Endpoint19_37Request["payload"]["turnID"]
+  readonly memoryID: Endpoint19_37Request["payload"]["memoryID"]
+  readonly rank: Endpoint19_37Request["payload"]["rank"]
+  readonly lexicalScore?: Endpoint19_37Request["payload"]["lexicalScore"]
+  readonly semanticScore?: Endpoint19_37Request["payload"]["semanticScore"]
+  readonly reason: Endpoint19_37Request["payload"]["reason"]
+}
+const Endpoint19_37 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_37Input) =>
+  raw["jarvis.recordMemoryUse"]({
+    payload: {
+      turnID: input["turnID"],
+      memoryID: input["memoryID"],
+      rank: input["rank"],
+      lexicalScore: input["lexicalScore"],
+      semanticScore: input["semanticScore"],
+      reason: input["reason"],
+    },
+  }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint19_38Request = Parameters<RawClient["server.jarvis"]["jarvis.replays"]>[0]
+type Endpoint19_38Input = { readonly limit?: Endpoint19_38Request["query"]["limit"] }
+const Endpoint19_38 = (raw: RawClient["server.jarvis"]) => (input?: Endpoint19_38Input) =>
+  raw["jarvis.replays"]({ query: { limit: input?.["limit"] } }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint19_39Request = Parameters<RawClient["server.jarvis"]["jarvis.recordReplay"]>[0]
+type Endpoint19_39Input = {
+  readonly turnID?: Endpoint19_39Request["payload"]["turnID"]
+  readonly sessionID?: Endpoint19_39Request["payload"]["sessionID"]
+  readonly surface: Endpoint19_39Request["payload"]["surface"]
+  readonly status?: Endpoint19_39Request["payload"]["status"]
+  readonly events: Endpoint19_39Request["payload"]["events"]
+  readonly metrics?: Endpoint19_39Request["payload"]["metrics"]
+  readonly error?: Endpoint19_39Request["payload"]["error"]
+}
+const Endpoint19_39 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_39Input) =>
+  raw["jarvis.recordReplay"]({
+    payload: {
+      turnID: input["turnID"],
+      sessionID: input["sessionID"],
+      surface: input["surface"],
+      status: input["status"],
+      events: input["events"],
+      metrics: input["metrics"],
+      error: input["error"],
+    },
+  }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint19_40Request = Parameters<RawClient["server.jarvis"]["jarvis.replay"]>[0]
+type Endpoint19_40Input = { readonly replayID: Endpoint19_40Request["params"]["replayID"] }
+const Endpoint19_40 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_40Input) =>
+  raw["jarvis.replay"]({ params: { replayID: input["replayID"] } }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint19_41Request = Parameters<RawClient["server.jarvis"]["jarvis.removeReplay"]>[0]
+type Endpoint19_41Input = { readonly replayID: Endpoint19_41Request["params"]["replayID"] }
+const Endpoint19_41 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_41Input) =>
+  raw["jarvis.removeReplay"]({ params: { replayID: input["replayID"] } }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint19_42Request = Parameters<RawClient["server.jarvis"]["jarvis.executeReplay"]>[0]
+type Endpoint19_42Input = {
+  readonly replayID: Endpoint19_42Request["params"]["replayID"]
+  readonly fixtureOnly?: Endpoint19_42Request["payload"]["fixtureOnly"]
+}
+const Endpoint19_42 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_42Input) =>
+  raw["jarvis.executeReplay"]({
+    params: { replayID: input["replayID"] },
+    payload: { fixtureOnly: input["fixtureOnly"] },
+  }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint19_43Request = Parameters<RawClient["server.jarvis"]["jarvis.replayExecution"]>[0]
+type Endpoint19_43Input = { readonly executionID: Endpoint19_43Request["params"]["executionID"] }
+const Endpoint19_43 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_43Input) =>
+  raw["jarvis.replayExecution"]({ params: { executionID: input["executionID"] } }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint19_44Request = Parameters<RawClient["server.jarvis"]["jarvis.compareReplays"]>[0]
+type Endpoint19_44Input = {
+  readonly baselineExecutionID: Endpoint19_44Request["payload"]["baselineExecutionID"]
+  readonly candidateExecutionID: Endpoint19_44Request["payload"]["candidateExecutionID"]
+}
+const Endpoint19_44 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_44Input) =>
+  raw["jarvis.compareReplays"]({
+    payload: { baselineExecutionID: input["baselineExecutionID"], candidateExecutionID: input["candidateExecutionID"] },
+  }).pipe(Effect.mapError(mapClientError))
+
+const Endpoint19_45 = (raw: RawClient["server.jarvis"]) => () =>
   raw["jarvis.inbox"]({}).pipe(Effect.mapError(mapClientError))
 
-type Endpoint19_23Request = Parameters<RawClient["server.jarvis"]["jarvis.wake"]>[0]
-type Endpoint19_23Input = {
-  readonly sessionID?: Endpoint19_23Request["payload"]["sessionID"]
-  readonly kind: Endpoint19_23Request["payload"]["kind"]
-  readonly topic: Endpoint19_23Request["payload"]["topic"]
-  readonly text: Endpoint19_23Request["payload"]["text"]
-  readonly priority: Endpoint19_23Request["payload"]["priority"]
-  readonly notBefore?: Endpoint19_23Request["payload"]["notBefore"]
+type Endpoint19_46Request = Parameters<RawClient["server.jarvis"]["jarvis.wake"]>[0]
+type Endpoint19_46Input = {
+  readonly sessionID?: Endpoint19_46Request["payload"]["sessionID"]
+  readonly kind: Endpoint19_46Request["payload"]["kind"]
+  readonly topic: Endpoint19_46Request["payload"]["topic"]
+  readonly text: Endpoint19_46Request["payload"]["text"]
+  readonly priority: Endpoint19_46Request["payload"]["priority"]
+  readonly notBefore?: Endpoint19_46Request["payload"]["notBefore"]
 }
-const Endpoint19_23 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_23Input) =>
+const Endpoint19_46 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_46Input) =>
   raw["jarvis.wake"]({
     payload: {
       sessionID: input["sessionID"],
@@ -1173,43 +1452,175 @@ const Endpoint19_23 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_23
     },
   }).pipe(Effect.mapError(mapClientError))
 
-type Endpoint19_24Request = Parameters<RawClient["server.jarvis"]["jarvis.dismissInbox"]>[0]
-type Endpoint19_24Input = { readonly wakeID: Endpoint19_24Request["params"]["wakeID"] }
-const Endpoint19_24 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_24Input) =>
+type Endpoint19_47Request = Parameters<RawClient["server.jarvis"]["jarvis.dismissInbox"]>[0]
+type Endpoint19_47Input = { readonly wakeID: Endpoint19_47Request["params"]["wakeID"] }
+const Endpoint19_47 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_47Input) =>
   raw["jarvis.dismissInbox"]({ params: { wakeID: input["wakeID"] } }).pipe(Effect.mapError(mapClientError))
 
-type Endpoint19_25Request = Parameters<RawClient["server.jarvis"]["jarvis.retryInbox"]>[0]
-type Endpoint19_25Input = { readonly wakeID: Endpoint19_25Request["params"]["wakeID"] }
-const Endpoint19_25 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_25Input) =>
+type Endpoint19_48Request = Parameters<RawClient["server.jarvis"]["jarvis.retryInbox"]>[0]
+type Endpoint19_48Input = { readonly wakeID: Endpoint19_48Request["params"]["wakeID"] }
+const Endpoint19_48 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_48Input) =>
   raw["jarvis.retryInbox"]({ params: { wakeID: input["wakeID"] } }).pipe(Effect.mapError(mapClientError))
 
+const Endpoint19_49 = (raw: RawClient["server.jarvis"]) => () =>
+  raw["jarvis.companionStatus"]({}).pipe(Effect.mapError(mapClientError))
+
+const Endpoint19_50 = (raw: RawClient["server.jarvis"]) => () =>
+  raw["jarvis.companionConfig"]({}).pipe(Effect.mapError(mapClientError))
+
+type Endpoint19_51Request = Parameters<RawClient["server.jarvis"]["jarvis.updateCompanionConfig"]>[0]
+type Endpoint19_51Input = {
+  readonly enabled: Endpoint19_51Request["payload"]["enabled"]
+  readonly schedule: Endpoint19_51Request["payload"]["schedule"]
+  readonly timezone: Endpoint19_51Request["payload"]["timezone"]
+  readonly catchUpUntil: Endpoint19_51Request["payload"]["catchUpUntil"]
+  readonly sources: Endpoint19_51Request["payload"]["sources"]
+  readonly updatedAt: Endpoint19_51Request["payload"]["updatedAt"]
+}
+const Endpoint19_51 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_51Input) =>
+  raw["jarvis.updateCompanionConfig"]({
+    payload: {
+      enabled: input["enabled"],
+      schedule: input["schedule"],
+      timezone: input["timezone"],
+      catchUpUntil: input["catchUpUntil"],
+      sources: input["sources"],
+      updatedAt: input["updatedAt"],
+    },
+  }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint19_52Request = Parameters<RawClient["server.jarvis"]["jarvis.runDailyBriefing"]>[0]
+type Endpoint19_52Input = {
+  readonly trigger?: Endpoint19_52Request["payload"]["trigger"]
+  readonly force?: Endpoint19_52Request["payload"]["force"]
+}
+const Endpoint19_52 = (raw: RawClient["server.jarvis"]) => (input?: Endpoint19_52Input) =>
+  raw["jarvis.runDailyBriefing"]({ payload: { trigger: input?.["trigger"], force: input?.["force"] } }).pipe(
+    Effect.mapError(mapClientError),
+  )
+
+type Endpoint19_53Request = Parameters<RawClient["server.jarvis"]["jarvis.dailyBriefings"]>[0]
+type Endpoint19_53Input = { readonly limit?: Endpoint19_53Request["query"]["limit"] }
+const Endpoint19_53 = (raw: RawClient["server.jarvis"]) => (input?: Endpoint19_53Input) =>
+  raw["jarvis.dailyBriefings"]({ query: { limit: input?.["limit"] } }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint19_54Request = Parameters<RawClient["server.jarvis"]["jarvis.dailyBriefing"]>[0]
+type Endpoint19_54Input = { readonly briefingID: Endpoint19_54Request["params"]["briefingID"] }
+const Endpoint19_54 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_54Input) =>
+  raw["jarvis.dailyBriefing"]({ params: { briefingID: input["briefingID"] } }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint19_55Request = Parameters<RawClient["server.jarvis"]["jarvis.prepareCompanionAction"]>[0]
+type Endpoint19_55Input = {
+  readonly briefingID?: Endpoint19_55Request["payload"]["briefingID"]
+  readonly kind: Endpoint19_55Request["payload"]["kind"]
+  readonly title: Endpoint19_55Request["payload"]["title"]
+  readonly preview: Endpoint19_55Request["payload"]["preview"]
+  readonly input: Endpoint19_55Request["payload"]["input"]
+  readonly requiredScopes?: Endpoint19_55Request["payload"]["requiredScopes"]
+  readonly idempotencyKey: Endpoint19_55Request["payload"]["idempotencyKey"]
+  readonly externalRevision?: Endpoint19_55Request["payload"]["externalRevision"]
+}
+const Endpoint19_55 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_55Input) =>
+  raw["jarvis.prepareCompanionAction"]({
+    payload: {
+      briefingID: input["briefingID"],
+      kind: input["kind"],
+      title: input["title"],
+      preview: input["preview"],
+      input: input["input"],
+      requiredScopes: input["requiredScopes"],
+      idempotencyKey: input["idempotencyKey"],
+      externalRevision: input["externalRevision"],
+    },
+  }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint19_56Request = Parameters<RawClient["server.jarvis"]["jarvis.companionActions"]>[0]
+type Endpoint19_56Input = { readonly limit?: Endpoint19_56Request["query"]["limit"] }
+const Endpoint19_56 = (raw: RawClient["server.jarvis"]) => (input?: Endpoint19_56Input) =>
+  raw["jarvis.companionActions"]({ query: { limit: input?.["limit"] } }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint19_57Request = Parameters<RawClient["server.jarvis"]["jarvis.approveCompanionAction"]>[0]
+type Endpoint19_57Input = {
+  readonly actionID: Endpoint19_57Request["params"]["actionID"]
+  readonly externalRevision?: Endpoint19_57Request["payload"]["externalRevision"]
+}
+const Endpoint19_57 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_57Input) =>
+  raw["jarvis.approveCompanionAction"]({
+    params: { actionID: input["actionID"] },
+    payload: { externalRevision: input["externalRevision"] },
+  }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint19_58Request = Parameters<RawClient["server.jarvis"]["jarvis.cancelCompanionAction"]>[0]
+type Endpoint19_58Input = { readonly actionID: Endpoint19_58Request["params"]["actionID"] }
+const Endpoint19_58 = (raw: RawClient["server.jarvis"]) => (input: Endpoint19_58Input) =>
+  raw["jarvis.cancelCompanionAction"]({ params: { actionID: input["actionID"] } }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint19_59Request = Parameters<RawClient["server.jarvis"]["jarvis.companionActionAudit"]>[0]
+type Endpoint19_59Input = { readonly limit?: Endpoint19_59Request["query"]["limit"] }
+const Endpoint19_59 = (raw: RawClient["server.jarvis"]) => (input?: Endpoint19_59Input) =>
+  raw["jarvis.companionActionAudit"]({ query: { limit: input?.["limit"] } }).pipe(Effect.mapError(mapClientError))
+
 const adaptGroup19 = (raw: RawClient["server.jarvis"]) => ({
-  status: Endpoint19_0(raw),
-  config: Endpoint19_1(raw),
-  updateConfig: Endpoint19_2(raw),
-  benchmarkStatus: Endpoint19_3(raw),
-  runBenchmark: Endpoint19_4(raw),
-  cancelBenchmark: Endpoint19_5(raw),
-  profiles: Endpoint19_6(raw),
-  syncProfiles: Endpoint19_7(raw),
-  goals: Endpoint19_8(raw),
-  createGoal: Endpoint19_9(raw),
-  resumeGoal: Endpoint19_10(raw),
-  replanGoal: Endpoint19_11(raw),
-  cancelGoal: Endpoint19_12(raw),
-  recordGoalStep: Endpoint19_13(raw),
-  outcomes: Endpoint19_14(raw),
-  completeGoal: Endpoint19_15(raw),
-  searchMemory: Endpoint19_16(raw),
-  remember: Endpoint19_17(raw),
-  removeMemory: Endpoint19_18(raw),
-  patchMemory: Endpoint19_19(raw),
-  resolveMemoryConflict: Endpoint19_20(raw),
-  reindexMemory: Endpoint19_21(raw),
-  inbox: Endpoint19_22(raw),
-  wake: Endpoint19_23(raw),
-  dismissInbox: Endpoint19_24(raw),
-  retryInbox: Endpoint19_25(raw),
+  conversation: Endpoint19_0(raw),
+  adoptConversation: Endpoint19_1(raw),
+  prewarm: Endpoint19_2(raw),
+  admitFinal: Endpoint19_3(raw),
+  controlStatus: Endpoint19_4(raw),
+  updateMediaState: Endpoint19_5(raw),
+  runDiagnostics: Endpoint19_6(raw),
+  createTurn: Endpoint19_7(raw),
+  currentTurn: Endpoint19_8(raw),
+  turn: Endpoint19_9(raw),
+  updateTurn: Endpoint19_10(raw),
+  cancelTurn: Endpoint19_11(raw),
+  presence: Endpoint19_12(raw),
+  handoffPresence: Endpoint19_13(raw),
+  status: Endpoint19_14(raw),
+  config: Endpoint19_15(raw),
+  updateConfig: Endpoint19_16(raw),
+  benchmarkStatus: Endpoint19_17(raw),
+  runBenchmark: Endpoint19_18(raw),
+  cancelBenchmark: Endpoint19_19(raw),
+  profiles: Endpoint19_20(raw),
+  syncProfiles: Endpoint19_21(raw),
+  goals: Endpoint19_22(raw),
+  createGoal: Endpoint19_23(raw),
+  resumeGoal: Endpoint19_24(raw),
+  replanGoal: Endpoint19_25(raw),
+  cancelGoal: Endpoint19_26(raw),
+  recordGoalStep: Endpoint19_27(raw),
+  outcomes: Endpoint19_28(raw),
+  completeGoal: Endpoint19_29(raw),
+  searchMemory: Endpoint19_30(raw),
+  remember: Endpoint19_31(raw),
+  removeMemory: Endpoint19_32(raw),
+  patchMemory: Endpoint19_33(raw),
+  resolveMemoryConflict: Endpoint19_34(raw),
+  reindexMemory: Endpoint19_35(raw),
+  memoryUses: Endpoint19_36(raw),
+  recordMemoryUse: Endpoint19_37(raw),
+  replays: Endpoint19_38(raw),
+  recordReplay: Endpoint19_39(raw),
+  replay: Endpoint19_40(raw),
+  removeReplay: Endpoint19_41(raw),
+  executeReplay: Endpoint19_42(raw),
+  replayExecution: Endpoint19_43(raw),
+  compareReplays: Endpoint19_44(raw),
+  inbox: Endpoint19_45(raw),
+  wake: Endpoint19_46(raw),
+  dismissInbox: Endpoint19_47(raw),
+  retryInbox: Endpoint19_48(raw),
+  companionStatus: Endpoint19_49(raw),
+  companionConfig: Endpoint19_50(raw),
+  updateCompanionConfig: Endpoint19_51(raw),
+  runDailyBriefing: Endpoint19_52(raw),
+  dailyBriefings: Endpoint19_53(raw),
+  dailyBriefing: Endpoint19_54(raw),
+  prepareCompanionAction: Endpoint19_55(raw),
+  companionActions: Endpoint19_56(raw),
+  approveCompanionAction: Endpoint19_57(raw),
+  cancelCompanionAction: Endpoint19_58(raw),
+  companionActionAudit: Endpoint19_59(raw),
 })
 
 const adaptClient = (raw: RawClient) => ({

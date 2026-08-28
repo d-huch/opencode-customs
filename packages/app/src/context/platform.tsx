@@ -50,6 +50,17 @@ export type ResearchBrowserStatus = {
   resultCount?: number
   message?: string
 }
+
+export type GoogleCompanionStatus = {
+  available: boolean
+  phase: "unavailable" | "disconnected" | "connecting" | "connected" | "expired" | "error"
+  accountID?: string
+  email?: string
+  scopes: string[]
+  writeScopes: string[]
+  checkedAt: number
+  error?: string
+}
 export type AvatarBridgeStatus = {
   available: boolean
   protocol: number
@@ -66,7 +77,7 @@ export type AvatarBridgeStatus = {
     characterID: string
     sessionID?: string
     profileID?: string
-    surface: "desktop" | "unity"
+    surface: "desktop" | "unity-editor" | "pcvr" | "quest"
     state: "idle" | "listening" | "thinking" | "planning" | "responding" | "speaking" | "acting" | "uncertain" | "error"
     emotion: string
     intensity: number
@@ -488,6 +499,12 @@ type PlatformBase = {
   /** Clear cookies, storage, and cache in the dedicated Research Browser profile. */
   clearResearchBrowserData?(): Promise<void>
 
+  getGoogleCompanionStatus?(): Promise<GoogleCompanionStatus>
+  importGoogleOAuthClient?(): Promise<GoogleCompanionStatus>
+  connectGoogleCompanion?(writeScopes?: string[]): Promise<GoogleCompanionStatus>
+  testGoogleCompanion?(): Promise<GoogleCompanionStatus>
+  disconnectGoogleCompanion?(): Promise<GoogleCompanionStatus>
+
   /** Inspect the loopback-only Unity/VR Avatar Bridge and retrieve its pairing data. */
   getAvatarBridgeStatus?(): Promise<AvatarBridgeStatus>
   routeAvatarSpeech?(sessionID: string, text: string): Promise<boolean>
@@ -523,6 +540,12 @@ type PlatformBase = {
   startAvatarBridgePairing?(): Promise<NonNullable<NonNullable<AvatarBridgeStatus["lan"]>["pairing"]>>
   cancelAvatarBridgePairing?(): Promise<void>
   retryAvatarBridgeSync?(): Promise<void>
+  executeJarvisReplayFixture?(replayID: string): Promise<{
+    executionID: string
+    status: string
+    passed: boolean
+    deliveredClients: number
+  }>
   revokeAvatarBridgeDevice?(id: string): Promise<void>
   resolveAvatarBridgeApproval?(id: string, approved: boolean): Promise<boolean>
   deleteAvatarBridgeMemory?(id: string): Promise<void>

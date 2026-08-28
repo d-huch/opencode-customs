@@ -129,8 +129,8 @@ describe("Unity Avatar Bridge protocol", () => {
       observeAgain: true,
     })).toMatchObject({ code: "completed", changedEntityIDs: ["door-1"], observeAgain: true })
     expect(parseAvatarClientMessage({
-      type: "hello", protocol: 2, protocolMinor: 1, token: "secret", clientID: "unity", characterID: "jarvis", actions: [],
-    })).toMatchObject({ protocol: 2, protocolMinor: 1 })
+      type: "hello", protocol: 2, protocolMinor: 6, token: "secret", clientID: "unity", characterID: "jarvis", surface: "pcvr", actions: [],
+    })).toMatchObject({ protocol: 2, protocolMinor: 6, surface: "pcvr" })
   })
 
   test("accepts v2.3 Quest microphone frames and rejects unsafe formats", () => {

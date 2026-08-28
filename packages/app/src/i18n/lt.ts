@@ -1,4 +1,4 @@
-import { DESKTOP_NATIVE_KEYS } from "./desktop-native"
+import { DESKTOP_NATIVE_ENGLISH, DESKTOP_NATIVE_KEYS } from "./desktop-native"
 
 const desktop = [
   "OpenCode",
@@ -70,6 +70,7 @@ const desktop = [
   "Įrašyti failą",
   "Failai",
   "Vietinis serveris",
+  "Research Browser",
   "WSL veikia tik sistemoje Windows",
   "WSL nepasiekiamas",
   "Nepavyko išvardyti įdiegtų WSL distributyvų",
@@ -94,7 +95,7 @@ const desktop = [
 ]
 
 export const dict = {
-  ...Object.fromEntries(DESKTOP_NATIVE_KEYS.map((key, index) => [key, desktop[index]])),
+  ...Object.fromEntries(DESKTOP_NATIVE_KEYS.map((key, index) => [key, desktop[index] ?? DESKTOP_NATIVE_ENGLISH[key]])),
   "command.category.suggested": "Siūloma",
   "command.category.view": "Rodinys",
   "command.category.project": "Projektas",

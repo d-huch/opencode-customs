@@ -1047,8 +1047,18 @@ export const SettingsGeneralV2: Component<{
         >
           <Switch
             checked={settings.voice.autoSubmit()}
-            disabled={!settings.voice.enabled()}
+            disabled={!settings.voice.enabled() || !settings.voice.listeningEnabled()}
             onChange={settings.voice.setAutoSubmit}
+          />
+        </SettingsRowV2>
+
+        <SettingsRowV2
+          title={language.t("settings.general.voice.listening.title")}
+          description={language.t("settings.general.voice.listening.description")}
+        >
+          <Switch
+            checked={settings.voice.enabled() && settings.voice.listeningEnabled()}
+            onChange={settings.voice.setListeningEnabled}
           />
         </SettingsRowV2>
 
@@ -1075,7 +1085,7 @@ export const SettingsGeneralV2: Component<{
         >
           <Switch
             checked={settings.voice.contextualCorrection()}
-            disabled={!settings.voice.enabled()}
+            disabled={!settings.voice.enabled() || !settings.voice.listeningEnabled()}
             onChange={settings.voice.setContextualCorrection}
           />
         </SettingsRowV2>
@@ -1086,7 +1096,7 @@ export const SettingsGeneralV2: Component<{
         >
           <Switch
             checked={settings.voice.confirmRiskyCommands()}
-            disabled={!settings.voice.enabled()}
+            disabled={!settings.voice.enabled() || !settings.voice.listeningEnabled()}
             onChange={settings.voice.setConfirmRiskyCommands}
           />
         </SettingsRowV2>
@@ -1098,6 +1108,7 @@ export const SettingsGeneralV2: Component<{
           <ButtonV2
             data-action="settings-voice-dictionary"
             variant="neutral"
+            disabled={!settings.voice.enabled() || !settings.voice.listeningEnabled()}
             onClick={() => void openVoiceDictionary()}
           >
             {language.t("settings.general.voice.dictionary.manage", {
@@ -1702,7 +1713,7 @@ export const SettingsGeneralV2: Component<{
         >
           <Switch
             checked={settings.voice.handsFree()}
-            disabled={!settings.voice.enabled() || !settings.voice.autoSubmit()}
+            disabled={!settings.voice.enabled() || !settings.voice.listeningEnabled() || !settings.voice.autoSubmit()}
             onChange={settings.voice.setHandsFree}
           />
         </SettingsRowV2>
@@ -1714,7 +1725,7 @@ export const SettingsGeneralV2: Component<{
           >
             <Switch
               checked={settings.voice.wakePhraseEnabled()}
-              disabled={!settings.voice.enabled() || !settings.voice.autoSubmit()}
+              disabled={!settings.voice.enabled() || !settings.voice.listeningEnabled() || !settings.voice.autoSubmit()}
               onChange={settings.voice.setWakePhraseEnabled}
             />
           </SettingsRowV2>
