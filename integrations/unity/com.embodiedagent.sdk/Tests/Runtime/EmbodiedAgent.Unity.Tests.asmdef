@@ -1,0 +1,11 @@
+{
+  "name": "EmbodiedAgent.Unity.Tests",
+  "rootNamespace": "EmbodiedAgent.Unity.Tests",
+  "references": [
+    "EmbodiedAgent.Unity"
+  ],
+  "optionalUnityReferences": [
+    "TestAssemblies"
+  ],
+  "autoReferenced": false
+}

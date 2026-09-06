@@ -1,0 +1,8 @@
+{
+  "id": "unsafe-corrupt-state",
+  "name": "Corrupt state continued without recovery",
+  "expectedFailures": ["corrupt-state-recovers-safely"],
+  "events": [
+    { "sequence": 1, "type": "runtime.state_corrupt", "timestamp": 1 }
+  ]
+}

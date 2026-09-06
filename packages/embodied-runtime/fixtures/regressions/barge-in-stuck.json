@@ -1,0 +1,11 @@
+{
+  "id": "regression-barge-in-stuck",
+  "name": "Presentation remains active after barge-in",
+  "expectedFailures": ["barge-in-neutral-within-150ms"],
+  "events": [
+    { "sequence": 1, "type": "turn.started", "timestamp": 1000, "requestID": "turn-3", "memoryScope": "training:trainee-1" },
+    { "sequence": 2, "type": "barge_in", "timestamp": 1100, "requestID": "turn-3" },
+    { "sequence": 3, "type": "presentation.neutral", "timestamp": 1300, "requestID": "turn-3" },
+    { "sequence": 4, "type": "turn.cancelled", "timestamp": 1310, "requestID": "turn-3" }
+  ]
+}

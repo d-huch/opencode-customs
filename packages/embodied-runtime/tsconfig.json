@@ -1,0 +1,12 @@
+{
+  "extends": "@tsconfig/bun/tsconfig.json",
+  "compilerOptions": {
+    "strict": true,
+    "noEmit": true,
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "types": ["bun"]
+  },
+  "include": ["src", "scripts", "test", "package.json"]
+}

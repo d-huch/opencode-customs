@@ -133,6 +133,55 @@ describe("Unity Avatar Bridge protocol", () => {
     })).toMatchObject({ protocol: 2, protocolMinor: 6, surface: "pcvr" })
   })
 
+  test("accepts bounded v2.9 scenario lifecycle, snapshots, and instructor results", () => {
+    expect(parseAvatarClientMessage({
+      type: "scenario.step",
+      runID: "run-1",
+      scenarioID: "training.equipment-isolation",
+      scenarioRevision: 2,
+      timestamp: 1_000,
+      sessionID: "session-1",
+      stepID: "verify-energy",
+      outcome: "success",
+      evidence: { "energy.zero": true },
+    })).toMatchObject({ type: "scenario.step", stepID: "verify-energy", scenarioRevision: 2 })
+    expect(parseAvatarClientMessage({
+      type: "scenario.completed",
+      runID: "run-1",
+      scenarioID: "training.equipment-isolation",
+      scenarioRevision: 2,
+      timestamp: 2_000,
+      durationMs: 1_000,
+      auditRootHash: "a".repeat(64),
+    })).toMatchObject({ type: "scenario.completed", durationMs: 1_000 })
+    expect(parseAvatarClientMessage({
+      type: "scenario.snapshot",
+      runID: "run-1",
+      scenarioID: "training.equipment-isolation",
+      scenarioRevision: 2,
+      timestamp: 2_100,
+      sessionID: "session-1",
+      traineeID: "trainee-1",
+      instructorID: "instructor-1",
+      status: "paused",
+      currentStepID: "verify-energy",
+      attempt: 2,
+      timeoutRemainingMs: 12_000,
+      evidence: { "energy.zero": true },
+      instructorEvidenceIDs: ["instructor.signed"],
+    })).toMatchObject({ type: "scenario.snapshot", status: "paused", attempt: 2 })
+    expect(parseAvatarClientMessage({
+      type: "instructor.command.result",
+      requestID: "command-1",
+      runID: "run-1",
+      ok: true,
+      code: "paused",
+      timestamp: 2_200,
+      stepID: "verify-energy",
+      attempt: 2,
+    })).toMatchObject({ type: "instructor.command.result", code: "paused" })
+  })
+
   test("accepts v2.3 Quest microphone frames and rejects unsafe formats", () => {
     expect(
       parseAvatarClientMessage({
@@ -168,6 +217,90 @@ describe("Unity Avatar Bridge protocol", () => {
         mode: "hands_free",
       }),
     ).toBeUndefined()
+  })
+
+  test("accepts bounded v2.10 demonstration events and recording audio", () => {
+    expect(parseAvatarClientMessage({
+      type: "demonstration.start",
+      demonstrationID: "loto-demo-1",
+      timestamp: 1_000,
+      title: "Equipment isolation",
+    })).toMatchObject({ type: "demonstration.start", demonstrationID: "loto-demo-1" })
+    expect(parseAvatarClientMessage({
+      type: "demonstration.event",
+      demonstrationID: "loto-demo-1",
+      eventID: "event-1",
+      sequence: 1,
+      timestamp: 1_100,
+      entityID: "disconnect_switch",
+      capabilityID: "safety.open_disconnect",
+      action: "open_disconnect",
+      ok: true,
+      code: "completed",
+      risk: "critical",
+      permissionCategory: "equipment.isolation",
+      postconditions: ["disconnectOpened=true"],
+    })).toMatchObject({ type: "demonstration.event", risk: "critical", sequence: 1 })
+    expect(parseAvatarClientMessage({
+      type: "audio.start",
+      requestID: "narration-1",
+      codec: "pcm_s16le",
+      sampleRate: 16_000,
+      channels: 1,
+      mode: "push_to_talk",
+      purpose: "demonstration",
+      demonstrationID: "loto-demo-1",
+    })).toMatchObject({ purpose: "demonstration", demonstrationID: "loto-demo-1" })
+    expect(parseAvatarClientMessage({
+      type: "audio.start",
+      requestID: "narration-2",
+      codec: "pcm_s16le",
+      sampleRate: 16_000,
+      channels: 1,
+      mode: "push_to_talk",
+      purpose: "demonstration",
+    })).toBeUndefined()
+  })
+
+  test("accepts bounded v2.11 AI Trainee controls", () => {
+    expect(parseAvatarClientMessage({
+      type: "ai.trainee.control",
+      requestID: "ai-start-1",
+      command: "start",
+      profile: "guided",
+      seed: 42,
+    })).toEqual({ type: "ai.trainee.control", requestID: "ai-start-1", command: "start", profile: "guided", seed: 42 })
+    expect(parseAvatarClientMessage({ type: "ai.trainee.control", requestID: "ai-pause-1", command: "pause" }))
+      .toEqual({ type: "ai.trainee.control", requestID: "ai-pause-1", command: "pause" })
+    expect(parseAvatarClientMessage({ type: "ai.trainee.control", requestID: "ai-invalid", command: "start", profile: "adversarial" }))
+      .toBeUndefined()
+    expect(parseAvatarClientMessage({ type: "ai.trainee.control", requestID: "ai-invalid", command: "start", profile: "blind", seed: -1 }))
+      .toBeUndefined()
+  })
+
+  test("accepts bounded v2.12 scenario reset results", () => {
+    expect(parseAvatarClientMessage({
+      type: "scenario.test.reset.result",
+      requestID: "reset-1",
+      ok: true,
+      code: "reset",
+      timestamp: 100,
+      scenarioID: "training.equipment-isolation",
+      scenarioRevision: 3,
+      baselineFingerprint: "abc123",
+      capabilityRevision: 4,
+      worldRevision: 20,
+      runID: "scenario-run-2",
+    })).toMatchObject({ type: "scenario.test.reset.result", requestID: "reset-1", ok: true, baselineFingerprint: "abc123" })
+    expect(parseAvatarClientMessage({
+      type: "scenario.test.reset.result",
+      requestID: "reset-1",
+      ok: true,
+      code: "reset",
+      timestamp: 100,
+      scenarioID: "training.equipment-isolation",
+      scenarioRevision: 0,
+    })).toBeUndefined()
   })
 
   test("rejects duplicate capability IDs and oversized world snapshots", () => {

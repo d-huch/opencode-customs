@@ -1,0 +1,10 @@
+{
+  "id": "regression-reconnect-state-loss",
+  "name": "Canonical session lost during reconnect",
+  "expectedFailures": ["session-survives-reconnect", "reconnect-restores-session"],
+  "events": [
+    { "sequence": 1, "type": "connection.snapshot", "timestamp": 1000, "sessionID": "session-a" },
+    { "sequence": 2, "type": "connection.closed", "timestamp": 1100, "sessionID": "session-a" },
+    { "sequence": 3, "type": "connection.snapshot", "timestamp": 1300, "sessionID": "session-b" }
+  ]
+}

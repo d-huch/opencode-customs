@@ -1,0 +1,24 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="Embodied Agent Runtime" Manufacturer="Embodied Agent" Version="0.4.0"
+           UpgradeCode="BFF7C3A4-D304-4CB8-A948-73BD5A59BD61" Scope="perMachine">
+    <MajorUpgrade DowngradeErrorMessage="A newer Embodied Agent Runtime is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Embodied Agent Runtime">
+        <Component Id="RuntimeComponent" Guid="29D435CE-A6EB-4558-9169-2BF049849D4A" Bitness="always64">
+          <File Id="RuntimeExecutable" Source="$(var.RuntimeExe)" KeyPath="yes" />
+          <RegistryValue Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\Run"
+                         Name="Embodied Agent Runtime" Value="&quot;[INSTALLFOLDER]embodied-agent-runtime.exe&quot;"
+                         Type="string" />
+        </Component>
+        <Component Id="ReplayComponent" Guid="ABFE9ACF-F8E5-45C4-B1D5-0470402969E2" Bitness="always64">
+          <File Id="ReplayExecutable" Source="$(var.ReplayExe)" KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+    <Feature Id="RuntimeFeature" Title="Embodied Agent Runtime" Level="1">
+      <ComponentRef Id="RuntimeComponent" />
+      <ComponentRef Id="ReplayComponent" />
+    </Feature>
+  </Package>
+</Wix>

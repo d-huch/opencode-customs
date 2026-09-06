@@ -1,0 +1,14 @@
+{
+  "id": "equipment-isolation-instructor-supervised",
+  "name": "Equipment Isolation supervised instructor flow",
+  "events": [
+    { "sequence": 1, "type": "connection.snapshot", "timestamp": 0, "sessionID": "training-session-1", "scenarioID": "equipment-isolation", "scenarioRevision": 3 },
+    { "sequence": 2, "type": "instructor.pause", "timestamp": 1000, "data": { "requestID": "pause-1" } },
+    { "sequence": 3, "type": "instructor.hint", "timestamp": 1500, "data": { "requestID": "hint-1" } },
+    { "sequence": 4, "type": "instructor.evidence", "timestamp": 2500, "data": { "requestID": "evidence-1", "source": "instructor" } },
+    { "sequence": 5, "type": "instructor.retry_current_step", "timestamp": 3000, "data": { "requestID": "retry-1" } },
+    { "sequence": 6, "type": "instructor.resume", "timestamp": 3500, "data": { "requestID": "resume-1" } },
+    { "sequence": 7, "type": "instructor.terminate", "timestamp": 5000, "data": { "requestID": "terminate-1" } },
+    { "sequence": 8, "type": "scenario.cancelled", "timestamp": 5010, "scenarioID": "equipment-isolation", "scenarioRevision": 3, "data": { "reason": "instructor_terminated" } }
+  ]
+}

@@ -1,4 +1,14 @@
-# OpenCode Customs Unity/VR Avatar Bridge v2.2
+# Embodied Agent SDK Alpha
+
+New Unity/Quest integrations should use the public UPM package at `com.embodiedagent.sdk`. Open
+`Embodied Agent > Setup Wizard`, or import the Equipment Isolation Safety Instructor sample for a complete typed-action
+reference scene. Unity Editor connects to the standalone Embodied Agent Runtime automatically through localhost
+bootstrap; no pairing JSON is stored in the scene.
+
+The older OpenCode Customs package below remains available as a protocol-v2.7 compatibility surface for existing
+Jarvis scenes. It is not the commercial SDK identity.
+
+# OpenCode Customs Unity/VR Avatar Bridge v2.2 (legacy)
 
 The Unity 6 integration is a UPM package at `com.opencode.customs.avatar-bridge`. It turns one companion into a bounded autonomous agent driven by semantic world state, typed capabilities, a goal stack, trusted autonomy profiles, and save-scoped memory.
 

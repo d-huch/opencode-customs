@@ -1,0 +1,9 @@
+{
+  "id": "duplicate-result-delivery",
+  "name": "Training result delivered twice",
+  "expectedFailures": ["training-results-deliver-at-most-once"],
+  "events": [
+    { "sequence": 1, "type": "result.delivered", "timestamp": 1, "idempotencyKey": "result-1" },
+    { "sequence": 2, "type": "result.delivered", "timestamp": 2, "idempotencyKey": "result-1" }
+  ]
+}

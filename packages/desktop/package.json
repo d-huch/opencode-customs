@@ -23,6 +23,9 @@
     "native:build": "bun install --cwd native"
   },
   "main": "./out/main/index.js",
+  "exports": {
+    "./avatar-bridge": "./src/main/avatar-bridge.ts"
+  },
   "dependencies": {
     "@mozilla/readability": "0.6.0",
     "@zip.js/zip.js": "2.7.62",

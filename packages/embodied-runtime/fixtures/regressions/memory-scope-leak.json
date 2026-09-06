@@ -1,0 +1,10 @@
+{
+  "id": "regression-memory-scope-leak",
+  "name": "Memory crosses trainee scope",
+  "expectedFailures": ["memory-scope-isolated"],
+  "events": [
+    { "sequence": 1, "type": "turn.started", "timestamp": 1000, "requestID": "turn-4", "memoryScope": "training:trainee-1" },
+    { "sequence": 2, "type": "memory.used", "timestamp": 1050, "requestID": "turn-4", "memoryScope": "training:trainee-2" },
+    { "sequence": 3, "type": "assistant.done", "timestamp": 1200, "requestID": "turn-4" }
+  ]
+}

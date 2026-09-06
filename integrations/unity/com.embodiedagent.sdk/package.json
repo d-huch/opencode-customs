@@ -1,0 +1,31 @@
+{
+  "name": "com.embodiedagent.sdk",
+  "version": "0.4.0-beta.2",
+  "displayName": "Embodied Agent SDK",
+  "description": "Local-first Unity 6 and Quest SDK for reliable embodied AI instructors.",
+  "unity": "6000.0",
+  "license": "SEE LICENSE IN EULA-BETA.md",
+  "author": {
+    "name": "Embodied Agent"
+  },
+  "dependencies": {
+    "com.unity.ai.navigation": "2.0.13",
+    "com.unity.animation.rigging": "1.4.1",
+    "com.unity.inputsystem": "1.20.0",
+    "com.unity.nuget.newtonsoft-json": "3.2.2",
+    "com.unity.ugui": "2.5.0",
+    "com.unity.xr.core-utils": "2.6.0",
+    "com.unity.xr.hands": "1.8.1",
+    "com.unity.xr.interaction.toolkit": "3.5.1",
+    "com.unity.xr.management": "4.6.0",
+    "com.unity.xr.meta-openxr": "2.4.0",
+    "com.unity.xr.openxr": "1.16.1"
+  },
+  "samples": [
+    {
+      "displayName": "Equipment Isolation Safety Instructor",
+      "description": "A deterministic Quest-ready safety training vertical slice with typed actions and replay fixtures.",
+      "path": "Samples~/SafetyInstructor"
+    }
+  ]
+}

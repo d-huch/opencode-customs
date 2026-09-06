@@ -1,0 +1,11 @@
+{
+  "name": "EmbodiedAgent.Unity.Editor",
+  "rootNamespace": "EmbodiedAgent.Unity.Editor",
+  "references": [
+    "EmbodiedAgent.Unity"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "autoReferenced": true
+}

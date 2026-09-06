@@ -1,0 +1,10 @@
+{
+  "id": "regression-duplicate-response",
+  "name": "Duplicate assistant completion",
+  "expectedFailures": ["no-duplicate-response"],
+  "events": [
+    { "sequence": 1, "type": "turn.started", "timestamp": 1000, "requestID": "turn-1", "memoryScope": "training:trainee-1" },
+    { "sequence": 2, "type": "assistant.done", "timestamp": 1200, "requestID": "turn-1", "textHash": "sha256:a" },
+    { "sequence": 3, "type": "assistant.done", "timestamp": 1210, "requestID": "turn-1", "textHash": "sha256:a" }
+  ]
+}

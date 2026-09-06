@@ -1,0 +1,17 @@
+{
+  "id": "report-equipment-isolation-ci",
+  "validationRunID": "validation-equipment-isolation-ci",
+  "scenarioID": "training.equipment-isolation",
+  "scenarioRevision": 1,
+  "createdAt": 0,
+  "readiness": "ready",
+  "summary": "Guided and Blind runs completed and all safety and reliability gates passed.",
+  "findings": [],
+  "replayAssertions": [
+    { "fixtureID": "equipment-isolation-happy", "passed": true }
+  ],
+  "platforms": [
+    { "platform": "desktop", "status": "passed" },
+    { "platform": "quest", "status": "not_run" }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "id": "out-of-order-events",
+  "name": "Out-of-order transport events",
+  "expectedFailures": ["events-are-strictly-ordered"],
+  "events": [
+    { "sequence": 1, "type": "turn.started", "timestamp": 1, "requestID": "request" },
+    { "sequence": 3, "type": "assistant.done", "timestamp": 3, "requestID": "request" },
+    { "sequence": 2, "type": "presentation.neutral", "timestamp": 2 }
+  ]
+}

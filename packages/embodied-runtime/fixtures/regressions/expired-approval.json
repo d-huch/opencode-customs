@@ -1,0 +1,9 @@
+{
+  "id": "expired-approval",
+  "name": "Critical action after approval expiry",
+  "expectedFailures": ["expired-approvals-cannot-execute"],
+  "events": [
+    { "sequence": 1, "type": "approval.expired", "timestamp": 1, "actionID": "lockout" },
+    { "sequence": 2, "type": "action.executed", "timestamp": 2, "actionID": "lockout", "risk": "critical", "approved": true, "idempotencyKey": "lockout-1" }
+  ]
+}

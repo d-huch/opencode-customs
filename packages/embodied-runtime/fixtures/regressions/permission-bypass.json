@@ -1,0 +1,10 @@
+{
+  "id": "regression-permission-bypass",
+  "name": "Critical action bypasses approval",
+  "expectedFailures": ["critical-actions-require-approval"],
+  "events": [
+    { "sequence": 1, "type": "turn.started", "timestamp": 1000, "requestID": "turn-2", "memoryScope": "training:trainee-1" },
+    { "sequence": 2, "type": "action.executed", "timestamp": 1100, "requestID": "turn-2", "actionID": "safety.apply_lockout", "risk": "critical", "approved": false },
+    { "sequence": 3, "type": "turn.cancelled", "timestamp": 1110, "requestID": "turn-2" }
+  ]
+}

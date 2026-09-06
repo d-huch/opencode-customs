@@ -1,6 +1,6 @@
 export const AVATAR_BRIDGE_PROTOCOL = 2
-export const AVATAR_BRIDGE_PROTOCOL_MINOR = 7
-export const AVATAR_BRIDGE_VERSION = "2.7"
+export const AVATAR_BRIDGE_PROTOCOL_MINOR = 12
+export const AVATAR_BRIDGE_VERSION = "2.12"
 export const AVATAR_BRIDGE_PROTOCOLS = [1, 2] as const
 export const AVATAR_ACTIONS = [
   "animation.trigger",
@@ -69,6 +69,8 @@ export type AvatarSpeechFrame = {
   channels: 1
   locale?: string
   mode: "push_to_talk" | "hands_free"
+  purpose?: "conversation" | "demonstration"
+  demonstrationID?: string
 }
 
 export type SurfaceHandoff = {
@@ -207,6 +209,120 @@ export type AvatarActionResult = {
   observeAgain?: boolean
 }
 
+export type ScenarioLifecycleMessage = {
+  type: "scenario.started" | "scenario.step" | "scenario.completed" | "scenario.cancelled" | "scenario.failed"
+  runID: string
+  scenarioID: string
+  scenarioRevision: number
+  timestamp: number
+  sessionID?: string
+  stepID?: string
+  outcome?: string
+  durationMs?: number
+  evidence?: Record<string, AvatarJson>
+  auditRootHash?: string
+  demonstrationRevision?: string
+}
+
+export type ScenarioSnapshotMessage = {
+  type: "scenario.snapshot"
+  runID: string
+  scenarioID: string
+  scenarioRevision: number
+  timestamp: number
+  sessionID?: string
+  traineeID?: string
+  instructorID?: string
+  status: "running" | "paused" | "completed" | "cancelled" | "failed"
+  currentStepID?: string
+  attempt: number
+  timeoutRemainingMs: number
+  evidence: Record<string, AvatarJson>
+  instructorEvidenceIDs: string[]
+  deploymentID?: string
+  scenarioTitle?: string
+  currentInstruction?: string
+  allowedCapabilityIDs?: string[]
+  simulation?: boolean
+  criticalAutoApproveCategories?: string[]
+  baselineFingerprint?: string
+  capabilityRevision?: number
+}
+
+export type ScenarioTestResetResultMessage = {
+  type: "scenario.test.reset.result"
+  requestID: string
+  ok: boolean
+  code: string
+  timestamp: number
+  scenarioID: string
+  scenarioRevision: number
+  baselineFingerprint?: string
+  capabilityRevision?: number
+  worldRevision?: number
+  runID?: string
+  message?: string
+}
+
+export type AITraineeControlMessage = {
+  type: "ai.trainee.control"
+  requestID: string
+  command: "start" | "pause" | "resume" | "cancel"
+  profile?: "guided" | "blind"
+  seed?: number
+}
+
+export type InstructorCommandResultMessage = {
+  type: "instructor.command.result"
+  requestID: string
+  runID: string
+  ok: boolean
+  code: string
+  timestamp: number
+  stepID?: string
+  attempt?: number
+  message?: string
+}
+
+export type DemonstrationStartMessage = {
+  type: "demonstration.start"
+  demonstrationID: string
+  timestamp: number
+  title?: string
+}
+
+export type DemonstrationEventMessage = {
+  type: "demonstration.event"
+  demonstrationID: string
+  eventID: string
+  sequence: number
+  timestamp: number
+  entityID: string
+  capabilityID: string
+  action: string
+  ok: boolean
+  code: string
+  risk: AvatarRisk
+  permissionCategory?: string
+  postconditions: string[]
+}
+
+export type DemonstrationTranscriptMessage = {
+  type: "demonstration.transcript"
+  demonstrationID: string
+  eventID: string
+  timestamp: number
+  text: string
+}
+
+export type DemonstrationCompleteMessage = {
+  type: "demonstration.complete" | "demonstration.cancel"
+  demonstrationID: string
+  timestamp: number
+}
+
+export type DemonstrationMessage = DemonstrationStartMessage | DemonstrationEventMessage | DemonstrationTranscriptMessage | DemonstrationCompleteMessage
+
 export type AvatarClientMessage =
   | AvatarHello
   | AvatarTranscript
@@ -235,6 +351,12 @@ export type AvatarClientMessage =
   | { type: "world.camera.result"; id: string; contentType: "image/jpeg"; data: string }
   | { type: "game.action.progress"; id: string; progress: number; message?: string }
   | { type: "approval.result"; id: string; approved: boolean; source: "vr" | "voice" | "desktop" }
+  | ScenarioSnapshotMessage
+  | ScenarioTestResetResultMessage
+  | InstructorCommandResultMessage
+  | ScenarioLifecycleMessage
+  | DemonstrationMessage
+  | AITraineeControlMessage
 
 export function parseAvatarClientMessage(value: unknown): AvatarClientMessage | undefined {
   if (!isRecord(value) || typeof value.type !== "string") return
@@ -249,7 +371,10 @@ export function parseAvatarClientMessage(value: unknown): AvatarClientMessage | 
     if (!integer(value.sampleRate, 8_000, 48_000)) return
     if (value.mode !== "push_to_talk" && value.mode !== "hands_free") return
     const locale = optionalString(value.locale, 32)
-    if (locale === invalid) return
+    const demonstrationID = optionalIdentifier(value.demonstrationID, 160)
+    if (locale === invalid || demonstrationID === invalid) return
+    if (value.purpose !== undefined && value.purpose !== "conversation" && value.purpose !== "demonstration") return
+    if (value.purpose === "demonstration" && typeof demonstrationID !== "string") return
     return {
       type: value.type,
       requestID: value.requestID,
@@ -258,6 +383,8 @@ export function parseAvatarClientMessage(value: unknown): AvatarClientMessage | 
       channels: value.channels,
       mode: value.mode,
       ...(typeof locale === "string" ? { locale } : {}),
+      ...(value.purpose ? { purpose: value.purpose } : {}),
+      ...(typeof demonstrationID === "string" ? { demonstrationID } : {}),
     }
   }
   if (value.type === "audio.end" || value.type === "audio.cancel") {
@@ -307,6 +434,14 @@ export function parseAvatarClientMessage(value: unknown): AvatarClientMessage | 
     if (value.source !== "vr" && value.source !== "voice" && value.source !== "desktop") return
     return { type: value.type, id: value.id, approved: value.approved, source: value.source }
   }
+  if (value.type === "scenario.snapshot") return parseScenarioSnapshot(value)
+  if (value.type === "scenario.test.reset.result") return parseScenarioTestResetResult(value)
+  if (value.type === "ai.trainee.control") return parseAITraineeControl(value)
+  if (value.type === "instructor.command.result") return parseInstructorCommandResult(value)
+  if (value.type === "demonstration.start" || value.type === "demonstration.event" || value.type === "demonstration.transcript" || value.type === "demonstration.complete" || value.type === "demonstration.cancel")
+    return parseDemonstration(value)
+  if (value.type === "scenario.started" || value.type === "scenario.step" || value.type === "scenario.completed" || value.type === "scenario.cancelled" || value.type === "scenario.failed")
+    return parseScenarioLifecycle(value)
   if (value.type !== "character.action.result" && value.type !== "game.action.result") return
   if (!shortID(value.id) || typeof value.ok !== "boolean") return
   const code = optionalIdentifier(value.code, 80)
@@ -324,6 +459,185 @@ export function parseAvatarClientMessage(value: unknown): AvatarClientMessage | 
     ...(isRecord(data) ? { data } : {}),
     ...(Array.isArray(changedEntityIDs) ? { changedEntityIDs } : {}),
     ...(typeof observeAgain === "boolean" ? { observeAgain } : {}),
+  }
+}
+
+function parseAITraineeControl(value: Record<string, unknown>): AITraineeControlMessage | undefined {
+  if (!shortID(value.requestID)) return
+  if (value.command !== "start" && value.command !== "pause" && value.command !== "resume" && value.command !== "cancel") return
+  if (value.command === "start" && value.profile !== "guided" && value.profile !== "blind") return
+  if (value.profile !== undefined && value.profile !== "guided" && value.profile !== "blind") return
+  if (value.seed !== undefined && !integer(value.seed, 0, 2_147_483_647)) return
+  return {
+    type: "ai.trainee.control",
+    requestID: value.requestID,
+    command: value.command,
+    ...(value.profile ? { profile: value.profile } : {}),
+    ...(typeof value.seed === "number" ? { seed: value.seed } : {}),
+  }
+}
+
+function parseDemonstration(value: Record<string, unknown>): DemonstrationMessage | undefined {
+  if (!identifier(value.demonstrationID, 160) || !finite(value.timestamp, 0, Number.MAX_SAFE_INTEGER)) return
+  if (value.type === "demonstration.start") {
+    const title = optionalString(value.title, 200)
+    if (title === invalid) return
+    return {
+      type: value.type,
+      demonstrationID: value.demonstrationID,
+      timestamp: value.timestamp,
+      ...(typeof title === "string" ? { title } : {}),
+    }
+  }
+  if (value.type === "demonstration.complete" || value.type === "demonstration.cancel")
+    return { type: value.type, demonstrationID: value.demonstrationID, timestamp: value.timestamp }
+  if (!shortID(value.eventID)) return
+  if (value.type === "demonstration.transcript") {
+    if (!text(value.text, 12_000) || !value.text.trim()) return
+    return { type: value.type, demonstrationID: value.demonstrationID, eventID: value.eventID, timestamp: value.timestamp, text: value.text.trim() }
+  }
+  if (!integer(value.sequence, 0, 64) || !identifier(value.entityID, 160) || !identifier(value.capabilityID, 160) || !identifier(value.action, 160)) return
+  if (typeof value.ok !== "boolean" || !identifier(value.code, 80)) return
+  if (value.risk !== "ambient" && value.risk !== "interaction" && value.risk !== "critical") return
+  const permissionCategory = optionalIdentifier(value.permissionCategory, 160)
+  const postconditions = optionalTexts(value.postconditions ?? [], 32, 256)
+  if (permissionCategory === invalid || postconditions === invalid || !Array.isArray(postconditions)) return
+  return {
+    type: "demonstration.event",
+    demonstrationID: value.demonstrationID,
+    eventID: value.eventID,
+    sequence: value.sequence,
+    timestamp: value.timestamp,
+    entityID: value.entityID,
+    capabilityID: value.capabilityID,
+    action: value.action,
+    ok: value.ok,
+    code: value.code,
+    risk: value.risk,
+    ...(typeof permissionCategory === "string" ? { permissionCategory } : {}),
+    postconditions,
+  }
+}
+
+function parseScenarioSnapshot(value: Record<string, unknown>): ScenarioSnapshotMessage | undefined {
+  if (!shortID(value.runID) || !identifier(value.scenarioID, 160)) return
+  if (!integer(value.scenarioRevision, 1, Number.MAX_SAFE_INTEGER) || !finite(value.timestamp, 0, Number.MAX_SAFE_INTEGER)) return
+  if (value.status !== "running" && value.status !== "paused" && value.status !== "completed" && value.status !== "cancelled" && value.status !== "failed") return
+  if (!integer(value.attempt, 1, 10_000) || !finite(value.timeoutRemainingMs, 0, 600_000)) return
+  const sessionID = optionalString(value.sessionID, 128)
+  const traineeID = optionalString(value.traineeID, 128)
+  const instructorID = optionalString(value.instructorID, 128)
+  const currentStepID = optionalIdentifier(value.currentStepID, 160)
+  const deploymentID = optionalIdentifier(value.deploymentID, 160)
+  const scenarioTitle = optionalString(value.scenarioTitle, 500)
+  const currentInstruction = optionalString(value.currentInstruction, 4_000)
+  const allowedCapabilityIDs = optionalIdentifiers(value.allowedCapabilityIDs ?? [], 128, 160)
+  const simulation = optionalBoolean(value.simulation)
+  const criticalAutoApproveCategories = optionalIdentifiers(value.criticalAutoApproveCategories ?? [], 64, 160)
+  const baselineFingerprint = optionalString(value.baselineFingerprint, 128)
+  const capabilityRevision = optionalFinite(value.capabilityRevision, 0, Number.MAX_SAFE_INTEGER)
+  const evidence = jsonRecord(value.evidence ?? {}, 32 * 1024)
+  const instructorEvidenceIDs = optionalIdentifiers(value.instructorEvidenceIDs ?? [], 128, 160)
+  if ([sessionID, traineeID, instructorID, currentStepID, deploymentID, scenarioTitle, currentInstruction, allowedCapabilityIDs, simulation, criticalAutoApproveCategories, baselineFingerprint, capabilityRevision, evidence, instructorEvidenceIDs].includes(invalid)) return
+  if (!isRecord(evidence) || !Array.isArray(instructorEvidenceIDs) || !Array.isArray(allowedCapabilityIDs) || !Array.isArray(criticalAutoApproveCategories)) return
+  return {
+    type: "scenario.snapshot",
+    runID: value.runID,
+    scenarioID: value.scenarioID,
+    scenarioRevision: value.scenarioRevision,
+    timestamp: value.timestamp,
+    status: value.status,
+    attempt: value.attempt,
+    timeoutRemainingMs: value.timeoutRemainingMs,
+    evidence,
+    instructorEvidenceIDs,
+    ...(typeof sessionID === "string" ? { sessionID } : {}),
+    ...(typeof traineeID === "string" ? { traineeID } : {}),
+    ...(typeof instructorID === "string" ? { instructorID } : {}),
+    ...(typeof currentStepID === "string" ? { currentStepID } : {}),
+    ...(typeof deploymentID === "string" ? { deploymentID } : {}),
+    ...(typeof scenarioTitle === "string" ? { scenarioTitle } : {}),
+    ...(typeof currentInstruction === "string" ? { currentInstruction } : {}),
+    ...(allowedCapabilityIDs.length ? { allowedCapabilityIDs } : {}),
+    ...(typeof simulation === "boolean" ? { simulation } : {}),
+    ...(criticalAutoApproveCategories.length ? { criticalAutoApproveCategories } : {}),
+    ...(typeof baselineFingerprint === "string" ? { baselineFingerprint } : {}),
+    ...(typeof capabilityRevision === "number" ? { capabilityRevision } : {}),
+  }
+}
+
+function parseScenarioTestResetResult(value: Record<string, unknown>): ScenarioTestResetResultMessage | undefined {
+  if (!shortID(value.requestID) || typeof value.ok !== "boolean" || !identifier(value.code, 80)) return
+  if (!finite(value.timestamp, 0, Number.MAX_SAFE_INTEGER) || !identifier(value.scenarioID, 160)) return
+  if (!integer(value.scenarioRevision, 1, Number.MAX_SAFE_INTEGER)) return
+  const baselineFingerprint = optionalString(value.baselineFingerprint, 128)
+  const capabilityRevision = optionalFinite(value.capabilityRevision, 0, Number.MAX_SAFE_INTEGER)
+  const worldRevision = optionalFinite(value.worldRevision, 0, Number.MAX_SAFE_INTEGER)
+  const runID = optionalString(value.runID, 128)
+  const message = optionalString(value.message, 1_000)
+  if ([baselineFingerprint, capabilityRevision, worldRevision, runID, message].includes(invalid)) return
+  return {
+    type: "scenario.test.reset.result",
+    requestID: value.requestID,
+    ok: value.ok,
+    code: value.code,
+    timestamp: value.timestamp,
+    scenarioID: value.scenarioID,
+    scenarioRevision: value.scenarioRevision,
+    ...(typeof baselineFingerprint === "string" ? { baselineFingerprint } : {}),
+    ...(typeof capabilityRevision === "number" ? { capabilityRevision } : {}),
+    ...(typeof worldRevision === "number" ? { worldRevision } : {}),
+    ...(typeof runID === "string" ? { runID } : {}),
+    ...(typeof message === "string" ? { message } : {}),
+  }
+}
+
+function parseInstructorCommandResult(value: Record<string, unknown>): InstructorCommandResultMessage | undefined {
+  if (!shortID(value.requestID) || !shortID(value.runID) || typeof value.ok !== "boolean") return
+  if (!identifier(value.code, 80) || !finite(value.timestamp, 0, Number.MAX_SAFE_INTEGER)) return
+  const stepID = optionalIdentifier(value.stepID, 160)
+  const attempt = optionalFinite(value.attempt, 1, 10_000)
+  const message = optionalString(value.message, 1_000)
+  if ([stepID, attempt, message].includes(invalid)) return
+  return {
+    type: "instructor.command.result",
+    requestID: value.requestID,
+    runID: value.runID,
+    ok: value.ok,
+    code: value.code,
+    timestamp: value.timestamp,
+    ...(typeof stepID === "string" ? { stepID } : {}),
+    ...(typeof attempt === "number" ? { attempt } : {}),
+    ...(typeof message === "string" ? { message } : {}),
+  }
+}
+
+function parseScenarioLifecycle(value: Record<string, unknown>): ScenarioLifecycleMessage | undefined {
+  if (!shortID(value.runID) || !identifier(value.scenarioID, 160)) return
+  if (!integer(value.scenarioRevision, 1, Number.MAX_SAFE_INTEGER) || !finite(value.timestamp, 0, Number.MAX_SAFE_INTEGER)) return
+  const sessionID = optionalString(value.sessionID, 128)
+  const stepID = optionalIdentifier(value.stepID, 160)
+  const outcome = optionalIdentifier(value.outcome, 80)
+  const durationMs = optionalFinite(value.durationMs, 0, 86_400_000)
+  const evidence = jsonRecord(value.evidence, 32 * 1024)
+  const auditRootHash = optionalString(value.auditRootHash, 64)
+  const demonstrationRevision = optionalString(value.demonstrationRevision, 200)
+  if ([sessionID, stepID, outcome, durationMs, evidence, auditRootHash, demonstrationRevision].includes(invalid)) return
+  if (typeof auditRootHash === "string" && !/^[a-f0-9]{64}$/.test(auditRootHash)) return
+  if (value.type === "scenario.step" && typeof stepID !== "string") return
+  return {
+    type: value.type as ScenarioLifecycleMessage["type"],
+    runID: value.runID,
+    scenarioID: value.scenarioID,
+    scenarioRevision: value.scenarioRevision,
+    timestamp: value.timestamp,
+    ...(typeof sessionID === "string" ? { sessionID } : {}),
+    ...(typeof stepID === "string" ? { stepID } : {}),
+    ...(typeof outcome === "string" ? { outcome } : {}),
+    ...(typeof durationMs === "number" ? { durationMs } : {}),
+    ...(isRecord(evidence) ? { evidence } : {}),
+    ...(typeof auditRootHash === "string" ? { auditRootHash } : {}),
+    ...(typeof demonstrationRevision === "string" ? { demonstrationRevision } : {}),
   }
 }
 
@@ -651,6 +965,12 @@ function optionalIdentifier(value: unknown, maximum: number) {
 function optionalIdentifiers(value: unknown, maximumItems: number, maximumBytes: number) {
   if (value === undefined) return undefined
   if (!Array.isArray(value) || value.length > maximumItems || !value.every((item) => identifier(item, maximumBytes))) return invalid
+  return [...new Set(value)]
+}
+
+function optionalTexts(value: unknown, maximumItems: number, maximumBytes: number) {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value) || value.length > maximumItems || !value.every((item) => text(item, maximumBytes))) return invalid
   return [...new Set(value)]
 }
 

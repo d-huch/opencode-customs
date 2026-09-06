@@ -1,0 +1,33 @@
+{
+  "name": "@embodied-agent/runtime",
+  "version": "0.4.0-beta.2",
+  "private": true,
+  "type": "module",
+  "license": "UNLICENSED",
+  "bin": {
+    "embodied-agent-runtime": "./src/index.ts",
+    "embodied-replay": "./src/replay-cli.ts",
+    "embodied-validate": "./src/validation-cli.ts"
+  },
+  "scripts": {
+    "typecheck": "tsgo --noEmit",
+    "test": "bun test --timeout 30000 --only-failures",
+    "replay": "bun run src/replay-cli.ts",
+    "validate-training": "bun run src/validation-cli.ts",
+    "build:mac": "BUN_NO_CODESIGN_MACHO_BINARY=1 bun build --compile --target=bun-darwin-arm64 --outfile=dist/mac-arm64/embodied-agent-runtime src/index.ts",
+    "build:replay:mac": "BUN_NO_CODESIGN_MACHO_BINARY=1 bun build --compile --target=bun-darwin-arm64 --outfile=dist/mac-arm64/embodied-replay src/replay-cli.ts",
+    "build:win": "bun build --compile --target=bun-windows-x64 --external @ff-labs/fff-bin-win32-x64/fff_c.dll --outfile=dist/win-x64/embodied-agent-runtime.exe src/index.ts",
+    "build:replay:win": "bun build --compile --target=bun-windows-x64 --outfile=dist/win-x64/embodied-replay.exe src/replay-cli.ts",
+    "package:alpha": "bun run scripts/package.ts",
+    "package:beta": "EMBODIED_RELEASE=production bun run scripts/package.ts"
+  },
+  "dependencies": {
+    "@opencode-ai/desktop": "workspace:*",
+    "opencode": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "catalog:",
+    "@typescript/native-preview": "catalog:",
+    "typescript": "catalog:"
+  }
+}

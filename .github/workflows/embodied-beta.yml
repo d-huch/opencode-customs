@@ -1,0 +1,88 @@
+name: embodied-beta
+
+on:
+  workflow_dispatch:
+    inputs:
+      quest:
+        description: Run the self-hosted Unity/Quest build gate
+        required: false
+        type: boolean
+        default: false
+  pull_request:
+    paths:
+      - "packages/embodied-runtime/**"
+      - "integrations/unity/com.embodiedagent.sdk/**"
+      - "packages/desktop/src/main/avatar-bridge*"
+      - "script/check-embodied.ts"
+      - ".github/workflows/embodied-beta.yml"
+
+jobs:
+  runtime:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            artifact: runtime-macos-arm64
+          - runner: windows-2025
+            artifact: runtime-windows-x64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: ./.github/actions/setup-bun
+      - name: Validate Runtime and Replay
+        working-directory: packages/embodied-runtime
+        run: |
+          bun typecheck
+          bun test --timeout 30000
+        shell: bash
+      - name: Build macOS executables
+        if: runner.os == 'macOS'
+        working-directory: packages/embodied-runtime
+        run: |
+          bun run build:mac
+          bun run build:replay:mac
+      - name: Build Windows executables and MSI
+        if: runner.os == 'Windows'
+        working-directory: packages/embodied-runtime
+        shell: pwsh
+        run: |
+          bun run build:win
+          bun run build:replay:win
+          dotnet tool install --global wix --version 5.0.2
+          wix build installer/windows/Runtime.wxs -arch x64 `
+            -d RuntimeExe="$PWD/dist/win-x64/embodied-agent-runtime.exe" `
+            -d ReplayExe="$PWD/dist/win-x64/embodied-replay.exe" `
+            -o dist/win-x64/Embodied-Agent-Runtime-Windows-x64.msi
+      - uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
+        with:
+          name: ${{ matrix.artifact }}
+          path: packages/embodied-runtime/dist/${{ runner.os == 'macOS' && 'mac-arm64' || 'win-x64' }}
+
+  sdk-contract:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: ./.github/actions/setup-bun
+      - name: Check public SDK and reliability gate
+        run: bun script/check-embodied.ts
+      - name: Dependency vulnerability report
+        run: bun audit --json > embodied-dependency-scan.json
+      - uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
+        with:
+          name: embodied-reliability
+          path: |
+            embodied-dependency-scan.json
+
+  quest:
+    if: github.event_name == 'workflow_dispatch' && inputs.quest
+    runs-on: [self-hosted, macOS, ARM64, unity6, quest3]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: ./.github/actions/setup-bun
+      - name: Build and validate Quest sample
+        run: bun script/check-embodied.ts --unity --quest
+      - uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
+        with:
+          name: embodied-quest-development
+          path: packages/embodied-runtime/dist/quest/Embodied-Agent-Safety-Instructor.apk

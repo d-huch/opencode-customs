@@ -463,9 +463,233 @@ describe("Avatar Bridge v2 integration", () => {
       actions: [],
       resumeSequence: latestSequence,
     }))
-    expect(await next(resumedMessages, "welcome")).toMatchObject({ serverVersion: "2.7", protocolMinor: 7 })
+    expect(await next(resumedMessages, "welcome")).toMatchObject({ serverVersion: "2.12", protocolMinor: 12 })
 
     resumed.close()
+    await bridge.stop()
+    await rm(directory, { recursive: true })
+  })
+
+  test.serial("retries one instructor command after a matching scenario reconnect", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "avatar-bridge-instructor-"))
+    const bridge = await startAvatarBridge({ stateDirectory: directory, bootstrapPort: 0, discoveryPort: 0 })
+    const identity = {
+      protocol: 2,
+      protocolMinor: 9,
+      token: bridge.token,
+      clientID: "instructor-client",
+      characterID: "instructor",
+      gameID: "safety-training",
+      saveSlotID: "pilot-1",
+      actions: [],
+    }
+    const snapshot = {
+      type: "scenario.snapshot",
+      runID: "run-instructor-1",
+      scenarioID: "equipment-isolation",
+      scenarioRevision: 3,
+      timestamp: Date.now(),
+      traineeID: "trainee-1",
+      instructorID: "instructor-1",
+      status: "running",
+      currentStepID: "ppe-inspection",
+      attempt: 1,
+      timeoutRemainingMs: 45_000,
+      evidence: {},
+      instructorEvidenceIDs: ["instructor-signoff"],
+    }
+    const first = new WebSocket(bridge.url)
+    const firstMessages: Record<string, unknown>[] = []
+    first.on("message", (value, binary) => {
+      if (!binary) firstMessages.push(JSON.parse(value.toString()) as Record<string, unknown>)
+    })
+    await opened(first)
+    first.send(JSON.stringify({ type: "hello", ...identity }))
+    await next(firstMessages, "welcome")
+    first.send(JSON.stringify(snapshot))
+    await Bun.sleep(20)
+
+    const input = {
+      requestID: "instructor-request-1",
+      runID: snapshot.runID,
+      scenarioRevision: snapshot.scenarioRevision,
+      expectedStepID: snapshot.currentStepID,
+      instructorID: snapshot.instructorID,
+      command: "pause" as const,
+    }
+    const pending = bridge.instructorCommand(input)
+    expect(await next(firstMessages, "instructor.command")).toMatchObject({ requestID: input.requestID, command: "pause" })
+    first.close()
+    await closed(first)
+
+    const resumed = new WebSocket(bridge.url)
+    const resumedMessages: Record<string, unknown>[] = []
+    resumed.on("message", (value, binary) => {
+      if (!binary) resumedMessages.push(JSON.parse(value.toString()) as Record<string, unknown>)
+    })
+    await opened(resumed)
+    resumed.send(JSON.stringify({ type: "hello", ...identity }))
+    await next(resumedMessages, "welcome")
+    resumed.send(JSON.stringify({ ...snapshot, timestamp: Date.now() }))
+    expect(await next(resumedMessages, "instructor.command")).toMatchObject({ requestID: input.requestID, command: "pause" })
+    resumed.send(JSON.stringify({
+      type: "instructor.command.result",
+      requestID: input.requestID,
+      runID: input.runID,
+      ok: true,
+      code: "paused",
+      timestamp: Date.now(),
+      stepID: input.expectedStepID,
+      attempt: 1,
+    }))
+    expect(await pending).toMatchObject({ requestID: input.requestID, ok: true, code: "paused" })
+    expect(await bridge.instructorCommand(input)).toMatchObject({ requestID: input.requestID, ok: true, code: "paused" })
+
+    resumed.close()
+    await bridge.stop()
+    await rm(directory, { recursive: true })
+  })
+
+  test.serial("routes v2.11 AI Trainee controls and auto-approves only simulation allowlists", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "avatar-bridge-ai-trainee-"))
+    const controls: Record<string, unknown>[] = []
+    const bridge = await startAvatarBridge({
+      stateDirectory: directory,
+      bootstrapPort: 0,
+      discoveryPort: 0,
+      onAITraineeControl: async (message) => {
+        controls.push(message)
+        return { ok: true, code: "started", runID: "ai-run-1" }
+      },
+    })
+    let socket = new WebSocket(bridge.url)
+    const messages: Record<string, unknown>[] = []
+    socket.on("message", (value, binary) => { if (!binary) messages.push(JSON.parse(value.toString()) as Record<string, unknown>) })
+    await opened(socket)
+    socket.send(JSON.stringify({
+      type: "hello", protocol: 2, protocolMinor: 11, token: bridge.token, clientID: "ai-client",
+      characterID: "trainee", gameID: "loto", saveSlotID: "simulation", actions: [],
+    }))
+    await next(messages, "welcome")
+    socket.send(JSON.stringify({ type: "ai.trainee.control", requestID: "control-1", command: "start", profile: "guided", seed: 7 }))
+    expect(await next(messages, "ai.trainee.command.result")).toMatchObject({ requestID: "control-1", ok: true, runID: "ai-run-1" })
+    expect(controls).toEqual([expect.objectContaining({ command: "start", profile: "guided", characterID: "trainee" })])
+
+    socket.send(JSON.stringify({
+      type: "capability.manifest", revision: 1, capabilities: [{
+        id: "safety.apply_lockout", title: "Apply lockout", description: "Apply a simulated lock",
+        parameters: { type: "object", properties: { entityID: { type: "string" } }, required: ["entityID"] },
+        risk: "critical", permissionCategory: "equipment.lockout", cooldownMs: 0, timeoutMs: 2_000,
+        cancellable: true, preconditions: ["disconnectOpened=true"], postconditions: ["lockoutApplied=true"],
+      }],
+    }))
+    await next(messages, "capability.ack")
+    socket.send(JSON.stringify({
+      type: "world.snapshot", world: {
+        gameID: "loto", saveSlotID: "simulation", characterID: "trainee", revision: 1, timestamp: Date.now(),
+        entities: [{ id: "lock", kind: "equipment", tags: ["lockout"], visible: true, state: {}, affordances: ["safety.apply_lockout"] }],
+        inventory: {}, quests: {}, relationships: {}, events: [],
+      },
+    }))
+    await next(messages, "world.ack")
+    const scenario = {
+      type: "scenario.snapshot", runID: "scenario-run-1", scenarioID: "equipment-isolation", scenarioRevision: 1,
+      timestamp: Date.now(), status: "running", attempt: 1, timeoutRemainingMs: 60_000,
+      currentStepID: "apply-lockout", currentInstruction: "Apply the lock", allowedCapabilityIDs: ["safety.apply_lockout"],
+      evidence: {}, instructorEvidenceIDs: [], simulation: true, criticalAutoApproveCategories: ["equipment.lockout"],
+    }
+    socket.send(JSON.stringify(scenario))
+    await Bun.sleep(20)
+
+    const input = {
+      runID: "ai-run-1", scenarioRunID: "scenario-run-1", characterID: "trainee",
+      decision: { capabilityID: "safety.apply_lockout", entityID: "lock", arguments: {}, expectedPostconditions: ["lockoutApplied=true"] },
+      idempotencyKey: "ai-run-1:1", simulationAutoApprove: true,
+    }
+    const pending = bridge.aiTraineeAction(input)
+    const action = await next(messages, "game.action")
+    expect(messages.some((message) => message.type === "approval.request")).toBe(false)
+    socket.send(JSON.stringify({ type: "game.action.result", id: action.id, ok: true, code: "completed" }))
+    const result = await pending
+    expect(result).toMatchObject({ ok: true, autoApproved: true, approved: true })
+    expect(await bridge.aiTraineeAction(input)).toEqual(result)
+    expect(messages.filter((message) => message.type === "game.action")).toHaveLength(0)
+
+    const reconnectInput = { ...input, idempotencyKey: "ai-run-1:reconnect" }
+    const reconnectPending = bridge.aiTraineeAction(reconnectInput)
+    const originalRequest = await next(messages, "game.action")
+    socket.close()
+    await closed(socket)
+    const resumed = new WebSocket(bridge.url)
+    resumed.on("message", (value, binary) => { if (!binary) messages.push(JSON.parse(value.toString()) as Record<string, unknown>) })
+    await opened(resumed)
+    resumed.send(JSON.stringify({
+      type: "hello", protocol: 2, protocolMinor: 11, token: bridge.token, clientID: "ai-client",
+      characterID: "trainee", gameID: "loto", saveSlotID: "simulation", actions: [],
+    }))
+    await next(messages, "welcome")
+    const retriedRequest = await next(messages, "game.action")
+    expect(retriedRequest.id).toBe(originalRequest.id)
+    resumed.send(JSON.stringify({ type: "game.action.result", id: retriedRequest.id, ok: true, code: "completed" }))
+    expect(await reconnectPending).toMatchObject({ ok: true, autoApproved: true })
+    socket = resumed
+
+    socket.send(JSON.stringify({
+      type: "capability.manifest", revision: 1, capabilities: [{
+        id: "safety.apply_lockout", title: "Apply lockout", description: "Apply a simulated lock",
+        parameters: { type: "object", properties: { entityID: { type: "string" } }, required: ["entityID"] },
+        risk: "critical", permissionCategory: "equipment.lockout", cooldownMs: 0, timeoutMs: 2_000,
+        cancellable: true, preconditions: ["disconnectOpened=true"], postconditions: ["lockoutApplied=true"],
+      }],
+    }))
+    await next(messages, "capability.ack")
+    socket.send(JSON.stringify({
+      type: "world.snapshot", world: {
+        gameID: "loto", saveSlotID: "simulation", characterID: "trainee", revision: 2, timestamp: Date.now(),
+        entities: [{ id: "lock", kind: "equipment", tags: ["lockout"], visible: true, state: {}, affordances: ["safety.apply_lockout"] }],
+        inventory: {}, quests: {}, relationships: {}, events: [],
+      },
+    }))
+    await next(messages, "world.ack")
+    socket.send(JSON.stringify({ ...scenario, timestamp: Date.now(), simulation: false }))
+    await Bun.sleep(20)
+    const denied = bridge.aiTraineeAction({ ...input, idempotencyKey: "ai-run-1:2" })
+    const approval = await next(messages, "approval.request")
+    expect(bridge.resolveApproval(String(approval.id), false)).toBe(true)
+    expect(await denied).toMatchObject({ ok: false, code: "approval_denied" })
+
+    socket.close()
+    await bridge.stop()
+    await rm(directory, { recursive: true })
+  })
+
+  test.serial("performs one bounded v2.12 scenario test reset", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "avatar-bridge-reset-"))
+    const bridge = await startAvatarBridge({ stateDirectory: directory, bootstrapPort: 0, discoveryPort: 0 })
+    const socket = new WebSocket(bridge.url)
+    const messages: Record<string, unknown>[] = []
+    socket.on("message", (value, binary) => { if (!binary) messages.push(JSON.parse(value.toString()) as Record<string, unknown>) })
+    await opened(socket)
+    socket.send(JSON.stringify({
+      type: "hello", protocol: 2, protocolMinor: 12, token: bridge.token, clientID: "validation-client",
+      characterID: "trainee", gameID: "loto", saveSlotID: "simulation", actions: [],
+    }))
+    await next(messages, "welcome")
+    socket.send(JSON.stringify({
+      type: "scenario.snapshot", runID: "scenario-run-1", scenarioID: "training.equipment-isolation", scenarioRevision: 2,
+      timestamp: Date.now(), status: "running", attempt: 1, timeoutRemainingMs: 60_000, evidence: {}, instructorEvidenceIDs: [],
+      simulation: true, baselineFingerprint: "baseline", capabilityRevision: 3,
+    }))
+    await Bun.sleep(20)
+    const pending = bridge.scenarioTestReset({ scenarioID: "training.equipment-isolation", scenarioRevision: 2, expectedBaselineFingerprint: "baseline" })
+    const request = await next(messages, "scenario.test.reset")
+    socket.send(JSON.stringify({
+      type: "scenario.test.reset.result", requestID: request.requestID, ok: true, code: "reset", timestamp: Date.now(),
+      scenarioID: "training.equipment-isolation", scenarioRevision: 2, baselineFingerprint: "baseline", capabilityRevision: 3,
+      worldRevision: 9, runID: "scenario-run-2",
+    }))
+    expect(await pending).toMatchObject({ ok: true, code: "reset", baselineFingerprint: "baseline", capabilityRevision: 3, worldRevision: 9 })
+    socket.close()
     await bridge.stop()
     await rm(directory, { recursive: true })
   })
@@ -501,7 +725,7 @@ describe("Avatar Bridge v2 integration", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify(identity),
     }).then((response) => response.json()) as Record<string, unknown>
-    expect(profile).toMatchObject({ ...identity, protocolMinor: 7, bootstrapVersion: 1, url: bridge.url })
+    expect(profile).toMatchObject({ ...identity, protocolMinor: 12, bootstrapVersion: 1, url: bridge.url })
     expect(typeof profile.token).toBe("string")
     expect(typeof profile.expiresAt).toBe("number")
 
@@ -579,12 +803,47 @@ describe("Avatar Bridge v2 integration", () => {
       service: "opencode-customs-avatar",
       version: 1,
       protocol: 2,
-      protocolMinor: 7,
+      protocolMinor: 12,
       certificateFingerprint: bridge.status().lan?.certificateFingerprint,
     })
     expect(value).not.toHaveProperty("token")
     expect(value.addresses).toBeArray()
 
+    socket.close()
+    await bridge.stop()
+    await rm(directory, { recursive: true })
+  })
+
+  test.serial("forwards v2.10 demonstration events once and acknowledges them", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "avatar-bridge-demonstration-"))
+    const recorded: Record<string, unknown>[] = []
+    const bridge = await startAvatarBridge({
+      stateDirectory: directory,
+      bootstrapPort: 0,
+      discoveryPort: 0,
+      onDemonstrationEvent: (message) => { recorded.push(message) },
+    })
+    const socket = new WebSocket(bridge.url)
+    const messages: Record<string, unknown>[] = []
+    socket.on("message", (value, binary) => { if (!binary) messages.push(JSON.parse(value.toString()) as Record<string, unknown>) })
+    await opened(socket)
+    socket.send(JSON.stringify({
+      type: "hello", protocol: 2, protocolMinor: 10, token: bridge.token, clientID: "demo-client",
+      characterID: "instructor", gameID: "loto", saveSlotID: "one", actions: [],
+    }))
+    await next(messages, "welcome")
+    socket.send(JSON.stringify({ type: "demonstration.start", demonstrationID: "demo-1", timestamp: Date.now(), title: "LOTO" }))
+    expect(await next(messages, "demonstration.ack")).toMatchObject({ demonstrationID: "demo-1", status: "recorded" })
+    socket.send(JSON.stringify({
+      type: "demonstration.event", demonstrationID: "demo-1", eventID: "event-1", sequence: 1, timestamp: Date.now(),
+      entityID: "disconnect_switch", capabilityID: "safety.open_disconnect", action: "open_disconnect", ok: true,
+      code: "completed", risk: "critical", permissionCategory: "equipment.isolation", postconditions: ["disconnectOpened=true"],
+    }))
+    expect(await next(messages, "demonstration.ack")).toMatchObject({ demonstrationID: "demo-1", eventID: "event-1" })
+    expect(recorded).toEqual([
+      expect.objectContaining({ type: "demonstration.start", clientID: "demo-client", gameID: "loto" }),
+      expect.objectContaining({ type: "demonstration.event", eventID: "event-1", risk: "critical" }),
+    ])
     socket.close()
     await bridge.stop()
     await rm(directory, { recursive: true })

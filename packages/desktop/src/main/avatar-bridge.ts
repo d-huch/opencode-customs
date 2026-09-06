@@ -20,15 +20,21 @@ import {
   parseGameAction,
   type AvatarActionInput,
   type AvatarActionResult,
+  type AITraineeControlMessage,
   type AvatarCapability,
   type AvatarClientMessage,
   type AvatarHello,
   type AvatarJson,
   type AvatarPresentationState,
+  type ScenarioLifecycleMessage,
   type AvatarSpeechFrame,
   type AvatarTranscript,
   type AvatarWorldEvent,
+  type DemonstrationMessage,
   type GameActionInput,
+  type InstructorCommandResultMessage,
+  type ScenarioSnapshotMessage,
+  type ScenarioTestResetResultMessage,
 } from "./avatar-bridge-protocol"
 import {
   AvatarCycleBudget,
@@ -96,6 +102,7 @@ type ClientState = AvatarHello & {
   attentionEvents: AvatarWorldEvent[]
   attentionTimer?: NodeJS.Timeout
   attentionCooldowns: Map<string, number>
+  scenarioSnapshot?: ScenarioSnapshotMessage
   audioInput?: {
     kind: "cascade"
     frame: AvatarSpeechFrame
@@ -114,6 +121,47 @@ type ClientState = AvatarHello & {
     unsubscribe: () => void
   }
 }
+export type InstructorCommandInput = {
+  requestID: string
+  runID: string
+  scenarioRevision: number
+  expectedStepID?: string
+  instructorID: string
+} & (
+  | { command: "pause" | "resume" | "retry_current_step" | "terminate" }
+  | { command: "hint"; text: string }
+  | { command: "evidence"; evidenceID: string; value: string; reason: string }
+)
+export type InstructorCommandResult = Omit<InstructorCommandResultMessage, "type">
+export type AITraineeActionInput = {
+  runID: string
+  scenarioRunID: string
+  characterID: string
+  decision: {
+    capabilityID: string
+    entityID: string
+    arguments: Record<string, AvatarJson>
+    expectedPostconditions: string[]
+  }
+  idempotencyKey: string
+  simulationAutoApprove: boolean
+}
+type PendingInstructorCommand = {
+  input: InstructorCommandInput
+  clientID: string
+  expiresAt: number
+  timer: NodeJS.Timeout
+  resolves: Array<(result: InstructorCommandResult) => void>
+}
+export type ScenarioTestResetResult = Omit<ScenarioTestResetResultMessage, "type">
+type PendingScenarioTestReset = {
+  requestID: string
+  clientID: string
+  scenarioID: string
+  scenarioRevision: number
+  timer: NodeJS.Timeout
+  resolve: (result: ScenarioTestResetResult) => void
+}
 type JarvisTurnPhase =
   | "listening"
   | "transcribing"
@@ -127,10 +175,12 @@ type JarvisTurnPhase =
   | "error"
 type PendingAction = {
   socket: WebSocket
+  clientID: string
   timer: NodeJS.Timeout
   actionID: string
   cycleID?: string
   cancellable: boolean
+  request: Record<string, unknown>
   resolve: (result: {
     ok: boolean
     code?: string
@@ -183,6 +233,15 @@ export async function startAvatarBridge(
     nemotronVoice?: NemotronVoiceController
     bootstrapPort?: number
     discoveryPort?: number
+    onScenarioLifecycle?: (message: ScenarioLifecycleMessage) => void | Promise<void>
+    onDemonstrationEvent?: (message: DemonstrationMessage & { clientID: string; characterID: string; gameID: string; saveSlotID: string }) => void | Promise<void>
+    onInstructorEvent?: (message: ScenarioSnapshotMessage | InstructorCommandResultMessage | { type: "client.connected" | "client.disconnected"; clientID: string; timestamp: number }) => void | Promise<void>
+    onAITraineeControl?: (message: AITraineeControlMessage & { clientID: string; characterID: string }) => Promise<{
+      ok: boolean
+      code: string
+      runID?: string
+      message?: string
+    }>
   } = {},
 ) {
   const writeLog = options.log ?? (() => undefined)
@@ -196,6 +255,9 @@ export async function startAvatarBridge(
   const pendingActions = new Map<string, PendingAction>()
   const pendingCameras = new Map<string, PendingCamera>()
   const pendingApprovals = new Map<string, PendingApproval>()
+  const pendingInstructorCommands = new Map<string, PendingInstructorCommand>()
+  const pendingScenarioTestResets = new Map<string, PendingScenarioTestReset>()
+  const instructorCommandResults = new Map<string, InstructorCommandResult>()
   const idempotency = new Map<string, { expiresAt: number; promise: Promise<GameActionResult> }>()
   const bootstrapTokens = new Map<string, {
     expiresAt: number
@@ -320,6 +382,7 @@ export async function startAvatarBridge(
         capabilities: [...client.capabilities.values()],
         world: worlds.get(client.characterID),
         lastHeartbeatAt: client.lastHeartbeatAt,
+        scenario: client.scenarioSnapshot,
       })),
     }
   }
@@ -767,6 +830,7 @@ export async function startAvatarBridge(
         }
         streams.set(message.clientID, stream)
         clients.set(socket, connected)
+        notifyInstructor({ type: "client.connected", clientID: connected.clientID, timestamp: Date.now() })
         if (device) void persistent.touchDevice(device.id)
         if (message.protocol === 2 && typeof message.resumeSequence === "number") {
           stream.history
@@ -792,6 +856,11 @@ export async function startAvatarBridge(
           },
           false,
         )
+        for (const action of pendingActions.values()) {
+          if (action.clientID !== connected.clientID) continue
+          action.socket = connected.socket
+          sendState(connected, action.request, false)
+        }
         writeLog("avatar", "Unity avatar connected", {
           clientID: message.clientID,
           characterID: message.characterID,
@@ -917,6 +986,80 @@ export async function startAvatarBridge(
       resolveApproval(message.id, message.approved)
       return
     }
+    if (message.type === "scenario.snapshot") {
+      state.scenarioSnapshot = message
+      notifyInstructor(message)
+      resendInstructorCommands(state, message)
+      return
+    }
+    if (message.type === "scenario.test.reset.result") {
+      settleScenarioTestReset(state, message)
+      return
+    }
+    if (message.type === "ai.trainee.control") {
+      void Promise.resolve(options.onAITraineeControl?.({
+        ...message,
+        clientID: state.clientID,
+        characterID: state.characterID,
+      }) ?? { ok: false, code: "ai_trainee_unavailable", message: "AI Trainee runtime is unavailable." }).then((result) => sendState(state, {
+        type: "ai.trainee.command.result",
+        requestID: message.requestID,
+        command: message.command,
+        ...result,
+        timestamp: Date.now(),
+      }, false)).catch((error) => sendState(state, {
+        type: "ai.trainee.command.result",
+        requestID: message.requestID,
+        command: message.command,
+        ok: false,
+        code: "ai_trainee_control_failed",
+        message: error instanceof Error ? error.message : String(error),
+        timestamp: Date.now(),
+      }, false))
+      return
+    }
+    if (message.type === "instructor.command.result") {
+      settleInstructorCommand(state, message)
+      notifyInstructor(message)
+      return
+    }
+    if (message.type === "demonstration.start" || message.type === "demonstration.event" || message.type === "demonstration.transcript" || message.type === "demonstration.complete" || message.type === "demonstration.cancel") {
+      void Promise.resolve(options.onDemonstrationEvent?.({
+        ...message,
+        clientID: state.clientID,
+        characterID: state.characterID,
+        gameID: state.gameID ?? "unknown",
+        saveSlotID: state.saveSlotID ?? "default",
+      })).then(() => sendState(state, {
+        type: "demonstration.ack",
+        demonstrationID: message.demonstrationID,
+        eventID: "eventID" in message ? message.eventID : undefined,
+        status: message.type === "demonstration.complete" ? "completed" : message.type === "demonstration.cancel" ? "cancelled" : "recorded",
+      }, false)).catch((error) => sendState(state, {
+        type: "demonstration.error",
+        demonstrationID: message.demonstrationID,
+        error: error instanceof Error ? error.message : String(error),
+      }, false))
+      return
+    }
+    if (message.type === "scenario.started" || message.type === "scenario.step" || message.type === "scenario.completed" || message.type === "scenario.cancelled" || message.type === "scenario.failed") {
+      writeLog("scenario", "Unity scenario lifecycle", {
+        clientID: state.clientID,
+        runID: message.runID,
+        scenarioID: message.scenarioID,
+        scenarioRevision: message.scenarioRevision,
+        event: message.type,
+        stepID: message.stepID,
+        outcome: message.outcome,
+        durationMs: message.durationMs,
+      })
+      void Promise.resolve(options.onScenarioLifecycle?.(message)).catch((error) => writeLog("scenario", "Scenario lifecycle observer failed", {
+        runID: message.runID,
+        scenarioID: message.scenarioID,
+        error: String(error),
+      }, "warn"))
+      return
+    }
     if (message.type === "character.action.result" || message.type === "game.action.result") {
       settleAction(pendingActions, state.socket, message)
       return
@@ -954,6 +1097,10 @@ export async function startAvatarBridge(
   }
 
   function startAudioInput(state: ClientState, frame: AvatarSpeechFrame) {
+    if (frame.purpose === "demonstration" && options.nemotronVoice?.engine() === "nemotron") {
+      sendState(state, { type: "audio.error", requestID: frame.requestID, error: "Instructor recording requires the Cascade transcription engine" }, false)
+      return
+    }
     if (options.nemotronVoice?.engine() === "nemotron") {
       startNemotronAudioInput(state, frame)
       return
@@ -997,6 +1144,30 @@ export async function startAvatarBridge(
         }
         state.partialTranscript = text
         sendState(state, { type: "user.transcript.final", requestID: frame.requestID, text }, false)
+        if (frame.purpose === "demonstration" && frame.demonstrationID) {
+          void Promise.resolve(options.onDemonstrationEvent?.({
+            type: "demonstration.transcript",
+            demonstrationID: frame.demonstrationID,
+            eventID: frame.requestID,
+            timestamp: Date.now(),
+            text,
+            clientID: state.clientID,
+            characterID: state.characterID,
+            gameID: state.gameID ?? "unknown",
+            saveSlotID: state.saveSlotID ?? "default",
+          })).then(() => sendState(state, {
+            type: "demonstration.ack",
+            demonstrationID: frame.demonstrationID,
+            eventID: frame.requestID,
+            status: "transcript_recorded",
+          }, false)).catch((error) => sendState(state, {
+            type: "demonstration.error",
+            demonstrationID: frame.demonstrationID,
+            error: error instanceof Error ? error.message : String(error),
+          }, false))
+          setPresence(state, "idle", { requestID: undefined, subtitle: undefined })
+          return
+        }
         enqueueTranscript(state, { type: "speech.final", requestID: frame.requestID, text, language: frame.locale })
       })
       .catch((error) => {
@@ -1148,12 +1319,13 @@ export async function startAvatarBridge(
     )
     if (!state) return { ok: false, message: `No connected character supports ${action.action}` }
     const id = `act_${randomUUID()}`
-    const result = waitForAction(id, state, ACTION_TIMEOUT)
-    sendState(state, { type: "character.action", id, ...action })
+    const request = { type: "character.action", id, ...action }
+    const result = waitForAction(id, state, ACTION_TIMEOUT, { actionID: action.action, cancellable: false, request })
+    sendState(state, request)
     return result
   }
 
-  async function dispatchGame(action: GameActionInput): Promise<GameActionResult> {
+  async function dispatchGame(action: GameActionInput, ai?: { scenarioRunID: string; simulationAutoApprove: boolean }): Promise<GameActionResult> {
     const state = selectClient(action.characterID, true)
     if (!state) return { ok: false, code: "unavailable", message: "No protocol v2 character is connected" }
     const capability = state.capabilities.get(action.actionID)
@@ -1166,6 +1338,9 @@ export async function startAvatarBridge(
       return { ok: false, code: "cooldown", message: `${capability.id} is cooling down for ${cooldown - now}ms` }
     }
     const cycleID = action.cycleID ?? `implicit:${state.clientID}:${Math.floor(now / persistent.config().cycleTimeoutMs)}`
+    const cacheKey = action.idempotencyKey ? `${state.clientID}\u0000${action.idempotencyKey}` : undefined
+    const cached = cacheKey ? idempotency.get(cacheKey) : undefined
+    if (cached && cached.expiresAt > now) return cached.promise
     const goal = action.cycleID ? goals.get(action.cycleID) : undefined
     if (goal && !goal.riskBudget.includes(capability.risk)) {
       return {
@@ -1178,10 +1353,10 @@ export async function startAvatarBridge(
     }
     const budget = budgets.consume(cycleID, persistent.config(), now)
     if (!budget.ok) return { ok: false, code: "budget_exceeded", message: budget.reason }
-    const cacheKey = action.idempotencyKey ? `${state.clientID}\u0000${action.idempotencyKey}` : undefined
-    const cached = cacheKey ? idempotency.get(cacheKey) : undefined
-    if (cached && cached.expiresAt > now) return cached.promise
-    const promise = executeGameAction(state, capability, { ...action, cycleID }, budget.remaining)
+    const autoApproved = ai?.simulationAutoApprove === true && capability.risk === "critical" &&
+      state.scenarioSnapshot?.runID === ai.scenarioRunID && state.scenarioSnapshot.simulation === true &&
+      state.scenarioSnapshot.criticalAutoApproveCategories?.includes(capability.permissionCategory) === true
+    const promise = executeGameAction(state, capability, { ...action, cycleID }, budget.remaining, autoApproved)
     if (cacheKey) idempotency.set(cacheKey, { expiresAt: now + IDEMPOTENCY_TTL, promise })
     return promise
   }
@@ -1191,20 +1366,15 @@ export async function startAvatarBridge(
     capability: AvatarCapability,
     action: GameActionInput & { cycleID: string },
     remaining: number,
+    autoApproved = false,
   ): Promise<GameActionResult> {
-    if (requiresApproval(state, capability)) {
+    const approvalRequired = requiresApproval(state, capability)
+    if (approvalRequired && !autoApproved) {
       const approved = await requestApproval(state, capability, action.args)
       if (!approved) return { ok: false, code: "approval_denied", message: `${capability.id} was not approved` }
     }
     const id = `game_${randomUUID()}`
-    const result = waitForAction(id, state, capability.timeoutMs, {
-      actionID: capability.id,
-      cycleID: action.cycleID,
-      cancellable: capability.cancellable,
-    })
-    state.cooldowns.set(capability.id, Date.now() + capability.cooldownMs)
-    setPresence(state, "acting", { goal: goals.get(action.cycleID)?.text })
-    sendState(state, {
+    const request = {
       type: "game.action",
       id,
       actionID: capability.id,
@@ -1212,7 +1382,16 @@ export async function startAvatarBridge(
       cycleID: action.cycleID,
       cancellable: capability.cancellable,
       timeoutMs: capability.timeoutMs,
+    }
+    const result = waitForAction(id, state, capability.timeoutMs, {
+      actionID: capability.id,
+      cycleID: action.cycleID,
+      cancellable: capability.cancellable,
+      request,
     })
+    state.cooldowns.set(capability.id, Date.now() + capability.cooldownMs)
+    setPresence(state, "acting", { goal: goals.get(action.cycleID)?.text })
+    sendState(state, request)
     const completed = await result
     setPresence(state, completed.ok ? "idle" : "uncertain", {
       subtitle: completed.message,
@@ -1229,16 +1408,132 @@ export async function startAvatarBridge(
       world: worlds.get(state.characterID),
       observeAgain: completed.observeAgain ?? true,
       ...(failure.replan ? { replanReason: failure.reason } : {}),
+      ...(autoApproved ? { autoApproved: true } : {}),
+      approved: true,
     }
+  }
+
+  function aiTraineeSnapshot(characterID?: string) {
+    const state = selectClient(characterID, true)
+    if (!state || !state.scenarioSnapshot) return
+    const world = worlds.get(state.characterID)
+    if (!world) return
+    return {
+      clientID: state.clientID,
+      characterID: state.characterID,
+      gameID: state.gameID ?? world.gameID,
+      worldRevision: world.revision,
+      entities: world.entities,
+      capabilities: [...state.capabilities.values()],
+      scenario: {
+        runID: state.scenarioSnapshot.runID,
+        scenarioID: state.scenarioSnapshot.scenarioID,
+        scenarioRevision: state.scenarioSnapshot.scenarioRevision,
+        ...(state.scenarioSnapshot.scenarioTitle ? { title: state.scenarioSnapshot.scenarioTitle } : {}),
+        status: state.scenarioSnapshot.status,
+        ...(state.scenarioSnapshot.currentStepID ? { currentStepID: state.scenarioSnapshot.currentStepID } : {}),
+        ...(state.scenarioSnapshot.currentInstruction ? { currentInstruction: state.scenarioSnapshot.currentInstruction } : {}),
+        ...(state.scenarioSnapshot.allowedCapabilityIDs ? { allowedCapabilityIDs: state.scenarioSnapshot.allowedCapabilityIDs } : {}),
+        attempt: state.scenarioSnapshot.attempt,
+        simulation: state.scenarioSnapshot.simulation === true,
+        criticalAutoApproveCategories: state.scenarioSnapshot.criticalAutoApproveCategories ?? [],
+        ...(state.scenarioSnapshot.baselineFingerprint ? { baselineFingerprint: state.scenarioSnapshot.baselineFingerprint } : {}),
+        ...(typeof state.scenarioSnapshot.capabilityRevision === "number" ? { capabilityRevision: state.scenarioSnapshot.capabilityRevision } : {}),
+      },
+    }
+  }
+
+  function scenarioTestReset(input: { scenarioID: string; scenarioRevision: number; expectedBaselineFingerprint?: string }) {
+    const states = [...clients.values()].filter((state) =>
+      state.protocol === 2 && (state.protocolMinor ?? 0) >= 12 &&
+      state.scenarioSnapshot?.scenarioID === input.scenarioID && state.scenarioSnapshot.scenarioRevision === input.scenarioRevision,
+    )
+    if (states.length !== 1) return Promise.resolve<ScenarioTestResetResult>({
+      requestID: `reset_${randomUUID()}`,
+      ok: false,
+      code: states.length > 1 ? "multiple_test_environments" : "test_environment_unavailable",
+      timestamp: Date.now(),
+      scenarioID: input.scenarioID,
+      scenarioRevision: input.scenarioRevision,
+      message: states.length > 1 ? "Validate Training supports one live test environment." : "Unity protocol v2.12 test environment is not connected.",
+    })
+    const state = states[0]!
+    const requestID = `reset_${randomUUID()}`
+    return new Promise<ScenarioTestResetResult>((resolve) => {
+      const timer = setTimeout(() => {
+        pendingScenarioTestResets.delete(requestID)
+        resolve({ requestID, ok: false, code: "reset_timeout", timestamp: Date.now(), scenarioID: input.scenarioID, scenarioRevision: input.scenarioRevision, message: "Unity did not complete the bounded reset." })
+      }, 30_000)
+      pendingScenarioTestResets.set(requestID, { requestID, clientID: state.clientID, scenarioID: input.scenarioID, scenarioRevision: input.scenarioRevision, timer, resolve })
+      sendState(state, {
+        type: "scenario.test.reset",
+        requestID,
+        scenarioID: input.scenarioID,
+        scenarioRevision: input.scenarioRevision,
+        expectedBaselineFingerprint: input.expectedBaselineFingerprint,
+      }, false)
+    })
+  }
+
+  function settleScenarioTestReset(state: ClientState, message: ScenarioTestResetResultMessage) {
+    const pending = pendingScenarioTestResets.get(message.requestID)
+    if (!pending || pending.clientID !== state.clientID || pending.scenarioID !== message.scenarioID || pending.scenarioRevision !== message.scenarioRevision) return
+    pendingScenarioTestResets.delete(message.requestID)
+    clearTimeout(pending.timer)
+    pending.resolve({
+      requestID: message.requestID,
+      ok: message.ok,
+      code: message.code,
+      timestamp: message.timestamp,
+      scenarioID: message.scenarioID,
+      scenarioRevision: message.scenarioRevision,
+      ...(message.baselineFingerprint ? { baselineFingerprint: message.baselineFingerprint } : {}),
+      ...(typeof message.capabilityRevision === "number" ? { capabilityRevision: message.capabilityRevision } : {}),
+      ...(typeof message.worldRevision === "number" ? { worldRevision: message.worldRevision } : {}),
+      ...(message.runID ? { runID: message.runID } : {}),
+      ...(message.message ? { message: message.message } : {}),
+    })
+  }
+
+  async function aiTraineeAction(input: AITraineeActionInput) {
+    const snapshot = aiTraineeSnapshot(input.characterID)
+    if (!snapshot || snapshot.scenario.runID !== input.scenarioRunID)
+      return { ok: false, code: "scenario_conflict", message: "The active Unity scenario changed." }
+    const result = await dispatchGame({
+      actionID: input.decision.capabilityID,
+      characterID: input.characterID,
+      args: { ...input.decision.arguments, entityID: input.decision.entityID },
+      cycleID: input.runID,
+      idempotencyKey: input.idempotencyKey,
+    }, { scenarioRunID: input.scenarioRunID, simulationAutoApprove: input.simulationAutoApprove })
+    return result
+  }
+
+  function notifyAITrainee(run: { id: string; status: string; profile: string; modelRoute?: string; currentStepID?: string; currentDecision?: { capabilityID: string; entityID: string }; reason?: string; attempts: unknown[]; characterID?: string }) {
+    const state = selectClient(run.characterID, true)
+    if (!state || (state.protocolMinor ?? 0) < 11) return
+    sendState(state, {
+      type: "ai.trainee.state",
+      runID: run.id,
+      status: run.status,
+      profile: run.profile,
+      model: run.modelRoute,
+      currentStepID: run.currentStepID,
+      decision: run.currentDecision,
+      reason: run.reason,
+      attempts: run.attempts.length,
+      timestamp: Date.now(),
+    }, false)
   }
 
   function waitForAction(
     id: string,
     state: ClientState,
     timeoutMs: number,
-    metadata: { actionID: string; cycleID?: string; cancellable: boolean } = {
+    metadata: { actionID: string; cycleID?: string; cancellable: boolean; request: Record<string, unknown> } = {
       actionID: "legacy",
       cancellable: false,
+      request: { type: "character.action", id },
     },
   ) {
     return new Promise<{
@@ -1253,7 +1548,7 @@ export async function startAvatarBridge(
         pendingActions.delete(id)
         resolve({ ok: false, code: "timeout", message: `Unity did not confirm the action within ${timeoutMs / 1_000}s` })
       }, timeoutMs)
-      pendingActions.set(id, { socket: state.socket, timer, resolve, ...metadata })
+      pendingActions.set(id, { socket: state.socket, clientID: state.clientID, timer, resolve, ...metadata })
     })
   }
 
@@ -1307,14 +1602,105 @@ export async function startAvatarBridge(
     })
   }
 
-  function resolveApproval(id: string, approved: boolean) {
+  function resolveApproval(id: string, approved: boolean, instructorID?: string) {
     const approval = pendingApprovals.get(id)
     if (!approval) return false
     pendingApprovals.delete(id)
     clearTimeout(approval.timer)
     approval.resolve(approved)
-    send(approval.socket, { type: "approval.resolved", id, approved })
+    send(approval.socket, { type: "approval.resolved", id, approved, ...(instructorID ? { instructorID } : {}) })
     return true
+  }
+
+  function instructorCommand(input: InstructorCommandInput) {
+    const settled = instructorCommandResults.get(input.requestID)
+    if (settled) return Promise.resolve(settled)
+    const states = [...clients.values()].filter((state) => state.protocol === 2 && (state.protocolMinor ?? 0) >= 9 && state.scenarioSnapshot?.runID === input.runID)
+    if (states.length !== 1) return Promise.resolve<InstructorCommandResult>({
+      requestID: input.requestID,
+      runID: input.runID,
+      ok: false,
+      code: states.length > 1 ? "multiple_trainees" : "scenario_unavailable",
+      timestamp: Date.now(),
+      message: states.length > 1 ? "Instructor Console supports one active trainee" : "The matching scenario is not connected",
+    })
+    const state = states[0]
+    const snapshot = state.scenarioSnapshot
+    if (!snapshot || snapshot.scenarioRevision !== input.scenarioRevision || (input.expectedStepID && snapshot.currentStepID !== input.expectedStepID))
+      return Promise.resolve<InstructorCommandResult>({
+        requestID: input.requestID,
+        runID: input.runID,
+        ok: false,
+        code: "scenario_conflict",
+        timestamp: Date.now(),
+        stepID: snapshot?.currentStepID,
+        attempt: snapshot?.attempt,
+        message: "Scenario revision or current step changed",
+      })
+    const existing = pendingInstructorCommands.get(input.requestID)
+    if (existing) return new Promise<InstructorCommandResult>((resolve) => existing.resolves.push(resolve))
+    return new Promise<InstructorCommandResult>((resolve) => {
+      const timer = setTimeout(() => {
+        const pending = pendingInstructorCommands.get(input.requestID)
+        if (!pending) return
+        settlePendingInstructorCommand(pending, { requestID: input.requestID, runID: input.runID, ok: false, code: "command_timeout", timestamp: Date.now(), message: "Unity did not acknowledge the instructor command" })
+      }, 30_000)
+      pendingInstructorCommands.set(input.requestID, { input, clientID: state.clientID, expiresAt: Date.now() + 30_000, timer, resolves: [resolve] })
+      sendInstructorCommand(state, input)
+    })
+  }
+
+  function sendInstructorCommand(state: ClientState, input: InstructorCommandInput) {
+    sendState(state, input.command === "hint"
+      ? { type: "instructor.hint", ...input }
+      : { type: "instructor.command", ...input })
+  }
+
+  function resendInstructorCommands(state: ClientState, snapshot: ScenarioSnapshotMessage) {
+    for (const pending of pendingInstructorCommands.values()) {
+      if (pending.clientID !== state.clientID || pending.input.runID !== snapshot.runID || pending.expiresAt <= Date.now()) continue
+      if (pending.input.scenarioRevision !== snapshot.scenarioRevision || (pending.input.expectedStepID && pending.input.expectedStepID !== snapshot.currentStepID)) {
+        settlePendingInstructorCommand(pending, {
+          requestID: pending.input.requestID,
+          runID: pending.input.runID,
+          ok: false,
+          code: "scenario_conflict",
+          timestamp: Date.now(),
+          stepID: snapshot.currentStepID,
+          attempt: snapshot.attempt,
+          message: "Scenario changed while the client was reconnecting",
+        })
+        continue
+      }
+      sendInstructorCommand(state, pending.input)
+    }
+  }
+
+  function settleInstructorCommand(state: ClientState, message: InstructorCommandResultMessage) {
+    const pending = pendingInstructorCommands.get(message.requestID)
+    if (!pending || pending.clientID !== state.clientID || pending.input.runID !== message.runID) return
+    settlePendingInstructorCommand(pending, {
+      requestID: message.requestID,
+      runID: message.runID,
+      ok: message.ok,
+      code: message.code,
+      timestamp: message.timestamp,
+      ...(message.stepID ? { stepID: message.stepID } : {}),
+      ...(message.attempt ? { attempt: message.attempt } : {}),
+      ...(message.message ? { message: message.message } : {}),
+    })
+  }
+
+  function settlePendingInstructorCommand(pending: PendingInstructorCommand, result: InstructorCommandResult) {
+    pendingInstructorCommands.delete(pending.input.requestID)
+    clearTimeout(pending.timer)
+    instructorCommandResults.set(pending.input.requestID, result)
+    if (instructorCommandResults.size > 128) instructorCommandResults.delete(instructorCommandResults.keys().next().value ?? "")
+    pending.resolves.forEach((resolve) => resolve(result))
+  }
+
+  function notifyInstructor(message: Parameters<NonNullable<typeof options.onInstructorEvent>>[0]) {
+    void Promise.resolve(options.onInstructorEvent?.(message)).catch((error) => writeLog("instructor", "Instructor event observer failed", { error: String(error) }, "warn"))
   }
 
   function cancelGoal(cycleID: string) {
@@ -2104,11 +2490,11 @@ function gameContext(state: ClientState, query: string) {
     presence.delete(state.characterID)
     if (state.attentionTimer) clearTimeout(state.attentionTimer)
     worlds.clearCharacter(state.characterID)
-    for (const [id, action] of pendingActions) {
+    for (const action of pendingActions.values()) {
       if (action.socket !== socket) continue
-      clearTimeout(action.timer)
-      pendingActions.delete(id)
-      action.resolve({ ok: false, message: "Unity character disconnected before completing the action" })
+      // Keep the original request alive until its timeout. A reconnect resends the
+      // same request ID, allowing Unity's result cache to acknowledge it without
+      // executing the capability twice.
     }
     for (const [id, approval] of pendingApprovals) {
       if (approval.socket !== socket) continue
@@ -2121,6 +2507,7 @@ function gameContext(state: ClientState, query: string) {
       camera.resolve(undefined)
     }
     writeLog("avatar", "Unity avatar disconnected", { clientID: state.clientID, characterID: state.characterID })
+    notifyInstructor({ type: "client.disconnected", clientID: state.clientID, timestamp: Date.now() })
   }
 
   function selectClient(characterID?: string, v2 = false) {
@@ -2266,6 +2653,9 @@ function gameContext(state: ClientState, query: string) {
       pairing.cancel()
     },
     executeReplayFixture,
+    aiTraineeSnapshot,
+    aiTraineeAction,
+    notifyAITrainee,
     speakSession,
     revokeDevice: async (id: string) => {
       const revoked = await persistent.revokeDevice(id)
@@ -2275,6 +2665,8 @@ function gameContext(state: ClientState, query: string) {
       return revoked
     },
     resolveApproval,
+    instructorCommand,
+    scenarioTestReset,
     memories: (filter?: Partial<Pick<AvatarMemory, "gameID" | "saveSlotID" | "characterID">>) =>
       persistent.memories(filter),
     remember: async (input: Omit<AvatarMemory, "id" | "createdAt" | "updatedAt"> & { id?: string }) => {
@@ -2331,6 +2723,11 @@ function gameContext(state: ClientState, query: string) {
     retrySync: () => flushOutbox(true),
     stop: async () => {
       clearInterval(heartbeat)
+      for (const [id, action] of pendingActions) {
+        clearTimeout(action.timer)
+        pendingActions.delete(id)
+        action.resolve({ ok: false, code: "bridge_shutdown", message: "Avatar Bridge is shutting down" })
+      }
       for (const state of clients.values()) {
         state.socket.close(1001, "OpenCode Customs is shutting down")
         state.socket.terminate()
@@ -2481,6 +2878,8 @@ type GameActionResult = {
   cycleID?: string
   remainingActions?: number
   world?: ReturnType<AvatarWorldStore["get"]>
+  autoApproved?: boolean
+  approved?: boolean
 }
 
 function jarvisMemoryPayload(memory: AvatarMemory, primaryProfileID?: string) {

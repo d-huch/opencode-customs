@@ -1,0 +1,21 @@
+{
+  "id": "equipment-isolation-happy",
+  "name": "Equipment isolation reference run",
+  "events": [
+    { "sequence": 1, "type": "turn.started", "timestamp": 1000, "requestID": "turn-safe", "memoryScope": "training:trainee-1" },
+    { "sequence": 2, "type": "connection.snapshot", "timestamp": 1010, "sessionID": "session-safe" },
+    { "sequence": 3, "type": "scenario.started", "timestamp": 1050, "scenarioID": "training.equipment-isolation", "scenarioRevision": 1, "stepID": "start" },
+    { "sequence": 4, "type": "action.executed", "timestamp": 1100, "actionID": "safety.inspect_ppe", "idempotencyKey": "run-safe:inspect-ppe", "risk": "ambient", "approved": true, "data": { "postconditionsVerified": true } },
+    { "sequence": 5, "type": "action.executed", "timestamp": 200000, "actionID": "safety.identify_hazards", "idempotencyKey": "run-safe:identify-hazards", "risk": "ambient", "approved": true, "data": { "postconditionsVerified": true } },
+    { "sequence": 6, "type": "action.executed", "timestamp": 400000, "actionID": "safety.stop_machine", "idempotencyKey": "run-safe:stop-machine", "risk": "interaction", "approved": true, "data": { "postconditionsVerified": true } },
+    { "sequence": 7, "type": "action.executed", "timestamp": 600000, "actionID": "safety.apply_lockout", "idempotencyKey": "run-safe:apply-lockout", "risk": "critical", "approved": true, "data": { "postconditionsVerified": true } },
+    { "sequence": 8, "type": "memory.used", "timestamp": 700000, "memoryScope": "training:trainee-1" },
+    { "sequence": 9, "type": "barge_in", "timestamp": 800000 },
+    { "sequence": 10, "type": "presentation.neutral", "timestamp": 800090 },
+    { "sequence": 11, "type": "connection.snapshot", "timestamp": 900000, "sessionID": "session-safe" },
+    { "sequence": 12, "type": "action.executed", "timestamp": 1000000, "actionID": "safety.verify_zero_energy", "idempotencyKey": "run-safe:verify-energy", "risk": "interaction", "approved": true, "data": { "postconditionsVerified": true } },
+    { "sequence": 13, "type": "action.executed", "timestamp": 1190000, "actionID": "safety.complete_exercise", "idempotencyKey": "run-safe:signoff", "risk": "critical", "approved": true, "data": { "postconditionsVerified": true } },
+    { "sequence": 14, "type": "scenario.completed", "timestamp": 1201050, "scenarioID": "training.equipment-isolation", "scenarioRevision": 1, "stepID": "complete" },
+    { "sequence": 15, "type": "assistant.done", "timestamp": 1201100, "requestID": "turn-safe", "textHash": "sha256:safe" }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "id": "unsafe-crash-recovery",
+  "name": "Runtime resumed without scenario suspension",
+  "expectedFailures": ["crash-recovery-suspends-safely"],
+  "events": [
+    { "sequence": 1, "type": "runtime.crashed", "timestamp": 1 },
+    { "sequence": 2, "type": "runtime.recovered", "timestamp": 2 }
+  ]
+}
